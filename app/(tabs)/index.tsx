@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -21,17 +21,23 @@ export default function LibraryScreen() {
   const { theme } = useTheme();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
+  const loaded = useRef(false);
 
   useEffect(() => {
-    loadTracks().then(setTracks);
+    loadTracks().then((t) => {
+      setTracks(t);
+      loaded.current = true;
+    });
   }, []);
 
+  useEffect(() => {
+    if (loaded.current) {
+      saveTracks(tracks);
+    }
+  }, [tracks]);
+
   const addTrack = useCallback((track: Track) => {
-    setTracks((prev) => {
-      const next = [track, ...prev];
-      saveTracks(next);
-      return next;
-    });
+    setTracks((prev) => [track, ...prev]);
   }, []);
 
   const handleShareImport = useCallback(

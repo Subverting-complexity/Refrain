@@ -2,7 +2,7 @@ import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { Track } from '../types';
 
 interface TrackListItemProps {
@@ -36,8 +36,7 @@ export function TrackListItem({ track, style }: TrackListItemProps) {
         },
         style,
       ]}
-      accessibilityRole="summary"
-      accessibilityLabel={`${track.filename}, ${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
+      accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
     >
       <View
         style={[
@@ -56,7 +55,7 @@ export function TrackListItem({ track, style }: TrackListItemProps) {
           {track.filename}
         </Text>
         <Text style={theme.typography.caption}>
-          {formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
+          ~{formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
           {formatFileSize(track.fileSizeBytes)}
         </Text>
       </View>
@@ -70,13 +69,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     borderWidth: 1,
   },
   iconContainer: {
     width: 40,
     height: 40,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import * as Linking from 'expo-linking';
 
 import { importFromUri, isSupportedFilename } from '../services/fileImport';
@@ -13,33 +13,36 @@ export function useShareIntent({
   onTrackImported,
   onError,
 }: UseShareIntentOptions) {
+  const onTrackImportedRef = useRef(onTrackImported);
+  const onErrorRef = useRef(onError);
+  onTrackImportedRef.current = onTrackImported;
+  onErrorRef.current = onError;
+
   useEffect(() => {
     async function handleUrl(url: string) {
       const filename = url.split('/').pop() ?? 'shared-audio.mp3';
 
       if (!isSupportedFilename(filename)) {
-        onError?.('Unsupported audio format');
+        onErrorRef.current?.('Unsupported audio format');
         return;
       }
 
       const result = await importFromUri(url, filename);
       if (result.success) {
-        onTrackImported(result.track);
+        onTrackImportedRef.current(result.track);
       } else {
-        onError?.(result.message);
+        onErrorRef.current?.(result.message);
       }
     }
 
-    // Handle URL that opened the app
     Linking.getInitialURL().then((url) => {
       if (url) handleUrl(url);
     });
 
-    // Handle URLs while app is running
     const subscription = Linking.addEventListener('url', (event) => {
       handleUrl(event.url);
     });
 
     return () => subscription.remove();
-  }, [onTrackImported, onError]);
+  }, []);
 }

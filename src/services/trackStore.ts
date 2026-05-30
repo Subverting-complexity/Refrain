@@ -6,6 +6,10 @@ function getStoreFile(): File {
   return new File(Paths.document, 'tracks.json');
 }
 
+function getTmpFile(): File {
+  return new File(Paths.document, 'tracks.json.tmp');
+}
+
 export async function loadTracks(): Promise<Track[]> {
   const file = getStoreFile();
   if (!file.exists) return [];
@@ -18,6 +22,7 @@ export async function loadTracks(): Promise<Track[]> {
 }
 
 export async function saveTracks(tracks: Track[]): Promise<void> {
-  const file = getStoreFile();
-  file.write(JSON.stringify(tracks));
+  const tmp = getTmpFile();
+  tmp.write(JSON.stringify(tracks));
+  await tmp.move(getStoreFile());
 }

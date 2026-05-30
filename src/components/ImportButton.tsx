@@ -2,7 +2,7 @@ import { ActivityIndicator, StyleSheet, Text, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
 
 interface ImportButtonProps {
@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
-    borderRadius: 12,
+    borderRadius: radii.md,
     minWidth: 160,
   },
   icon: {
