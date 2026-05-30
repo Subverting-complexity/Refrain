@@ -42,17 +42,6 @@
             { "mimeType": "audio/mp4" },
             { "mimeType": "audio/x-m4a" }
           ]
-        },
-        {
-          "action": "SEND",
-          "category": ["DEFAULT"],
-          "data": [
-            { "mimeType": "audio/mpeg" },
-            { "mimeType": "audio/wav" },
-            { "mimeType": "audio/aac" },
-            { "mimeType": "audio/mp4" },
-            { "mimeType": "audio/x-m4a" }
-          ]
         }
       ]
     },

@@ -29,15 +29,12 @@ function parseFormat(filename: string): AudioFormat | null {
   return EXTENSION_TO_FORMAT[ext] ?? null;
 }
 
-function getTracksDir(): Directory {
-  return new Directory(Paths.document, 'tracks');
-}
-
-function ensureTracksDir(): void {
-  const dir = getTracksDir();
+function ensureTracksDir(): Directory {
+  const dir = new Directory(Paths.document, 'tracks');
   if (!dir.exists) {
     dir.create();
   }
+  return dir;
 }
 
 export async function pickAndImportFile(): Promise<ImportOutcome> {
@@ -88,8 +85,7 @@ async function importFromFile(
   const destFilename = `${id}.${format}`;
 
   try {
-    ensureTracksDir();
-    const tracksDir = getTracksDir();
+    const tracksDir = ensureTracksDir();
     const destFile = new File(tracksDir, destFilename);
     await sourceFile.copy(destFile);
 

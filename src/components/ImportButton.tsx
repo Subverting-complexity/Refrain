@@ -1,15 +1,11 @@
-import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
-import { Track } from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
 
 interface ImportButtonProps {
-  onImportComplete: (track: Track) => void;
-  onImportError?: (message: string) => void;
   loading?: boolean;
   onPress: () => void;
   style?: ViewStyle;
@@ -41,7 +37,13 @@ export function ImportButton({
             color={theme.colors.accentText}
             style={styles.icon}
           />
-          <Text style={[styles.label, { color: theme.colors.accentText }]}>
+          <Text
+            style={[
+              theme.typography.body,
+              styles.label,
+              { color: theme.colors.accentText },
+            ]}
+          >
             Import Audio
           </Text>
         </>
@@ -62,7 +64,6 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   label: {
-    fontSize: 16,
     fontWeight: '600',
   },
 });
