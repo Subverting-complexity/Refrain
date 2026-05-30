@@ -1,20 +1,14 @@
-import React, { createContext, useCallback, useMemo, useState } from 'react';
+import React, { createContext, useMemo, useState } from 'react';
 import { useColorScheme as useSystemColorScheme } from 'react-native';
-import { Theme, darkTheme, lightTheme } from './index';
+import { ColorMode, Theme, darkTheme, lightTheme } from './index';
 
-type ColorMode = 'system' | 'dark' | 'light';
-
-interface ThemeContextValue {
+export interface ThemeContextValue {
   theme: Theme;
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
 }
 
-export const ThemeContext = createContext<ThemeContextValue>({
-  theme: darkTheme,
-  colorMode: 'system',
-  setColorMode: () => {},
-});
+export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -31,17 +25,13 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     return colorMode === 'light' ? lightTheme : darkTheme;
   }, [colorMode, systemScheme]);
 
-  const handleSetColorMode = useCallback((mode: ColorMode) => {
-    setColorMode(mode);
-  }, []);
-
   const value = useMemo(
     () => ({
       theme: resolvedTheme,
       colorMode,
-      setColorMode: handleSetColorMode,
+      setColorMode,
     }),
-    [resolvedTheme, colorMode, handleSetColorMode],
+    [resolvedTheme, colorMode],
   );
 
   return (

@@ -7,8 +7,8 @@ import { View } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { useTheme } from '../src/hooks/useTheme';
-import { ThemeProvider } from '../src/theme/ThemeProvider';
+import { useTheme } from '@/src/hooks/useTheme';
+import { ThemeProvider } from '@/src/theme/ThemeProvider';
 
 export { ErrorBoundary } from 'expo-router';
 

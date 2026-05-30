@@ -1,25 +1,26 @@
 import React from 'react';
-import {
-  Pressable,
-  PressableProps,
-  StyleProp,
-  StyleSheet,
-  ViewStyle,
-} from 'react-native';
+import { Pressable, PressableProps, StyleSheet } from 'react-native';
 import { MIN_TOUCH_TARGET } from '../theme';
 
 interface AccessiblePressableProps extends PressableProps {
   accessibilityRole: PressableProps['accessibilityRole'];
   accessibilityLabel: string;
   accessibilityState?: PressableProps['accessibilityState'];
-  style?: StyleProp<ViewStyle>;
 }
 
 export function AccessiblePressable({
   style,
   ...props
 }: AccessiblePressableProps) {
-  return <Pressable style={[styles.base, style]} {...props} />;
+  return (
+    <Pressable
+      style={(state) => [
+        styles.base,
+        typeof style === 'function' ? style(state) : style,
+      ]}
+      {...props}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

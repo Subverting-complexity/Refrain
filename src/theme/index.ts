@@ -2,6 +2,8 @@ import { TextStyle } from 'react-native';
 
 export const MIN_TOUCH_TARGET = 44;
 
+export type ColorMode = 'system' | 'dark' | 'light';
+
 export interface ThemeColors {
   background: string;
   surface: string;
@@ -14,15 +16,17 @@ export interface ThemeColors {
   errorText: string;
 }
 
+export interface ThemeTypography {
+  body: TextStyle;
+  bodySmall: TextStyle;
+  heading: TextStyle;
+  caption: TextStyle;
+}
+
 export interface Theme {
   dark: boolean;
   colors: ThemeColors;
-  typography: {
-    body: TextStyle;
-    bodySmall: TextStyle;
-    heading: TextStyle;
-    caption: TextStyle;
-  };
+  typography: ThemeTypography;
 }
 
 const typographyBase = {
@@ -32,46 +36,47 @@ const typographyBase = {
   caption: { fontSize: 12, lineHeight: 16 } as TextStyle,
 };
 
+function makeTypography(colors: ThemeColors): ThemeTypography {
+  return {
+    body: { ...typographyBase.body, color: colors.textPrimary },
+    bodySmall: { ...typographyBase.bodySmall, color: colors.textPrimary },
+    heading: { ...typographyBase.heading, color: colors.textPrimary },
+    caption: { ...typographyBase.caption, color: colors.textSecondary },
+  };
+}
+
+const darkColors: ThemeColors = {
+  background: '#111d1f',
+  surface: '#1a2e30',
+  textPrimary: '#e8f5f0',
+  textSecondary: '#8ba89e',
+  accent: '#7edbb8',
+  accentText: '#111d1f',
+  border: '#2a4a4e',
+  error: '#f87171',
+  errorText: '#1a1a1a',
+};
+
+const lightColors: ThemeColors = {
+  background: '#f2faf7',
+  surface: '#ffffff',
+  textPrimary: '#1a2e28',
+  textSecondary: '#4a6a60',
+  accent: '#3daa80',
+  accentText: '#ffffff',
+  border: '#cce8df',
+  error: '#dc2626',
+  errorText: '#ffffff',
+};
+
 export const darkTheme: Theme = {
   dark: true,
-  colors: {
-    background: '#111d1f',
-    surface: '#1a2e30',
-    textPrimary: '#e8f5f0',
-    textSecondary: '#8ba89e',
-    accent: '#7edbb8',
-    accentText: '#111d1f',
-    border: '#2a4a4e',
-    error: '#f87171',
-    errorText: '#1a1a1a',
-  },
-  typography: {
-    ...typographyBase,
-    body: { ...typographyBase.body, color: '#e8f5f0' },
-    bodySmall: { ...typographyBase.bodySmall, color: '#e8f5f0' },
-    heading: { ...typographyBase.heading, color: '#e8f5f0' },
-    caption: { ...typographyBase.caption, color: '#8ba89e' },
-  },
+  colors: darkColors,
+  typography: makeTypography(darkColors),
 };
 
 export const lightTheme: Theme = {
   dark: false,
-  colors: {
-    background: '#f2faf7',
-    surface: '#ffffff',
-    textPrimary: '#1a2e28',
-    textSecondary: '#4a6a60',
-    accent: '#3daa80',
-    accentText: '#ffffff',
-    border: '#cce8df',
-    error: '#dc2626',
-    errorText: '#ffffff',
-  },
-  typography: {
-    ...typographyBase,
-    body: { ...typographyBase.body, color: '#1a2e28' },
-    bodySmall: { ...typographyBase.bodySmall, color: '#1a2e28' },
-    heading: { ...typographyBase.heading, color: '#1a2e28' },
-    caption: { ...typographyBase.caption, color: '#4a6a60' },
-  },
+  colors: lightColors,
+  typography: makeTypography(lightColors),
 };

@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
+import { Text } from 'react-native';
 
-import { useTheme } from '../../src/hooks/useTheme';
+import { useTheme } from '@/src/hooks/useTheme';
 
 export default function TabLayout() {
   const { theme } = useTheme();
@@ -24,6 +25,9 @@ export default function TabLayout() {
         options={{
           title: 'Library',
           tabBarAccessibilityLabel: 'Track library',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 20, color }}>♫</Text>
+          ),
         }}
       />
     </Tabs>

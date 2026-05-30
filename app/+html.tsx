@@ -23,6 +23,7 @@ export default function Root({ children }: PropsWithChildren) {
   );
 }
 
+// Pre-hydration colors must be static CSS — keep in sync with src/theme/index.ts
 const responsiveBackground = `
 body {
   background-color: #111d1f;
