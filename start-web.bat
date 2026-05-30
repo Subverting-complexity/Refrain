@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 if not exist node_modules (
   echo Installing dependencies...
-  npm install
+  call npm install
 )
 echo Starting Refrain on web...
-npm run web
+call npm run web
