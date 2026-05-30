@@ -8,7 +8,21 @@
     "scheme": "refrain",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Audio",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.mp3",
+              "public.mpeg-4-audio",
+              "com.microsoft.waveform-audio",
+              "public.aac-audio"
+            ]
+          }
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +30,20 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      }
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [
+            { "mimeType": "audio/mpeg" },
+            { "mimeType": "audio/wav" },
+            { "mimeType": "audio/aac" },
+            { "mimeType": "audio/mp4" },
+            { "mimeType": "audio/x-m4a" }
+          ]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",

@@ -13,6 +13,11 @@ export const spacing = {
   xxl: 32,
 } as const;
 
+export const radii = {
+  sm: 8,
+  md: 12,
+} as const;
+
 export type Spacing = typeof spacing;
 
 export interface ThemeColors {
