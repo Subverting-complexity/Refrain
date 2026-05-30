@@ -4,6 +4,17 @@ export const MIN_TOUCH_TARGET = 44;
 
 export type ColorMode = 'system' | 'dark' | 'light';
 
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+} as const;
+
+export type Spacing = typeof spacing;
+
 export interface ThemeColors {
   background: string;
   surface: string;
@@ -27,6 +38,7 @@ export interface Theme {
   dark: boolean;
   colors: ThemeColors;
   typography: ThemeTypography;
+  spacing: Spacing;
 }
 
 const typographyBase = {
@@ -73,10 +85,16 @@ export const darkTheme: Theme = {
   dark: true,
   colors: darkColors,
   typography: makeTypography(darkColors),
+  spacing,
 };
 
 export const lightTheme: Theme = {
   dark: false,
   colors: lightColors,
   typography: makeTypography(lightColors),
+  spacing,
 };
+
+// Pre-hydration CSS in app/+html.tsx must use these values directly.
+export const BACKGROUND_DARK = darkColors.background;
+export const BACKGROUND_LIGHT = lightColors.background;

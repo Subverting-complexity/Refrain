@@ -1,6 +1,8 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
+import { BACKGROUND_DARK, BACKGROUND_LIGHT } from '@/src/theme';
+
 export default function Root({ children }: PropsWithChildren) {
   return (
     <html lang="en">
@@ -14,7 +16,12 @@ export default function Root({ children }: PropsWithChildren) {
         <ScrollViewStyleReset />
         <style
           dangerouslySetInnerHTML={{
-            __html: responsiveBackground,
+            __html: `
+body { background-color: ${BACKGROUND_DARK}; }
+@media (prefers-color-scheme: light) {
+  body { background-color: ${BACKGROUND_LIGHT}; }
+}
+#root { display: flex; flex: 1; }`,
           }}
         />
       </head>
@@ -22,18 +29,3 @@ export default function Root({ children }: PropsWithChildren) {
     </html>
   );
 }
-
-// Pre-hydration colors must be static CSS — keep in sync with src/theme/index.ts
-const responsiveBackground = `
-body {
-  background-color: #111d1f;
-}
-@media (prefers-color-scheme: light) {
-  body {
-    background-color: #f2faf7;
-  }
-}
-#root {
-  display: flex;
-  flex: 1;
-}`;

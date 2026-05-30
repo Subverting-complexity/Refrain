@@ -1,5 +1,5 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
 
 import { useTheme } from '@/src/hooks/useTheme';
 
@@ -25,8 +25,8 @@ export default function TabLayout() {
         options={{
           title: 'Library',
           tabBarAccessibilityLabel: 'Track library',
-          tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 20, color }}>♫</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="library-outline" size={size} color={color} />
           ),
         }}
       />

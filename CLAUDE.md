@@ -8,7 +8,8 @@ Audio looper app built with Expo (SDK 56) + TypeScript + expo-router.
 - `npm run ios` — start on iOS
 - `npm run android` — start on Android
 - `npm run lint` — run ESLint
-- `npm run format` — run Prettier
+- `npm run format` — run Prettier (write)
+- `npm run format:check` — check Prettier formatting (CI)
 
 ## Project Structure
 
@@ -27,4 +28,6 @@ Audio looper app built with Expo (SDK 56) + TypeScript + expo-router.
 - **Accessibility**: use `AccessiblePressable` for all pressable elements (enforces 44x44pt min touch target)
 - **Components**: one component per file, co-located types, accept `style` prop overrides
 - **Services**: pure modules with no React dependency
+- **Spacing**: use `spacing` tokens from `src/theme` — never hardcode px values for padding/margin
+- **Icons**: use `@expo/vector-icons` (Ionicons) — never emoji text as icons
 - **TypeScript**: strict mode enabled
