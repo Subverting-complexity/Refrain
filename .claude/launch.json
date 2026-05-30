@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["http-server", "mockups", "-p", "3457", "-c-1"],
       "port": 3457
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8081"],
+      "port": 8081
     }
   ]
 }
