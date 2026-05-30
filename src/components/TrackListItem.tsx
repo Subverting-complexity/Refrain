@@ -125,8 +125,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   deleteButton: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     borderRadius: radii.sm,
     marginLeft: spacing.sm,
   },

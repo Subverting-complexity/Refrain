@@ -31,14 +31,24 @@ export default function LibraryScreen() {
   }, []);
 
   const addTrack = useCallback((track: Track) => {
-    insertTrack(track);
-    setTracks((prev) => [track, ...prev]);
+    try {
+      insertTrack(track);
+      setTracks((prev) => [track, ...prev]);
+    } catch {
+      AccessibilityInfo.announceForAccessibility(
+        'Failed to save track to library',
+      );
+    }
   }, []);
 
   const handleDelete = useCallback((id: string) => {
-    deleteTrack(id);
-    setTracks((prev) => prev.filter((t) => t.id !== id));
-    AccessibilityInfo.announceForAccessibility('Track deleted');
+    try {
+      deleteTrack(id);
+      setTracks((prev) => prev.filter((t) => t.id !== id));
+      AccessibilityInfo.announceForAccessibility('Track deleted');
+    } catch {
+      AccessibilityInfo.announceForAccessibility('Failed to delete track');
+    }
   }, []);
 
   const handleShareImport = useCallback(
