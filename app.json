@@ -36,11 +36,21 @@
           "action": "VIEW",
           "category": ["DEFAULT", "BROWSABLE"],
           "data": [
-            { "mimeType": "audio/mpeg" },
-            { "mimeType": "audio/wav" },
-            { "mimeType": "audio/aac" },
-            { "mimeType": "audio/mp4" },
-            { "mimeType": "audio/x-m4a" }
+            {
+              "mimeType": "audio/mpeg"
+            },
+            {
+              "mimeType": "audio/wav"
+            },
+            {
+              "mimeType": "audio/aac"
+            },
+            {
+              "mimeType": "audio/mp4"
+            },
+            {
+              "mimeType": "audio/x-m4a"
+            }
           ]
         }
       ]
@@ -59,7 +69,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#111d1f"
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true

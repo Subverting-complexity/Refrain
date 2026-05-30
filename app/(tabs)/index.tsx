@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -13,7 +13,11 @@ import { TrackListItem } from '@/src/components/TrackListItem';
 import { useShareIntent } from '@/src/hooks/useShareIntent';
 import { useTheme } from '@/src/hooks/useTheme';
 import { pickAndImportFile } from '@/src/services/fileImport';
-import { loadTracks, saveTracks } from '@/src/services/trackStore';
+import {
+  deleteTrack,
+  insertTrack,
+  loadTracks,
+} from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Track } from '@/src/types';
 
@@ -21,23 +25,30 @@ export default function LibraryScreen() {
   const { theme } = useTheme();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
-  const loaded = useRef(false);
 
   useEffect(() => {
-    loadTracks().then((t) => {
-      setTracks(t);
-      loaded.current = true;
-    });
+    loadTracks().then(setTracks);
   }, []);
 
-  useEffect(() => {
-    if (loaded.current) {
-      saveTracks(tracks);
-    }
-  }, [tracks]);
-
   const addTrack = useCallback((track: Track) => {
-    setTracks((prev) => [track, ...prev]);
+    try {
+      insertTrack(track);
+      setTracks((prev) => [track, ...prev]);
+    } catch {
+      AccessibilityInfo.announceForAccessibility(
+        'Failed to save track to library',
+      );
+    }
+  }, []);
+
+  const handleDelete = useCallback((id: string) => {
+    try {
+      deleteTrack(id);
+      setTracks((prev) => prev.filter((t) => t.id !== id));
+      AccessibilityInfo.announceForAccessibility('Track deleted');
+    } catch {
+      AccessibilityInfo.announceForAccessibility('Failed to delete track');
+    }
   }, []);
 
   const handleShareImport = useCallback(
@@ -110,7 +121,11 @@ export default function LibraryScreen() {
             data={tracks}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <TrackListItem track={item} style={styles.listItem} />
+              <TrackListItem
+                track={item}
+                onDelete={handleDelete}
+                style={styles.listItem}
+              />
             )}
             contentContainerStyle={styles.listContent}
           />

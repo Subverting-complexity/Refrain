@@ -1,12 +1,15 @@
-import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { useState } from 'react';
+import { Alert, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
+import { AccessiblePressable } from './AccessiblePressable';
 import { Track } from '../types';
 
 interface TrackListItemProps {
   track: Track;
+  onDelete?: (id: string) => void;
   style?: ViewStyle;
 }
 
@@ -23,11 +26,33 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function TrackListItem({ track, style }: TrackListItemProps) {
+export function TrackListItem({ track, onDelete, style }: TrackListItemProps) {
   const { theme } = useTheme();
+  const [showDelete, setShowDelete] = useState(false);
+
+  function handleLongPress() {
+    if (!onDelete) return;
+    setShowDelete(true);
+  }
+
+  function handleDeletePress() {
+    Alert.alert('Delete Track', `Remove "${track.filename}" from library?`, [
+      { text: 'Cancel', style: 'cancel', onPress: () => setShowDelete(false) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => onDelete?.(track.id),
+      },
+    ]);
+  }
 
   return (
-    <View
+    <AccessiblePressable
+      accessibilityRole="button"
+      accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
+      accessibilityHint={onDelete ? 'Long press to delete' : undefined}
+      onLongPress={handleLongPress}
+      onPress={() => setShowDelete(false)}
       style={[
         styles.container,
         {
@@ -36,7 +61,6 @@ export function TrackListItem({ track, style }: TrackListItemProps) {
         },
         style,
       ]}
-      accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
     >
       <View
         style={[
@@ -59,7 +83,21 @@ export function TrackListItem({ track, style }: TrackListItemProps) {
           {formatFileSize(track.fileSizeBytes)}
         </Text>
       </View>
-    </View>
+      {showDelete && (
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${track.filename}`}
+          onPress={handleDeletePress}
+          style={[styles.deleteButton, { backgroundColor: theme.colors.error }]}
+        >
+          <Ionicons
+            name="trash-outline"
+            size={18}
+            color={theme.colors.errorText}
+          />
+        </AccessiblePressable>
+      )}
+    </AccessiblePressable>
   );
 }
 
@@ -85,5 +123,11 @@ const styles = StyleSheet.create({
   },
   filename: {
     marginBottom: spacing.xs,
+  },
+  deleteButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.sm,
+    marginLeft: spacing.sm,
   },
 });
