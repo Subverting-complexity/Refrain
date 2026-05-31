@@ -50,14 +50,15 @@ export function TransportControls({
       <AccessiblePressable
         accessibilityRole="button"
         accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
-        accessibilityState={{ disabled: isLoading }}
+        accessibilityState={{ disabled: isDisabled || isLoading }}
         onPress={isPlaying ? onPause : onPlay}
-        disabled={isLoading}
+        disabled={isDisabled || isLoading}
         style={(pressState) => [
           styles.playButton,
           {
             backgroundColor: theme.colors.accent,
-            opacity: isLoading ? 0.4 : pressState.pressed ? 0.7 : 1,
+            opacity:
+              isDisabled || isLoading ? 0.4 : pressState.pressed ? 0.7 : 1,
           },
         ]}
       >
