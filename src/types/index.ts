@@ -29,3 +29,16 @@ export type ImportErrorCode =
   | 'file_not_found'
   | 'copy_failed'
   | 'metadata_failed';
+
+export type PlaybackStatus =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'error';
+
+export interface PlaybackState {
+  status: PlaybackStatus;
+  positionMs: number;
+  durationMs: number;
+}

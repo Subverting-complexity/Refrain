@@ -51,7 +51,7 @@ These files provide context for specific workflows. You don't need to
 read all of them every session — consult them when the topic is
 relevant to what you're working on.
 
-| File | When to consult |
-| ---- | --------------- |
-| `ClaudeProject.md` | Project identity, labels, quality gate, branch convention, board config. Read at the start of any workflow command. |
+| File                    | When to consult                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `ClaudeProject.md`      | Project identity, labels, quality gate, branch convention, board config. Read at the start of any workflow command.         |
 | `docs/review.config.md` | Review label definitions, non-compliance gates, tech-stack review rules. Read when performing or preparing for code review. |

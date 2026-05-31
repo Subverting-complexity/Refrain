@@ -5,11 +5,11 @@ execute skill read this file.
 
 ## Identity
 
-| Setting        | Value                    |
-| -------------- | ------------------------ |
-| org            | `Subverting-complexity`  |
-| repo           | `Refrain`                |
-| default-branch | `main`                   |
+| Setting        | Value                   |
+| -------------- | ----------------------- |
+| org            | `Subverting-complexity` |
+| repo           | `Refrain`               |
+| default-branch | `main`                  |
 
 ## Package Manager
 
@@ -39,26 +39,26 @@ Map workflow purposes to your repository's actual label names.
 
 | Purpose           | Label               |
 | ----------------- | ------------------- |
-| priority-critical | `priority/critical`  |
-| priority-high     | `priority/high`      |
-| priority-medium   | `priority/medium`    |
-| priority-low      | `priority/low`       |
+| priority-critical | `priority/critical` |
+| priority-high     | `priority/high`     |
+| priority-medium   | `priority/medium`   |
+| priority-low      | `priority/low`      |
 
 ### Type
 
-| Purpose    | Label         |
-| ---------- | ------------- |
-| type-story | `type/story`  |
-| type-bug   | `type/bug`    |
-| type-debt  | `type/debt`   |
-| type-arch  | `type/arch`   |
+| Purpose    | Label        |
+| ---------- | ------------ |
+| type-story | `type/story` |
+| type-bug   | `type/bug`   |
+| type-debt  | `type/debt`  |
+| type-arch  | `type/arch`  |
 
 ### Status
 
-| Purpose        | Label              |
-| -------------- | ------------------ |
-| status-ready   | `status/ready`     |
-| status-blocked | `status/blocked`   |
+| Purpose        | Label            |
+| -------------- | ---------------- |
+| status-ready   | `status/ready`   |
+| status-blocked | `status/blocked` |
 
 ### Claude
 
@@ -66,16 +66,16 @@ Simple markers applied by workflow commands. These are **not** the
 review state labels — those are defined in `docs/review.config.md`
 and managed by the code-review skill.
 
-| Purpose          | Label              | Applied by       |
-| ---------------- | ------------------ | ---------------- |
-| claude-authored  | `claude:authored`  | finish-story     |
-| claude-blocked   | `claude:blocked`   | block-story      |
+| Purpose         | Label             | Applied by   |
+| --------------- | ----------------- | ------------ |
+| claude-authored | `claude:authored` | finish-story |
+| claude-blocked  | `claude:blocked`  | block-story  |
 
 ## Session Budget
 
-| Setting       | Value    |
-| ------------- | -------- |
-| stale-timeout | `8h`     |
+| Setting       | Value |
+| ------------- | ----- |
+| stale-timeout | `8h`  |
 
 The `stale-timeout` controls how long an assigned issue can go without
 a branch or PR before `pick-story` reclaims it.
@@ -102,11 +102,11 @@ Issues should include these sections at minimum:
 
 ## Project Board
 
-| Setting             | Value                                              |
-| ------------------- | -------------------------------------------------- |
-| project-number      | `7`                                                |
-| project-node-id     | `PVT_kwDODj6aos4BZOQd`                            |
-| status-field-id     | `PVTSSF_lADODj6aos4BZOQdzhUOfOE`                  |
+| Setting         | Value                            |
+| --------------- | -------------------------------- |
+| project-number  | `7`                              |
+| project-node-id | `PVT_kwDODj6aos4BZOQd`           |
+| status-field-id | `PVTSSF_lADODj6aos4BZOQdzhUOfOE` |
 
 ### Status Options
 
