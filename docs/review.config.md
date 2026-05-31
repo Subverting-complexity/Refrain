@@ -10,16 +10,16 @@
 
 State labels are mutually exclusive — exactly one is applied per review.
 
-| Label | Type | Meaning |
-| ----- | ---- | ------- |
-| `claude-reviewing` | State | Review in progress — prevents concurrent reviews |
-| `claude-approved` | State | No remaining issues, ready for human merge |
-| `claude-changes-requested` | State | Concrete problems remain that a human must address |
-| `claude-needs-discussion` | State | Architectural or scope questions need human judgment |
-| `claude-needs-re-review` | State | New commits pushed since last review — re-review required |
-| `claude-review-failed` | State | Review could not be completed (checkout failed, PR too large) |
-| `claude-updating` | State | A builder agent is addressing review feedback — prevents concurrent updates |
-| `claude-fixes-applied` | Action | Claude pushed fix commits to the PR branch (sticky across runs) |
+| Label                      | Type   | Meaning                                                                     |
+| -------------------------- | ------ | --------------------------------------------------------------------------- |
+| `claude-reviewing`         | State  | Review in progress — prevents concurrent reviews                            |
+| `claude-approved`          | State  | No remaining issues, ready for human merge                                  |
+| `claude-changes-requested` | State  | Concrete problems remain that a human must address                          |
+| `claude-needs-discussion`  | State  | Architectural or scope questions need human judgment                        |
+| `claude-needs-re-review`   | State  | New commits pushed since last review — re-review required                   |
+| `claude-review-failed`     | State  | Review could not be completed (checkout failed, PR too large)               |
+| `claude-updating`          | State  | A builder agent is addressing review feedback — prevents concurrent updates |
+| `claude-fixes-applied`     | Action | Claude pushed fix commits to the PR branch (sticky across runs)             |
 
 These labels are managed by the `/github-workflow:code-review` skill
 and form the single source of truth for PR review state. Claude labels
