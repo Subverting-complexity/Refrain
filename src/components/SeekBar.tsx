@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   barTouchArea: {
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.xl,
     position: 'relative',
   },
   barTrack: {
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    top: 6,
+    top: 18,
     width: 16,
     height: 16,
     borderRadius: 8,

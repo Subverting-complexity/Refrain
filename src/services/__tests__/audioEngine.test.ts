@@ -84,6 +84,21 @@ describe('audioEngine', () => {
       expect(mockCreateAsync).toHaveBeenCalledTimes(2);
     });
 
+    it('resets to idle when createAsync throws', async () => {
+      mockCreateAsync.mockRejectedValueOnce(new Error('unsupported format'));
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      await loadTrack('file:///bad.mp3');
+
+      const lastCall = listener.mock.calls[listener.mock.calls.length - 1][0];
+      expect(lastCall).toEqual(
+        expect.objectContaining({ status: 'idle', positionMs: 0 }),
+      );
+    });
+
     it('notifies subscriber with loading status', async () => {
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
@@ -220,16 +235,56 @@ describe('audioEngine', () => {
       );
     });
 
-    it('returns an unsubscribe function', () => {
-      const { subscribe } = require('../audioEngine');
+    it('returns an unsubscribe function that stops updates', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
       const listener = jest.fn();
 
       const unsubscribe = subscribe(listener);
+      listener.mockClear();
       unsubscribe();
 
-      // After unsubscribe, listener should not receive further updates
-      // (tested indirectly via loadTrack not notifying)
-      expect(typeof unsubscribe).toBe('function');
+      await loadTrack('file:///test.mp3');
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('supports multiple concurrent listeners', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const listenerA = jest.fn();
+      const listenerB = jest.fn();
+
+      subscribe(listenerA);
+      subscribe(listenerB);
+      listenerA.mockClear();
+      listenerB.mockClear();
+
+      await loadTrack('file:///test.mp3');
+
+      expect(listenerA).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'loading' }),
+      );
+      expect(listenerB).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'loading' }),
+      );
+    });
+
+    it('unsubscribing one listener does not affect others', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const listenerA = jest.fn();
+      const listenerB = jest.fn();
+
+      const unsubA = subscribe(listenerA);
+      subscribe(listenerB);
+      listenerA.mockClear();
+      listenerB.mockClear();
+
+      unsubA();
+      await loadTrack('file:///test.mp3');
+
+      expect(listenerA).not.toHaveBeenCalled();
+      expect(listenerB).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'loading' }),
+      );
     });
   });
 

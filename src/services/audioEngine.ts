@@ -11,8 +11,14 @@ const IDLE_STATE: PlaybackState = {
 };
 
 let sound: Audio.Sound | null = null;
-let listener: PlaybackListener | null = null;
+const listeners = new Set<PlaybackListener>();
 let currentState: PlaybackState = { ...IDLE_STATE };
+
+function notify(state: PlaybackState): void {
+  for (const cb of listeners) {
+    cb(state);
+  }
+}
 
 function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
   if (!avStatus.isLoaded) {
@@ -36,7 +42,7 @@ function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
 function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
   if (!avStatus.isLoaded && avStatus.error) {
     currentState = { ...IDLE_STATE };
-    listener?.(currentState);
+    notify(currentState);
     return;
   }
 
@@ -48,26 +54,31 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
   }
 
   currentState = newState;
-  listener?.(currentState);
+  notify(currentState);
 }
 
 export async function loadTrack(uri: string): Promise<void> {
   await unloadTrack();
 
   currentState = { status: 'loading', positionMs: 0, durationMs: 0 };
-  listener?.(currentState);
+  notify(currentState);
 
-  await Audio.setAudioModeAsync({
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-  });
+  try {
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+    });
 
-  const { sound: newSound } = await Audio.Sound.createAsync(
-    { uri },
-    { shouldPlay: false, progressUpdateIntervalMillis: 100 },
-    onPlaybackStatusUpdate,
-  );
-  sound = newSound;
+    const { sound: newSound } = await Audio.Sound.createAsync(
+      { uri },
+      { shouldPlay: false, progressUpdateIntervalMillis: 100 },
+      onPlaybackStatusUpdate,
+    );
+    sound = newSound;
+  } catch {
+    currentState = { ...IDLE_STATE };
+    notify(currentState);
+  }
 }
 
 export async function play(): Promise<void> {
@@ -105,16 +116,14 @@ export async function unloadTrack(): Promise<void> {
     sound = null;
   }
   currentState = { ...IDLE_STATE };
-  listener?.(currentState);
+  notify(currentState);
 }
 
 export function subscribe(cb: PlaybackListener): () => void {
-  listener = cb;
+  listeners.add(cb);
   cb(currentState);
   return () => {
-    if (listener === cb) {
-      listener = null;
-    }
+    listeners.delete(cb);
   };
 }
 
