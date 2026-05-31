@@ -30,7 +30,12 @@ export type ImportErrorCode =
   | 'copy_failed'
   | 'metadata_failed';
 
-export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused';
+export type PlaybackStatus =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'error';
 
 export interface PlaybackState {
   status: PlaybackStatus;

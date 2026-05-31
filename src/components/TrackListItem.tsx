@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
+import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { Track } from '../types';
 
@@ -12,13 +13,6 @@ interface TrackListItemProps {
   onPress?: (track: Track) => void;
   onDelete?: (id: string) => void;
   style?: ViewStyle;
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function formatFileSize(bytes: number): string {
@@ -56,7 +50,15 @@ export function TrackListItem({
     <AccessiblePressable
       accessibilityRole="button"
       accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
-      accessibilityHint={onDelete ? 'Long press to delete' : undefined}
+      accessibilityHint={
+        onPress && onDelete
+          ? 'Tap to play, long press to delete'
+          : onDelete
+            ? 'Long press to delete'
+            : onPress
+              ? 'Tap to play'
+              : undefined
+      }
       onLongPress={handleLongPress}
       onPress={() => {
         if (showDelete) {

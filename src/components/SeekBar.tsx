@@ -10,19 +10,13 @@ import {
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
+import { formatDuration } from '../utils/formatTime';
 
 interface SeekBarProps {
   positionMs: number;
   durationMs: number;
   onSeek: (positionMs: number) => void;
   style?: ViewStyle;
-}
-
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 export function SeekBar({
@@ -55,7 +49,7 @@ export function SeekBar({
     <View
       style={[styles.container, style]}
       accessibilityRole="adjustable"
-      accessibilityLabel={`Playback position: ${formatTime(positionMs)} of ${formatTime(durationMs)}`}
+      accessibilityLabel={`Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`}
     >
       <View
         style={styles.barTouchArea}
@@ -90,10 +84,10 @@ export function SeekBar({
       </View>
       <View style={styles.timeRow}>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
-          {formatTime(positionMs)}
+          {formatDuration(positionMs)}
         </Text>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
-          {formatTime(durationMs)}
+          {formatDuration(durationMs)}
         </Text>
       </View>
     </View>

@@ -25,21 +25,22 @@ export function TransportControls({
   const { theme } = useTheme();
   const isPlaying = status === 'playing';
   const isLoading = status === 'loading';
+  const isDisabled = status === 'idle' || status === 'error';
 
   return (
     <View style={[styles.container, style]}>
       <AccessiblePressable
         accessibilityRole="button"
         accessibilityLabel="Stop"
-        accessibilityState={{ disabled: status === 'idle' }}
+        accessibilityState={{ disabled: isDisabled }}
         onPress={onStop}
-        disabled={status === 'idle'}
+        disabled={isDisabled}
         style={(pressState) => [
           styles.button,
           {
             backgroundColor: theme.colors.surface,
             borderColor: theme.colors.border,
-            opacity: status === 'idle' ? 0.4 : pressState.pressed ? 0.7 : 1,
+            opacity: isDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
           },
         ]}
       >

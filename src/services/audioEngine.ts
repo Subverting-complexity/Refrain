@@ -41,7 +41,7 @@ function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
 
 function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
   if (!avStatus.isLoaded && avStatus.error) {
-    currentState = { ...IDLE_STATE };
+    currentState = { status: 'error', positionMs: 0, durationMs: 0 };
     notify(currentState);
     return;
   }
@@ -76,7 +76,7 @@ export async function loadTrack(uri: string): Promise<void> {
     );
     sound = newSound;
   } catch {
-    currentState = { ...IDLE_STATE };
+    currentState = { status: 'error', positionMs: 0, durationMs: 0 };
     notify(currentState);
   }
 }

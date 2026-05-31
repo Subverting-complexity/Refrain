@@ -49,6 +49,15 @@ export default function PlayerScreen() {
         </Text>
       </View>
 
+      {status === 'error' && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle" size={20} color={theme.colors.error} />
+          <Text style={[theme.typography.body, { color: theme.colors.error }]}>
+            Unable to load this track
+          </Text>
+        </View>
+      )}
+
       <View style={styles.controls}>
         <SeekBar
           positionMs={positionMs}
@@ -96,6 +105,14 @@ const styles = StyleSheet.create({
   controls: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.md,
   },
   seekBar: {
     marginBottom: spacing.xl,

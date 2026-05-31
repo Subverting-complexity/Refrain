@@ -84,7 +84,7 @@ describe('audioEngine', () => {
       expect(mockCreateAsync).toHaveBeenCalledTimes(2);
     });
 
-    it('resets to idle when createAsync throws', async () => {
+    it('reports error status when createAsync throws', async () => {
       mockCreateAsync.mockRejectedValueOnce(new Error('unsupported format'));
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
@@ -95,7 +95,7 @@ describe('audioEngine', () => {
 
       const lastCall = listener.mock.calls[listener.mock.calls.length - 1][0];
       expect(lastCall).toEqual(
-        expect.objectContaining({ status: 'idle', positionMs: 0 }),
+        expect.objectContaining({ status: 'error', positionMs: 0 }),
       );
     });
 
@@ -339,7 +339,7 @@ describe('audioEngine', () => {
       });
     });
 
-    it('reports idle on error status', async () => {
+    it('reports error on playback error status', async () => {
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
 
@@ -350,7 +350,7 @@ describe('audioEngine', () => {
       statusCallback?.({ isLoaded: false, error: 'playback error' });
 
       expect(listener).toHaveBeenCalledWith({
-        status: 'idle',
+        status: 'error',
         positionMs: 0,
         durationMs: 0,
       });
