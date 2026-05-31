@@ -28,6 +28,13 @@ function RootLayoutNav() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="player"
+          options={{
+            title: 'Now Playing',
+            presentation: 'card',
+          }}
+        />
       </Stack>
     </View>
   );

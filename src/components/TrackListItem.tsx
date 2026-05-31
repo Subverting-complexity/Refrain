@@ -9,6 +9,7 @@ import { Track } from '../types';
 
 interface TrackListItemProps {
   track: Track;
+  onPress?: (track: Track) => void;
   onDelete?: (id: string) => void;
   style?: ViewStyle;
 }
@@ -26,7 +27,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function TrackListItem({ track, onDelete, style }: TrackListItemProps) {
+export function TrackListItem({
+  track,
+  onPress,
+  onDelete,
+  style,
+}: TrackListItemProps) {
   const { theme } = useTheme();
   const [showDelete, setShowDelete] = useState(false);
 
@@ -52,7 +58,13 @@ export function TrackListItem({ track, onDelete, style }: TrackListItemProps) {
       accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
       accessibilityHint={onDelete ? 'Long press to delete' : undefined}
       onLongPress={handleLongPress}
-      onPress={() => setShowDelete(false)}
+      onPress={() => {
+        if (showDelete) {
+          setShowDelete(false);
+        } else {
+          onPress?.(track);
+        }
+      }}
       style={[
         styles.container,
         {

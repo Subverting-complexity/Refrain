@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ImportButton } from '@/src/components/ImportButton';
@@ -23,6 +24,7 @@ import { Track } from '@/src/types';
 
 export default function LibraryScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
 
@@ -66,6 +68,16 @@ export default function LibraryScreen() {
       `Share import failed: ${message}`,
     );
   }, []);
+
+  const handleTrackPress = useCallback(
+    (track: Track) => {
+      router.push({
+        pathname: '/player',
+        params: { uri: track.uri, filename: track.filename },
+      });
+    },
+    [router],
+  );
 
   useShareIntent({
     onTrackImported: handleShareImport,
@@ -123,6 +135,7 @@ export default function LibraryScreen() {
             renderItem={({ item }) => (
               <TrackListItem
                 track={item}
+                onPress={handleTrackPress}
                 onDelete={handleDelete}
                 style={styles.listItem}
               />
