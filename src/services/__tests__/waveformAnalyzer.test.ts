@@ -41,6 +41,12 @@ function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
       view.setInt16(headerSize + i * 2, Math.round(samples[i] * 32767), true);
     } else if (bytesPerSample === 1) {
       view.setUint8(headerSize + i, Math.round(samples[i] * 127 + 128));
+    } else if (bytesPerSample === 4) {
+      view.setInt32(
+        headerSize + i * 4,
+        Math.round(samples[i] * 2147483647),
+        true,
+      );
     }
   }
 
@@ -103,6 +109,22 @@ describe('extractPeaks', () => {
       expect(peaks).toHaveLength(5);
       peaks.forEach((p) => {
         expect(p).toBeCloseTo(0.1, 5);
+      });
+    });
+
+    it('extracts peaks from a 32-bit WAV file', async () => {
+      const samples = Array.from({ length: 400 }, (_, i) =>
+        Math.sin((i / 400) * Math.PI * 2),
+      );
+      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples, 32));
+
+      const peaks = await extractPeaks('file:///test.wav', 10);
+
+      expect(peaks).toHaveLength(10);
+      expect(Math.max(...peaks)).toBeCloseTo(1, 1);
+      peaks.forEach((p) => {
+        expect(p).toBeGreaterThanOrEqual(0.05);
+        expect(p).toBeLessThanOrEqual(1);
       });
     });
 
