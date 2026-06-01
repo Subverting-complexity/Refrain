@@ -1,0 +1,193 @@
+import React from 'react';
+import { create, act, ReactTestRenderer } from 'react-test-renderer';
+
+import { WaveformView } from '../WaveformView';
+
+jest.mock('../../hooks/useTheme', () => ({
+  useTheme: () => ({
+    theme: {
+      colors: {
+        accent: '#7edbb8',
+        border: '#2a4a4e',
+        surface: '#1a2e30',
+        textSecondary: '#8ba89e',
+      },
+      spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
+      typography: {},
+    },
+  }),
+}));
+
+const DEFAULT_PEAKS = [0.2, 0.5, 0.8, 1.0, 0.6];
+
+function findBars(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.type === 'View' &&
+      node.props.style &&
+      Array.isArray(node.props.style) &&
+      node.props.style.some(
+        (s: Record<string, unknown>) => s && typeof s.height === 'string',
+      ),
+  );
+}
+
+function renderWaveform(
+  props: Partial<React.ComponentProps<typeof WaveformView>> = {},
+) {
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(
+      <WaveformView
+        peaks={DEFAULT_PEAKS}
+        positionMs={0}
+        durationMs={10000}
+        onSeek={jest.fn()}
+        {...props}
+      />,
+    );
+  });
+  return tree;
+}
+
+describe('WaveformView', () => {
+  it('renders bars for each peak', () => {
+    const tree = renderWaveform();
+    const bars = findBars(tree);
+    expect(bars).toHaveLength(DEFAULT_PEAKS.length);
+  });
+
+  it('colors bars based on playback progress', () => {
+    const tree = renderWaveform({ positionMs: 5000 });
+    const bars = findBars(tree);
+
+    const accentBars = bars.filter((b) =>
+      b.props.style.some(
+        (s: Record<string, unknown>) => s.backgroundColor === '#7edbb8',
+      ),
+    );
+    const borderBars = bars.filter((b) =>
+      b.props.style.some(
+        (s: Record<string, unknown>) => s.backgroundColor === '#2a4a4e',
+      ),
+    );
+
+    expect(accentBars.length).toBeGreaterThan(0);
+    expect(borderBars.length).toBeGreaterThan(0);
+  });
+
+  it('renders a cursor element', () => {
+    const tree = renderWaveform({ positionMs: 2500 });
+
+    const cursors = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        node.props.style &&
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (s: Record<string, unknown>) =>
+            s && s.left === '25%' && s.backgroundColor === '#7edbb8',
+        ),
+    );
+
+    expect(cursors).toHaveLength(1);
+  });
+
+  it('renders nothing when peaks is empty', () => {
+    const tree = renderWaveform({ peaks: [] });
+    const bars = findBars(tree);
+    expect(bars).toHaveLength(0);
+  });
+
+  it('sets accessibility role and label', () => {
+    const tree = renderWaveform({ positionMs: 5000, durationMs: 120000 });
+
+    const container = tree.root.findAll(
+      (node) =>
+        node.type === 'View' && node.props.accessibilityRole === 'adjustable',
+    );
+
+    expect(container).toHaveLength(1);
+    expect(container[0].props.accessibilityLabel).toContain('0:05');
+    expect(container[0].props.accessibilityLabel).toContain('2:00');
+  });
+
+  it('calls onSeek when touch area is tapped', () => {
+    const onSeek = jest.fn();
+    const tree = renderWaveform({ onSeek });
+
+    const touchArea = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        typeof node.props.onResponderGrant === 'function' &&
+        typeof node.props.onLayout === 'function',
+    );
+
+    expect(touchArea).toHaveLength(1);
+
+    act(() => {
+      touchArea[0].props.onLayout({
+        nativeEvent: { layout: { width: 300 } },
+      });
+    });
+
+    act(() => {
+      touchArea[0].props.onResponderGrant({
+        nativeEvent: { locationX: 150 },
+      });
+    });
+
+    expect(onSeek).toHaveBeenCalledWith(5000);
+  });
+
+  it('renders A/B marker lines when provided', () => {
+    const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
+
+    const markerLines = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        node.props.style &&
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (s: Record<string, unknown>) => s && s.backgroundColor === '#8ba89e',
+        ) &&
+        node.props.style.some(
+          (s: Record<string, unknown>) => s && s.width === 2 && s.top === 0,
+        ),
+    );
+
+    expect(markerLines).toHaveLength(2);
+  });
+
+  it('renders highlighted region between A/B markers', () => {
+    const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
+
+    const regions = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        node.props.style &&
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (s: Record<string, unknown>) =>
+            s && typeof s.width === 'string' && s.width === '60%',
+        ),
+    );
+
+    expect(regions).toHaveLength(1);
+  });
+
+  it('accepts style prop override', () => {
+    const tree = renderWaveform({ style: { marginTop: 20 } });
+
+    const container = tree.root.findAll(
+      (node) =>
+        node.type === 'View' && node.props.accessibilityRole === 'adjustable',
+    );
+
+    const flatStyle = container[0].props.style;
+    const hasMarginTop = flatStyle.some(
+      (s: Record<string, unknown>) => s && s.marginTop === 20,
+    );
+    expect(hasMarginTop).toBe(true);
+  });
+});
