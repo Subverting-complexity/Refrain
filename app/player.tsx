@@ -5,7 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { SeekBar } from '@/src/components/SeekBar';
 import { TransportControls } from '@/src/components/TransportControls';
+import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
+import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { spacing } from '@/src/theme';
 
@@ -18,25 +20,35 @@ export default function PlayerScreen() {
 
   const { status, positionMs, durationMs, play, pause, stop, seekTo } =
     useAudioPlayer(uri ?? null);
+  const { peaks } = useWaveformData(uri ?? null);
 
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={['bottom']}
     >
-      <View style={styles.artwork}>
-        <View
-          style={[
-            styles.artworkPlaceholder,
-            { backgroundColor: theme.colors.surface },
-          ]}
-        >
-          <Ionicons
-            name="musical-notes"
-            size={64}
-            color={theme.colors.accent}
+      <View style={styles.waveformArea}>
+        {peaks.length > 0 ? (
+          <WaveformView
+            peaks={peaks}
+            positionMs={positionMs}
+            durationMs={durationMs}
+            onSeek={seekTo}
           />
-        </View>
+        ) : (
+          <View
+            style={[
+              styles.artworkPlaceholder,
+              { backgroundColor: theme.colors.surface },
+            ]}
+          >
+            <Ionicons
+              name="musical-notes"
+              size={64}
+              color={theme.colors.accent}
+            />
+          </View>
+        )}
       </View>
 
       <View style={styles.trackInfo}>
@@ -82,11 +94,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  artwork: {
+  waveformArea: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.xl,
   },
   artworkPlaceholder: {
     width: 240,
