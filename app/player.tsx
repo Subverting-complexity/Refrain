@@ -3,11 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { CountdownOverlay } from '@/src/components/CountdownOverlay';
+import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { TransportControls } from '@/src/components/TransportControls';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
+import { useCountdown } from '@/src/hooks/useCountdown';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { spacing } from '@/src/theme';
@@ -25,7 +28,6 @@ export default function PlayerScreen() {
     durationMs,
     markerA,
     markerB,
-    play,
     pause,
     stop,
     seekTo,
@@ -34,12 +36,31 @@ export default function PlayerScreen() {
     clearMarkers,
   } = useAudioPlayer(uri ?? null);
   const { peaks } = useWaveformData(uri ?? null);
+  const {
+    countdownState,
+    countdownConfig,
+    setCountdownConfig,
+    playWithCountdown,
+    cancelCountdown,
+  } = useCountdown();
+
+  const isCounting = countdownState.phase === 'counting';
+
+  const handlePlay = () => {
+    if (isCounting) {
+      cancelCountdown();
+    } else {
+      void playWithCountdown();
+    }
+  };
 
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={['bottom']}
     >
+      <CountdownOverlay countdownState={countdownState} />
+
       <View style={styles.waveformArea}>
         {peaks.length > 0 ? (
           <WaveformView
@@ -88,6 +109,12 @@ export default function PlayerScreen() {
       )}
 
       <View style={styles.controls}>
+        <CountdownSettings
+          config={countdownConfig}
+          onConfigChange={setCountdownConfig}
+          style={styles.countdownSettings}
+        />
+
         <MarkerControls
           status={status}
           positionMs={positionMs}
@@ -107,9 +134,9 @@ export default function PlayerScreen() {
         />
 
         <TransportControls
-          status={status}
-          onPlay={play}
-          onPause={pause}
+          status={isCounting ? 'playing' : status}
+          onPlay={handlePlay}
+          onPause={isCounting ? cancelCountdown : pause}
           onStop={stop}
           style={styles.transport}
         />
@@ -155,6 +182,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.md,
+  },
+  countdownSettings: {
+    marginBottom: spacing.lg,
   },
   seekBar: {
     marginBottom: spacing.xl,

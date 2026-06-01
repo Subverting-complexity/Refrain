@@ -1,0 +1,252 @@
+import React from 'react';
+import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+
+import { useTheme } from '../hooks/useTheme';
+import { spacing } from '../theme';
+import { CountdownConfig, CountdownDuration, CountdownMode } from '../types';
+import { AccessiblePressable } from './AccessiblePressable';
+
+interface CountdownSettingsProps {
+  config: CountdownConfig;
+  onConfigChange: (config: CountdownConfig) => void;
+  style?: ViewStyle;
+}
+
+const DURATION_PRESETS: { label: string; value: CountdownDuration }[] = [
+  { label: '1 bar', value: { type: 'bars', bars: 1 } },
+  { label: '2 bars', value: { type: 'bars', bars: 2 } },
+  { label: '4 bars', value: { type: 'bars', bars: 4 } },
+  { label: '3s', value: { type: 'seconds', seconds: 3 } },
+  { label: '5s', value: { type: 'seconds', seconds: 5 } },
+];
+
+function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'bars' && b.type === 'bars') return a.bars === b.bars;
+  if (a.type === 'seconds' && b.type === 'seconds')
+    return a.seconds === b.seconds;
+  return false;
+}
+
+export function CountdownSettings({
+  config,
+  onConfigChange,
+  style,
+}: CountdownSettingsProps) {
+  const { theme } = useTheme();
+
+  const toggleEnabled = () => {
+    onConfigChange({ ...config, enabled: !config.enabled });
+  };
+
+  const setMode = (mode: CountdownMode) => {
+    onConfigChange({ ...config, mode });
+  };
+
+  const setDuration = (duration: CountdownDuration) => {
+    onConfigChange({ ...config, duration });
+  };
+
+  const setBpm = (text: string) => {
+    const parsed = parseInt(text, 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 300) {
+      onConfigChange({ ...config, bpm: parsed });
+    }
+  };
+
+  return (
+    <View style={[styles.container, style]}>
+      <View style={styles.row}>
+        <Text style={[theme.typography.body, styles.label]}>Countdown</Text>
+        <AccessiblePressable
+          accessibilityRole="switch"
+          accessibilityLabel={`Countdown ${config.enabled ? 'on' : 'off'}`}
+          accessibilityState={{ checked: config.enabled }}
+          onPress={toggleEnabled}
+          style={[
+            styles.toggle,
+            {
+              backgroundColor: config.enabled
+                ? theme.colors.accent
+                : theme.colors.surface,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.toggleThumb,
+              {
+                backgroundColor: config.enabled
+                  ? theme.colors.accentText
+                  : theme.colors.textSecondary,
+                transform: [{ translateX: config.enabled ? 20 : 0 }],
+              },
+            ]}
+          />
+        </AccessiblePressable>
+      </View>
+
+      {config.enabled && (
+        <>
+          <View style={styles.row}>
+            <Text style={[theme.typography.bodySmall, styles.label]}>Mode</Text>
+            <View style={styles.chipRow}>
+              {(['silent', 'metronome'] as CountdownMode[]).map((mode) => (
+                <AccessiblePressable
+                  key={mode}
+                  accessibilityRole="radio"
+                  accessibilityLabel={mode}
+                  accessibilityState={{ selected: config.mode === mode }}
+                  onPress={() => setMode(mode)}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor:
+                        config.mode === mode
+                          ? theme.colors.accent
+                          : theme.colors.surface,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      theme.typography.bodySmall,
+                      {
+                        color:
+                          config.mode === mode
+                            ? theme.colors.accentText
+                            : theme.colors.textPrimary,
+                      },
+                    ]}
+                  >
+                    {mode === 'silent' ? 'Silent' : 'Metronome'}
+                  </Text>
+                </AccessiblePressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={[theme.typography.bodySmall, styles.label]}>
+              Duration
+            </Text>
+            <View style={styles.chipRow}>
+              {DURATION_PRESETS.map((preset) => (
+                <AccessiblePressable
+                  key={preset.label}
+                  accessibilityRole="radio"
+                  accessibilityLabel={preset.label}
+                  accessibilityState={{
+                    selected: durationEqual(config.duration, preset.value),
+                  }}
+                  onPress={() => setDuration(preset.value)}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: durationEqual(
+                        config.duration,
+                        preset.value,
+                      )
+                        ? theme.colors.accent
+                        : theme.colors.surface,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      theme.typography.bodySmall,
+                      {
+                        color: durationEqual(config.duration, preset.value)
+                          ? theme.colors.accentText
+                          : theme.colors.textPrimary,
+                      },
+                    ]}
+                  >
+                    {preset.label}
+                  </Text>
+                </AccessiblePressable>
+              ))}
+            </View>
+          </View>
+
+          {config.mode === 'metronome' && (
+            <View style={styles.row}>
+              <Text style={[theme.typography.bodySmall, styles.label]}>
+                BPM
+              </Text>
+              <TextInput
+                accessibilityLabel="BPM"
+                keyboardType="number-pad"
+                value={String(config.bpm)}
+                onChangeText={setBpm}
+                maxLength={3}
+                style={[
+                  styles.bpmInput,
+                  {
+                    color: theme.colors.textPrimary,
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
+              />
+            </View>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    gap: spacing.md,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  label: {
+    flex: 0,
+    marginRight: spacing.md,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: spacing.lg,
+    borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  toggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 3,
+    justifyContent: 'center',
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  bpmInput: {
+    width: 64,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 1,
+    textAlign: 'center',
+    fontSize: 16,
+  },
+});
