@@ -19,12 +19,17 @@ interface WaveformViewProps {
   onSeek: (positionMs: number) => void;
   markerA?: number;
   markerB?: number;
+  onMarkerAChange?: (positionMs: number) => void;
+  onMarkerBChange?: (positionMs: number) => void;
   style?: ViewStyle;
 }
 
 const WAVEFORM_HEIGHT = 120;
 const BAR_WIDTH = 2;
 const BAR_GAP = 1;
+const MARKER_HIT_ZONE_PX = 20;
+
+type DragTarget = 'markerA' | 'markerB' | 'seek';
 
 export function WaveformView({
   peaks,
@@ -33,26 +38,86 @@ export function WaveformView({
   onSeek,
   markerA,
   markerB,
+  onMarkerAChange,
+  onMarkerBChange,
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
   const containerWidth = useRef(0);
+  const dragTarget = useRef<DragTarget>('seek');
   const progress = durationMs > 0 ? positionMs / durationMs : 0;
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     containerWidth.current = e.nativeEvent.layout.width;
   }, []);
 
-  const seekFromEvent = useCallback(
-    (e: GestureResponderEvent) => {
-      if (durationMs <= 0 || containerWidth.current <= 0) return;
+  const positionFromEvent = useCallback(
+    (e: GestureResponderEvent): number | null => {
+      if (durationMs <= 0 || containerWidth.current <= 0) return null;
       const ratio = Math.max(
         0,
         Math.min(1, e.nativeEvent.locationX / containerWidth.current),
       );
-      onSeek(Math.round(ratio * durationMs));
+      return Math.round(ratio * durationMs);
     },
-    [durationMs, onSeek],
+    [durationMs],
+  );
+
+  const detectDragTarget = useCallback(
+    (e: GestureResponderEvent): DragTarget => {
+      if (containerWidth.current <= 0 || durationMs <= 0) return 'seek';
+      const touchX = e.nativeEvent.locationX;
+
+      if (markerA != null && onMarkerAChange) {
+        const markerAX = (markerA / durationMs) * containerWidth.current;
+        if (Math.abs(touchX - markerAX) <= MARKER_HIT_ZONE_PX) return 'markerA';
+      }
+      if (markerB != null && onMarkerBChange) {
+        const markerBX = (markerB / durationMs) * containerWidth.current;
+        if (Math.abs(touchX - markerBX) <= MARKER_HIT_ZONE_PX) return 'markerB';
+      }
+      return 'seek';
+    },
+    [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
+  );
+
+  const handleGrant = useCallback(
+    (e: GestureResponderEvent) => {
+      dragTarget.current = detectDragTarget(e);
+      const ms = positionFromEvent(e);
+      if (ms == null) return;
+
+      if (dragTarget.current === 'markerA') {
+        onMarkerAChange?.(ms);
+      } else if (dragTarget.current === 'markerB') {
+        onMarkerBChange?.(ms);
+      } else {
+        onSeek(ms);
+      }
+    },
+    [
+      detectDragTarget,
+      positionFromEvent,
+      onSeek,
+      onMarkerAChange,
+      onMarkerBChange,
+    ],
+  );
+
+  const handleMove = useCallback(
+    (e: GestureResponderEvent) => {
+      const ms = positionFromEvent(e);
+      if (ms == null) return;
+
+      if (dragTarget.current === 'markerA') {
+        onMarkerAChange?.(ms);
+      } else if (dragTarget.current === 'markerB') {
+        onMarkerBChange?.(ms);
+      } else {
+        onSeek(ms);
+      }
+    },
+    [positionFromEvent, onSeek, onMarkerAChange, onMarkerBChange],
   );
 
   const bars = useMemo(() => {
@@ -112,6 +177,7 @@ export function WaveformView({
               backgroundColor: theme.colors.textSecondary,
             },
           ]}
+          accessibilityLabel={`Loop start marker at ${formatDuration(markerA)}`}
         />,
       );
     }
@@ -127,6 +193,7 @@ export function WaveformView({
               backgroundColor: theme.colors.textSecondary,
             },
           ]}
+          accessibilityLabel={`Loop end marker at ${formatDuration(markerB)}`}
         />,
       );
     }
@@ -140,6 +207,14 @@ export function WaveformView({
     theme.colors.textSecondary,
   ]);
 
+  const a11yLabel = useMemo(() => {
+    let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
+    if (markerA != null && markerB != null) {
+      label += `. Loop from ${formatDuration(markerA)} to ${formatDuration(markerB)}`;
+    }
+    return label;
+  }, [positionMs, durationMs, markerA, markerB]);
+
   return (
     <View
       style={[
@@ -148,15 +223,15 @@ export function WaveformView({
         style,
       ]}
       accessibilityRole="adjustable"
-      accessibilityLabel={`Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`}
+      accessibilityLabel={a11yLabel}
     >
       <View
         style={styles.touchArea}
         onLayout={handleLayout}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={seekFromEvent}
-        onResponderMove={seekFromEvent}
+        onResponderGrant={handleGrant}
+        onResponderMove={handleMove}
       >
         <View style={styles.barsContainer}>{bars}</View>
 

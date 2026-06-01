@@ -50,6 +50,15 @@ function renderWaveform(
   return tree;
 }
 
+function getTouchArea(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.type === 'View' &&
+      typeof node.props.onResponderGrant === 'function' &&
+      typeof node.props.onLayout === 'function',
+  )[0];
+}
+
 describe('WaveformView', () => {
   it('renders bars for each peak', () => {
     const tree = renderWaveform();
@@ -112,27 +121,38 @@ describe('WaveformView', () => {
     expect(container[0].props.accessibilityLabel).toContain('2:00');
   });
 
+  it('includes loop range in accessibility label when markers set', () => {
+    const tree = renderWaveform({
+      positionMs: 5000,
+      durationMs: 120000,
+      markerA: 10000,
+      markerB: 30000,
+    });
+
+    const container = tree.root.findAll(
+      (node) =>
+        node.type === 'View' && node.props.accessibilityRole === 'adjustable',
+    );
+
+    expect(container[0].props.accessibilityLabel).toContain(
+      'Loop from 0:10 to 0:30',
+    );
+  });
+
   it('calls onSeek when touch area is tapped', () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek });
 
-    const touchArea = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        typeof node.props.onResponderGrant === 'function' &&
-        typeof node.props.onLayout === 'function',
-    );
-
-    expect(touchArea).toHaveLength(1);
+    const touchArea = getTouchArea(tree);
 
     act(() => {
-      touchArea[0].props.onLayout({
+      touchArea.props.onLayout({
         nativeEvent: { layout: { width: 300 } },
       });
     });
 
     act(() => {
-      touchArea[0].props.onResponderGrant({
+      touchArea.props.onResponderGrant({
         nativeEvent: { locationX: 150 },
       });
     });
@@ -174,6 +194,174 @@ describe('WaveformView', () => {
     );
 
     expect(regions).toHaveLength(1);
+  });
+
+  it('adds accessibility labels to marker lines', () => {
+    const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
+
+    const markerALabel = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        node.props.accessibilityLabel &&
+        node.props.accessibilityLabel.includes('Loop start marker'),
+    );
+    const markerBLabel = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        node.props.accessibilityLabel &&
+        node.props.accessibilityLabel.includes('Loop end marker'),
+    );
+
+    expect(markerALabel).toHaveLength(1);
+    expect(markerBLabel).toHaveLength(1);
+  });
+
+  describe('marker dragging', () => {
+    it('calls onMarkerAChange when touch starts near markerA', () => {
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 152 },
+        });
+      });
+
+      expect(onMarkerAChange).toHaveBeenCalled();
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('calls onMarkerBChange when touch starts near markerB', () => {
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 2000,
+        markerB: 8000,
+        durationMs: 10000,
+        onMarkerBChange,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 242 },
+        });
+      });
+
+      expect(onMarkerBChange).toHaveBeenCalled();
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('continues dragging marker on move after grant near marker', () => {
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 150 },
+        });
+      });
+
+      onMarkerAChange.mockClear();
+
+      act(() => {
+        touchArea.props.onResponderMove({
+          nativeEvent: { locationX: 180 },
+        });
+      });
+
+      expect(onMarkerAChange).toHaveBeenCalledWith(6000);
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('falls back to seek when touch is not near any marker', () => {
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 30 },
+        });
+      });
+
+      expect(onSeek).toHaveBeenCalled();
+      expect(onMarkerAChange).not.toHaveBeenCalled();
+    });
+
+    it('does not drag markers when callbacks are not provided', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 150 },
+        });
+      });
+
+      expect(onSeek).toHaveBeenCalled();
+    });
   });
 
   it('accepts style prop override', () => {

@@ -7,6 +7,8 @@ const IDLE_STATE: PlaybackState = {
   status: 'idle',
   positionMs: 0,
   durationMs: 0,
+  markerA: null,
+  markerB: null,
 };
 
 export function useAudioPlayer(trackUri: string | null) {
@@ -29,6 +31,24 @@ export function useAudioPlayer(trackUri: string | null) {
   const pause = useCallback(() => audioEngine.pause(), []);
   const stop = useCallback(() => audioEngine.stop(), []);
   const seekTo = useCallback((ms: number) => audioEngine.seekTo(ms), []);
+  const setMarkerA = useCallback(
+    (ms: number) => audioEngine.setMarkerA(ms),
+    [],
+  );
+  const setMarkerB = useCallback(
+    (ms: number) => audioEngine.setMarkerB(ms),
+    [],
+  );
+  const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
 
-  return { ...state, play, pause, stop, seekTo };
+  return {
+    ...state,
+    play,
+    pause,
+    stop,
+    seekTo,
+    setMarkerA,
+    setMarkerB,
+    clearMarkers,
+  };
 }

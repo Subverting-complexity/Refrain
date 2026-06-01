@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { MarkerControls } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { TransportControls } from '@/src/components/TransportControls';
 import { WaveformView } from '@/src/components/WaveformView';
@@ -18,8 +19,20 @@ export default function PlayerScreen() {
     filename: string;
   }>();
 
-  const { status, positionMs, durationMs, play, pause, stop, seekTo } =
-    useAudioPlayer(uri ?? null);
+  const {
+    status,
+    positionMs,
+    durationMs,
+    markerA,
+    markerB,
+    play,
+    pause,
+    stop,
+    seekTo,
+    setMarkerA,
+    setMarkerB,
+    clearMarkers,
+  } = useAudioPlayer(uri ?? null);
   const { peaks } = useWaveformData(uri ?? null);
 
   return (
@@ -34,6 +47,10 @@ export default function PlayerScreen() {
             positionMs={positionMs}
             durationMs={durationMs}
             onSeek={seekTo}
+            markerA={markerA ?? undefined}
+            markerB={markerB ?? undefined}
+            onMarkerAChange={setMarkerA}
+            onMarkerBChange={setMarkerB}
           />
         ) : (
           <View
@@ -71,6 +88,17 @@ export default function PlayerScreen() {
       )}
 
       <View style={styles.controls}>
+        <MarkerControls
+          status={status}
+          positionMs={positionMs}
+          markerA={markerA}
+          markerB={markerB}
+          onSetMarkerA={setMarkerA}
+          onSetMarkerB={setMarkerB}
+          onClearMarkers={clearMarkers}
+          style={styles.markers}
+        />
+
         <SeekBar
           positionMs={positionMs}
           durationMs={durationMs}
@@ -116,6 +144,9 @@ const styles = StyleSheet.create({
   controls: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
+  },
+  markers: {
+    marginBottom: spacing.lg,
   },
   errorBanner: {
     flexDirection: 'row',
