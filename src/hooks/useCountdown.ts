@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import * as audioEngine from '../services/audioEngine';
 import * as countdownEngine from '../services/countdownEngine';
 import { CountdownConfig, CountdownState } from '../types';
 
@@ -18,12 +17,18 @@ const IDLE_STATE: CountdownState = {
   currentBeat: 0,
 };
 
-export function useCountdown() {
+interface UseCountdownOptions {
+  onPlay: () => void | Promise<void>;
+}
+
+export function useCountdown({ onPlay }: UseCountdownOptions) {
   const [countdownState, setCountdownState] =
     useState<CountdownState>(IDLE_STATE);
   const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
   const configRef = useRef(config);
   configRef.current = config;
+  const onPlayRef = useRef(onPlay);
+  onPlayRef.current = onPlay;
 
   useEffect(() => {
     const unsub = countdownEngine.subscribe(setCountdownState);
@@ -39,12 +44,12 @@ export function useCountdown() {
   const playWithCountdown = useCallback(async () => {
     const cfg = configRef.current;
     if (!cfg.enabled) {
-      await audioEngine.play();
+      await onPlayRef.current();
       return;
     }
 
     await countdownEngine.start(cfg, () => {
-      void audioEngine.play();
+      void onPlayRef.current();
     });
   }, []);
 

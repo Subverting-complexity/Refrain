@@ -41,23 +41,15 @@ export function CountdownOverlay({
   );
 }
 
-const absoluteFill = {
-  position: 'absolute' as const,
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-};
-
 const styles = StyleSheet.create({
   container: {
-    ...absoluteFill,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
   },
   backdrop: {
-    ...absoluteFill,
+    ...StyleSheet.absoluteFill,
     opacity: 0.85,
   },
   numeral: {

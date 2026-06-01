@@ -64,6 +64,8 @@ async function playClick(): Promise<void> {
   }
 }
 
+let startTimestamp = 0;
+
 async function tick(
   config: CountdownConfig,
   onFinished: () => void,
@@ -96,9 +98,11 @@ async function tick(
   notify(currentState);
 
   const interval = beatIntervalMs(config.bpm);
+  const expectedNext = startTimestamp + nextBeat * interval;
+  const delay = Math.max(0, expectedNext - Date.now());
   timerId = setTimeout(() => {
     void tick(config, onFinished);
-  }, interval);
+  }, delay);
 }
 
 export async function start(
@@ -127,6 +131,7 @@ export async function start(
   notify(currentState);
 
   const interval = beatIntervalMs(config.bpm);
+  startTimestamp = Date.now();
   timerId = setTimeout(() => {
     void tick(config, onFinished);
   }, interval);

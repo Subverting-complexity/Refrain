@@ -28,6 +28,7 @@ export default function PlayerScreen() {
     durationMs,
     markerA,
     markerB,
+    play,
     pause,
     stop,
     seekTo,
@@ -42,7 +43,7 @@ export default function PlayerScreen() {
     setCountdownConfig,
     playWithCountdown,
     cancelCountdown,
-  } = useCountdown();
+  } = useCountdown({ onPlay: play });
 
   const isCounting = countdownState.phase === 'counting';
 

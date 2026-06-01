@@ -15,31 +15,14 @@ jest.mock('expo-av', () => ({
   },
 }));
 
-const mockPlay = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../services/audioEngine', () => ({
-  play: (...args: unknown[]) => mockPlay(...args),
-  pause: jest.fn().mockResolvedValue(undefined),
-  stop: jest.fn().mockResolvedValue(undefined),
-  seekTo: jest.fn().mockResolvedValue(undefined),
-  loadTrack: jest.fn().mockResolvedValue(undefined),
-  unloadTrack: jest.fn().mockResolvedValue(undefined),
-  subscribe: jest.fn().mockReturnValue(jest.fn()),
-  getState: jest.fn().mockReturnValue({
-    status: 'idle',
-    positionMs: 0,
-    durationMs: 0,
-    markerA: null,
-    markerB: null,
-  }),
-}));
-
 import { useCountdown } from '../useCountdown';
 import { CountdownConfig } from '../../types';
 
+const mockPlay = jest.fn().mockResolvedValue(undefined);
 let lastResult: ReturnType<typeof useCountdown>;
 
 function TestComponent() {
-  lastResult = useCountdown();
+  lastResult = useCountdown({ onPlay: mockPlay });
   return null;
 }
 

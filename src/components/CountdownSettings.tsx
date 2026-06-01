@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -34,6 +34,7 @@ export function CountdownSettings({
   style,
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
+  const [bpmText, setBpmText] = useState(String(config.bpm));
 
   const toggleEnabled = () => {
     onConfigChange({ ...config, enabled: !config.enabled });
@@ -47,12 +48,21 @@ export function CountdownSettings({
     onConfigChange({ ...config, duration });
   };
 
-  const setBpm = (text: string) => {
-    const parsed = parseInt(text, 10);
+  const handleBpmChange = (text: string) => {
+    const digits = text.replace(/[^0-9]/g, '');
+    setBpmText(digits);
+    const parsed = parseInt(digits, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed <= 300) {
       onConfigChange({ ...config, bpm: parsed });
     }
   };
+
+  const handleBpmBlur = () => {
+    setBpmText(String(config.bpm));
+  };
+
+  const showBpm =
+    config.mode === 'metronome' || config.duration.type === 'bars';
 
   return (
     <View style={[styles.container, style]}>
@@ -172,7 +182,7 @@ export function CountdownSettings({
             </View>
           </View>
 
-          {config.mode === 'metronome' && (
+          {showBpm && (
             <View style={styles.row}>
               <Text style={[theme.typography.bodySmall, styles.label]}>
                 BPM
@@ -180,8 +190,9 @@ export function CountdownSettings({
               <TextInput
                 accessibilityLabel="BPM"
                 keyboardType="number-pad"
-                value={String(config.bpm)}
-                onChangeText={setBpm}
+                value={bpmText}
+                onChangeText={handleBpmChange}
+                onBlur={handleBpmBlur}
                 maxLength={3}
                 style={[
                   styles.bpmInput,

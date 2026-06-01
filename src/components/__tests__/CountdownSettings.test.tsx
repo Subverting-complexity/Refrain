@@ -132,10 +132,27 @@ describe('CountdownSettings', () => {
     expect(findAllByLabel(tree.root, 'BPM').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('does not show BPM input in silent mode', () => {
+  it('shows BPM input in silent mode with bar-based duration', () => {
     const onChange = jest.fn();
     const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'silent' }),
+      defaultConfig({
+        enabled: true,
+        mode: 'silent',
+        duration: { type: 'bars', bars: 1 },
+      }),
+      onChange,
+    );
+    expect(findAllByLabel(tree.root, 'BPM').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not show BPM input in silent mode with seconds-based duration', () => {
+    const onChange = jest.fn();
+    const tree = renderSettings(
+      defaultConfig({
+        enabled: true,
+        mode: 'silent',
+        duration: { type: 'seconds', seconds: 3 },
+      }),
       onChange,
     );
     expect(findAllByLabel(tree.root, 'BPM')).toHaveLength(0);
