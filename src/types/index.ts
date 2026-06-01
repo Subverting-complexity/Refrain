@@ -46,3 +46,25 @@ export interface PlaybackState {
 }
 
 export type WaveformPeaks = number[];
+
+export type CountdownMode = 'silent' | 'metronome';
+
+export type CountdownDuration =
+  | { type: 'bars'; bars: 1 | 2 | 4 }
+  | { type: 'seconds'; seconds: number };
+
+export interface CountdownConfig {
+  enabled: boolean;
+  mode: CountdownMode;
+  duration: CountdownDuration;
+  bpm: number;
+}
+
+export type CountdownPhase = 'idle' | 'counting' | 'finished';
+
+export interface CountdownState {
+  phase: CountdownPhase;
+  beatsRemaining: number;
+  totalBeats: number;
+  currentBeat: number;
+}
