@@ -8,11 +8,15 @@ const IDLE_STATE: PlaybackState = {
   status: 'idle',
   positionMs: 0,
   durationMs: 0,
+  markerA: null,
+  markerB: null,
 };
 
 let sound: Audio.Sound | null = null;
 const listeners = new Set<PlaybackListener>();
 let currentState: PlaybackState = { ...IDLE_STATE };
+let markerA: number | null = null;
+let markerB: number | null = null;
 
 function notify(state: PlaybackState): void {
   for (const cb of listeners) {
@@ -22,7 +26,7 @@ function notify(state: PlaybackState): void {
 
 function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
   if (!avStatus.isLoaded) {
-    return { ...IDLE_STATE };
+    return { ...IDLE_STATE, markerA, markerB };
   }
 
   let status: PlaybackStatus = 'paused';
@@ -36,12 +40,20 @@ function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
     status,
     positionMs: avStatus.positionMillis,
     durationMs: avStatus.durationMillis ?? 0,
+    markerA,
+    markerB,
   };
 }
 
 function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
   if (!avStatus.isLoaded && avStatus.error) {
-    currentState = { status: 'error', positionMs: 0, durationMs: 0 };
+    currentState = {
+      status: 'error',
+      positionMs: 0,
+      durationMs: 0,
+      markerA,
+      markerB,
+    };
     notify(currentState);
     return;
   }
@@ -53,6 +65,17 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
     newState.positionMs = newState.durationMs;
   }
 
+  if (
+    avStatus.isLoaded &&
+    avStatus.isPlaying &&
+    markerA != null &&
+    markerB != null &&
+    newState.positionMs >= markerB
+  ) {
+    sound?.setPositionAsync(markerA);
+    return;
+  }
+
   currentState = newState;
   notify(currentState);
 }
@@ -60,7 +83,13 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
 export async function loadTrack(uri: string): Promise<void> {
   await unloadTrack();
 
-  currentState = { status: 'loading', positionMs: 0, durationMs: 0 };
+  currentState = {
+    status: 'loading',
+    positionMs: 0,
+    durationMs: 0,
+    markerA: null,
+    markerB: null,
+  };
   notify(currentState);
 
   try {
@@ -76,7 +105,13 @@ export async function loadTrack(uri: string): Promise<void> {
     );
     sound = newSound;
   } catch {
-    currentState = { status: 'error', positionMs: 0, durationMs: 0 };
+    currentState = {
+      status: 'error',
+      positionMs: 0,
+      durationMs: 0,
+      markerA: null,
+      markerB: null,
+    };
     notify(currentState);
   }
 }
@@ -88,7 +123,7 @@ export async function play(): Promise<void> {
     currentState.positionMs >= currentState.durationMs &&
     currentState.durationMs > 0
   ) {
-    await sound.setPositionAsync(0);
+    await sound.setPositionAsync(markerA ?? 0);
   }
   await sound.playAsync();
 }
@@ -101,7 +136,7 @@ export async function pause(): Promise<void> {
 export async function stop(): Promise<void> {
   if (!sound) return;
   await sound.stopAsync();
-  await sound.setPositionAsync(0);
+  await sound.setPositionAsync(markerA ?? 0);
 }
 
 export async function seekTo(positionMs: number): Promise<void> {
@@ -115,7 +150,32 @@ export async function unloadTrack(): Promise<void> {
     await sound.unloadAsync();
     sound = null;
   }
+  markerA = null;
+  markerB = null;
   currentState = { ...IDLE_STATE };
+  notify(currentState);
+}
+
+export function setMarkerA(positionMs: number): void {
+  markerA = positionMs;
+  if (markerB != null && positionMs >= markerB) {
+    markerB = null;
+  }
+  currentState = { ...currentState, markerA, markerB };
+  notify(currentState);
+}
+
+export function setMarkerB(positionMs: number): void {
+  if (markerA != null && positionMs <= markerA) return;
+  markerB = positionMs;
+  currentState = { ...currentState, markerB };
+  notify(currentState);
+}
+
+export function clearMarkers(): void {
+  markerA = null;
+  markerB = null;
+  currentState = { ...currentState, markerA: null, markerB: null };
   notify(currentState);
 }
 

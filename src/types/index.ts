@@ -41,6 +41,8 @@ export interface PlaybackState {
   status: PlaybackStatus;
   positionMs: number;
   durationMs: number;
+  markerA: number | null;
+  markerB: number | null;
 }
 
 export type WaveformPeaks = number[];

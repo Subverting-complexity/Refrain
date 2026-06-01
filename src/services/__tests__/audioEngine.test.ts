@@ -111,6 +111,23 @@ describe('audioEngine', () => {
         expect.objectContaining({ status: 'loading' }),
       );
     });
+
+    it('clears markers when loading a new track', async () => {
+      const { loadTrack, setMarkerA, subscribe } = require('../audioEngine');
+      await loadTrack('file:///first.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      await loadTrack('file:///second.mp3');
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: null, markerB: null }),
+      );
+    });
   });
 
   describe('play', () => {
@@ -132,7 +149,22 @@ describe('audioEngine', () => {
       expect(mockPlayAsync).not.toHaveBeenCalled();
     });
 
-    it('resets position when playing after track finished', async () => {
+    it('resets position to markerA when playing after track finished', async () => {
+      const { loadTrack, play, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(10000);
+      statusCallback?.(
+        makeLoadedStatus({ didJustFinish: true, positionMillis: 60000 }),
+      );
+      await play();
+
+      expect(mockSetPositionAsync).toHaveBeenCalledWith(10000);
+      expect(mockPlayAsync).toHaveBeenCalled();
+    });
+
+    it('resets position to 0 when playing after track finished with no markers', async () => {
       const { loadTrack, play } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
@@ -174,6 +206,18 @@ describe('audioEngine', () => {
 
       expect(mockStopAsync).toHaveBeenCalled();
       expect(mockSetPositionAsync).toHaveBeenCalledWith(0);
+    });
+
+    it('resets position to markerA when markers are set', async () => {
+      const { loadTrack, stop, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      await stop();
+
+      expect(mockStopAsync).toHaveBeenCalled();
+      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
     });
 
     it('does nothing when no sound is loaded', async () => {
@@ -219,6 +263,31 @@ describe('audioEngine', () => {
       expect(mockUnloadAsync).toHaveBeenCalled();
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'idle', positionMs: 0 }),
+      );
+    });
+
+    it('clears markers on unload', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        unloadTrack,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      await unloadTrack();
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: null, markerB: null }),
       );
     });
   });
@@ -296,6 +365,8 @@ describe('audioEngine', () => {
         status: 'idle',
         positionMs: 0,
         durationMs: 0,
+        markerA: null,
+        markerB: null,
       });
     });
   });
@@ -313,11 +384,13 @@ describe('audioEngine', () => {
         makeLoadedStatus({ isPlaying: true, positionMillis: 5000 }),
       );
 
-      expect(listener).toHaveBeenCalledWith({
-        status: 'playing',
-        positionMs: 5000,
-        durationMs: 60000,
-      });
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'playing',
+          positionMs: 5000,
+          durationMs: 60000,
+        }),
+      );
     });
 
     it('reports paused status when finished', async () => {
@@ -332,11 +405,13 @@ describe('audioEngine', () => {
         makeLoadedStatus({ didJustFinish: true, positionMillis: 60000 }),
       );
 
-      expect(listener).toHaveBeenCalledWith({
-        status: 'paused',
-        positionMs: 60000,
-        durationMs: 60000,
-      });
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'paused',
+          positionMs: 60000,
+          durationMs: 60000,
+        }),
+      );
     });
 
     it('reports error on playback error status', async () => {
@@ -349,11 +424,13 @@ describe('audioEngine', () => {
 
       statusCallback?.({ isLoaded: false, error: 'playback error' });
 
-      expect(listener).toHaveBeenCalledWith({
-        status: 'error',
-        positionMs: 0,
-        durationMs: 0,
-      });
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'error',
+          positionMs: 0,
+          durationMs: 0,
+        }),
+      );
     });
 
     it('reports loading status when buffering', async () => {
@@ -369,6 +446,210 @@ describe('audioEngine', () => {
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'loading' }),
       );
+    });
+  });
+
+  describe('setMarkerA', () => {
+    it('sets markerA and notifies listeners', async () => {
+      const { loadTrack, setMarkerA, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      subscribe(listener);
+      listener.mockClear();
+
+      setMarkerA(5000);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: 5000, markerB: null }),
+      );
+    });
+
+    it('clears markerB when new A >= existing B', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setMarkerA(15000);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: 15000, markerB: null }),
+      );
+    });
+  });
+
+  describe('setMarkerB', () => {
+    it('sets markerB when A is set and B > A', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setMarkerB(10000);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: 5000, markerB: 10000 }),
+      );
+    });
+
+    it('rejects markerB when <= markerA', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(10000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setMarkerB(5000);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clearMarkers', () => {
+    it('resets both markers to null', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        clearMarkers,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      clearMarkers();
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: null, markerB: null }),
+      );
+    });
+  });
+
+  describe('loop-back behavior', () => {
+    it('seeks to markerA when position reaches markerB during playback', async () => {
+      const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockSetPositionAsync.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
+      );
+
+      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
+    });
+
+    it('seeks to markerA when position overshoots markerB', async () => {
+      const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockSetPositionAsync.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 15050 }),
+      );
+
+      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
+    });
+
+    it('does not loop back when not playing', async () => {
+      const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockSetPositionAsync.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: false, positionMillis: 15000 }),
+      );
+
+      expect(mockSetPositionAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not loop back when only markerA is set', async () => {
+      const { loadTrack, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      mockSetPositionAsync.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 50000 }),
+      );
+
+      expect(mockSetPositionAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not notify listeners during loop-back seek', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
+      );
+
+      expect(listener).not.toHaveBeenCalled();
     });
   });
 });
