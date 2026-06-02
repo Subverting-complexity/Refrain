@@ -24,7 +24,7 @@ async function migrateFromJson(): Promise<void> {
         track.uri,
         track.format,
         track.durationMs,
-        track.durationEstimated ? 1 : 0,
+        track.durationEstimated === false ? 0 : 1,
         track.fileSizeBytes,
         track.importedAt,
       );

@@ -21,8 +21,11 @@ export function getDatabase(): SQLite.SQLiteDatabase {
       db.execSync(
         `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
       );
-    } catch {
-      // Column already exists — safe to ignore
+    } catch (e: unknown) {
+      // Swallow only "duplicate column" errors; anything else is unexpected
+      if (!(e instanceof Error) || !e.message.includes('duplicate column')) {
+        throw e;
+      }
     }
   }
   return db;

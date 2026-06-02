@@ -43,8 +43,12 @@ export default function PlayerScreen() {
   const durationPersisted = useRef(false);
   useEffect(() => {
     if (trackId && durationMs > 0 && !durationPersisted.current) {
-      durationPersisted.current = true;
-      updateTrackDuration(trackId, durationMs);
+      try {
+        updateTrackDuration(trackId, durationMs);
+        durationPersisted.current = true;
+      } catch {
+        // DB write failed — will retry on next durationMs update
+      }
     }
   }, [trackId, durationMs]);
 
