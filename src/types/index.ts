@@ -44,6 +44,8 @@ export interface PlaybackState {
   durationMs: number;
   markerA: number | null;
   markerB: number | null;
+  /** Human-readable reason the track failed to load/play. Set only when status is 'error'. */
+  lastError?: string;
 }
 
 export type WaveformPeaks = number[];

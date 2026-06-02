@@ -21,9 +21,12 @@ export function useAudioPlayer(trackUri: string | null) {
 
   useEffect(() => {
     if (!trackUri) return;
-    audioEngine.loadTrack(trackUri);
+    // loadTrack handles its own errors internally and reports them via the
+    // 'error' status; the .catch() is defence-in-depth so a rejection here
+    // can never become an unhandled promise rejection.
+    void audioEngine.loadTrack(trackUri).catch(() => undefined);
     return () => {
-      audioEngine.unloadTrack();
+      void audioEngine.unloadTrack().catch(() => undefined);
     };
   }, [trackUri]);
 
