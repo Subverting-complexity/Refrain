@@ -141,6 +141,8 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   markerLabel: {
     fontSize: 18,
@@ -158,5 +160,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
