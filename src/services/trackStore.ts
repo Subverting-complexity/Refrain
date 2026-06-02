@@ -1,4 +1,4 @@
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import { Track } from '../types';
 import { getDatabase } from './database';
@@ -90,5 +90,57 @@ export function updateTrackDuration(id: string, durationMs: number): void {
 
 export function deleteTrack(id: string): void {
   const db = getDatabase();
+  const row = db.getFirstSync<{ uri: string }>(
+    'SELECT uri FROM tracks WHERE id = ?',
+    id,
+  );
   db.runSync('DELETE FROM tracks WHERE id = ?', id);
+  if (row?.uri) {
+    deleteFileIfExists(row.uri);
+  }
+}
+
+/**
+ * Deletes a file at the given URI if it exists. Never throws — a missing
+ * file or a delete failure is treated as a no-op so callers (e.g. track
+ * removal) are not interrupted by filesystem state.
+ */
+function deleteFileIfExists(uri: string): void {
+  try {
+    const file = new File(uri);
+    if (file.exists) {
+      file.delete();
+    }
+  } catch {
+    // File already gone or cannot be deleted — non-fatal.
+  }
+}
+
+/**
+ * Defensive crash-recovery sweep: deletes any file in the tracks directory
+ * whose id is not present in the database. Best-effort — never throws.
+ * Returns the number of orphan files removed.
+ */
+export function cleanupOrphanFiles(): number {
+  const db = getDatabase();
+  let removed = 0;
+  try {
+    const tracksDir = new Directory(Paths.document, 'tracks');
+    if (!tracksDir.exists) return 0;
+
+    const rows = db.getAllSync<{ id: string }>('SELECT id FROM tracks');
+    const knownIds = new Set(rows.map((r) => r.id));
+
+    for (const entry of tracksDir.list()) {
+      if (!(entry instanceof File)) continue;
+      const id = entry.name.replace(/\.[^.]+$/, '');
+      if (!knownIds.has(id)) {
+        deleteFileIfExists(entry.uri);
+        removed += 1;
+      }
+    }
+  } catch {
+    // Directory unreadable or listing failed — non-fatal.
+  }
+  return removed;
 }
