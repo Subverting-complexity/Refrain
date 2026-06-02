@@ -44,7 +44,11 @@ jest.mock('expo-file-system', () => ({
   })),
 }));
 
-function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
+function createWavBuffer(
+  samples: number[],
+  bitsPerSample = 16,
+  audioFormat = 1,
+): ArrayBuffer {
   const numChannels = 1;
   const sampleRate = 44100;
   const bytesPerSample = bitsPerSample / 8;
@@ -61,7 +65,7 @@ function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
   // fmt chunk
   view.setUint32(12, 0x666d7420, false); // "fmt "
   view.setUint32(16, 16, true); // chunk size
-  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(20, audioFormat, true); // 1 = PCM, 3 = IEEE float
   view.setUint16(22, numChannels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
@@ -72,11 +76,14 @@ function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
   view.setUint32(36, 0x64617461, false); // "data"
   view.setUint32(40, dataSize, true);
 
+  const isFloat = audioFormat === 3;
   for (let i = 0; i < samples.length; i++) {
     if (bytesPerSample === 2) {
       view.setInt16(headerSize + i * 2, Math.round(samples[i] * 32767), true);
     } else if (bytesPerSample === 1) {
       view.setUint8(headerSize + i, Math.round(samples[i] * 127 + 128));
+    } else if (bytesPerSample === 4 && isFloat) {
+      view.setFloat32(headerSize + i * 4, samples[i], true);
     } else if (bytesPerSample === 4) {
       view.setInt32(
         headerSize + i * 4,
@@ -158,6 +165,54 @@ describe('extractPeaks', () => {
 
       expect(peaks).toHaveLength(10);
       expect(Math.max(...peaks)).toBeCloseTo(1, 1);
+      peaks.forEach((p) => {
+        expect(p).toBeGreaterThanOrEqual(0.05);
+        expect(p).toBeLessThanOrEqual(1);
+      });
+    });
+
+    it('extracts peaks from a 32-bit IEEE float WAV file', async () => {
+      const samples = Array.from({ length: 400 }, (_, i) =>
+        Math.sin((i / 400) * Math.PI * 2),
+      );
+      setMockFile(createWavBuffer(samples, 32, 3));
+
+      const peaks = await extractPeaks('file:///test.wav', 10);
+
+      expect(peaks).toHaveLength(10);
+      expect(Math.max(...peaks)).toBeCloseTo(1, 1);
+      peaks.forEach((p) => {
+        expect(p).toBeGreaterThanOrEqual(0.05);
+        expect(p).toBeLessThanOrEqual(1);
+      });
+    });
+
+    it('decodes float amplitude envelope (not garbage from int misread)', async () => {
+      // Loud first half, quiet second half. Correct float decoding yields a
+      // clear high-to-low envelope; reading the float bytes as Int32 (the bug)
+      // would flatten both halves to near-identical values.
+      const samples = Array.from({ length: 400 }, (_, i) =>
+        i < 200 ? Math.sin((i / 50) * Math.PI * 2) : 0.05 * Math.sin(i),
+      );
+      setMockFile(createWavBuffer(samples, 32, 3));
+
+      const peaks = await extractPeaks('file:///test.wav', 10);
+
+      const loud = Math.max(...peaks.slice(0, 5));
+      const quiet = Math.max(...peaks.slice(5));
+      expect(loud).toBeGreaterThan(quiet * 3);
+    });
+
+    it('falls back to compressed derivation for unsupported WAV format', async () => {
+      // audioFormat 0xFFFE (WAVE_FORMAT_EXTENSIBLE) is not directly decodable.
+      const samples = Array.from({ length: 400 }, (_, i) =>
+        Math.sin((i / 400) * Math.PI * 2),
+      );
+      setMockFile(createWavBuffer(samples, 16, 0xfffe));
+
+      const peaks = await extractPeaks('file:///test.wav', 10);
+
+      expect(peaks).toHaveLength(10);
       peaks.forEach((p) => {
         expect(p).toBeGreaterThanOrEqual(0.05);
         expect(p).toBeLessThanOrEqual(1);
