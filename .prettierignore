@@ -1,0 +1,5 @@
+# Generated coverage reports
+coverage/
+
+# Agent/editor workspace artifacts (not application source)
+.claude/

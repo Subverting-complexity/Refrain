@@ -160,6 +160,51 @@ describe('WaveformView', () => {
     expect(onSeek).toHaveBeenCalledWith(5000);
   });
 
+  it('maps a tap at the bars left edge to position 0 (padding-aware)', () => {
+    const onSeek = jest.fn();
+    const tree = renderWaveform({ onSeek, durationMs: 10000 });
+
+    const touchArea = getTouchArea(tree);
+
+    act(() => {
+      touchArea.props.onLayout({
+        nativeEvent: { layout: { width: 300 } },
+      });
+    });
+
+    // The bars start HORIZONTAL_PADDING (spacing.md = 12) in from the edge,
+    // so a tap there is the start of the track, not a positive offset.
+    act(() => {
+      touchArea.props.onResponderGrant({
+        nativeEvent: { locationX: 12 },
+      });
+    });
+
+    expect(onSeek).toHaveBeenCalledWith(0);
+  });
+
+  it('maps a tap at the bars right edge to the full duration', () => {
+    const onSeek = jest.fn();
+    const tree = renderWaveform({ onSeek, durationMs: 10000 });
+
+    const touchArea = getTouchArea(tree);
+
+    act(() => {
+      touchArea.props.onLayout({
+        nativeEvent: { layout: { width: 300 } },
+      });
+    });
+
+    // Right edge of the bars sits at width - HORIZONTAL_PADDING = 288.
+    act(() => {
+      touchArea.props.onResponderGrant({
+        nativeEvent: { locationX: 288 },
+      });
+    });
+
+    expect(onSeek).toHaveBeenCalledWith(10000);
+  });
+
   it('renders A/B marker lines when provided', () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
@@ -306,7 +351,9 @@ describe('WaveformView', () => {
         });
       });
 
-      expect(onMarkerAChange).toHaveBeenCalledWith(6000);
+      // Bars are inset by HORIZONTAL_PADDING (spacing.md = 12) on each side,
+      // so the track spans 276px: (180 - 12) / 276 * 10000 = 6087ms.
+      expect(onMarkerAChange).toHaveBeenCalledWith(6087);
       expect(onSeek).not.toHaveBeenCalled();
     });
 
