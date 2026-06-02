@@ -48,6 +48,9 @@ function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   statusCallback = null;
+  // setPositionAsync returns a Promise in expo-av; mirror that so callers can
+  // chain .catch on it.
+  mockSetPositionAsync.mockResolvedValue(undefined);
 });
 
 describe('audioEngine', () => {
@@ -654,7 +657,39 @@ describe('audioEngine', () => {
       expect(mockSetPositionAsync).not.toHaveBeenCalled();
     });
 
-    it('does not notify listeners during loop-back seek', async () => {
+    it('notifies listeners with position clamped to markerA on loop-back', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      // Overshoot marker B by ~50ms; the published position should snap back to
+      // marker A rather than reporting the overshoot point.
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 15050 }),
+      );
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'playing',
+          positionMs: 5000,
+        }),
+      );
+    });
+
+    it('does not throw and reports error when the loop-back seek rejects', async () => {
+      mockSetPositionAsync.mockRejectedValueOnce(new Error('seek failed'));
       const {
         loadTrack,
         setMarkerA,
@@ -675,7 +710,16 @@ describe('audioEngine', () => {
         makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
       );
 
-      expect(listener).not.toHaveBeenCalled();
+      // Let the rejected setPositionAsync promise settle.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'error',
+          lastError: 'seek failed',
+        }),
+      );
     });
   });
 });

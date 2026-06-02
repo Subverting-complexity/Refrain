@@ -79,7 +79,26 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
     markerB != null &&
     newState.positionMs >= markerB
   ) {
-    sound?.setPositionAsync(markerA);
+    // Clamp the published position to marker A so the cursor jumps cleanly back
+    // to the loop start instead of stalling at the overshoot point (up to
+    // progressUpdateIntervalMillis past marker B) until the next status update.
+    newState.positionMs = markerA;
+    currentState = newState;
+    notify(currentState);
+
+    // Fire-and-forget would leak an unhandled rejection if the seek fails;
+    // catch it and surface as an error state.
+    void sound?.setPositionAsync(markerA).catch((err) => {
+      currentState = {
+        status: 'error',
+        positionMs: currentState.positionMs,
+        durationMs: currentState.durationMs,
+        markerA,
+        markerB,
+        lastError: errorMessage(err),
+      };
+      notify(currentState);
+    });
     return;
   }
 
