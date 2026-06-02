@@ -9,16 +9,12 @@ import {
   ViewStyle,
 } from 'react-native';
 
+import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
 
 const SEEK_STEP_MS = 5000;
-
-// Throttle native seeks during drag to ~20/sec. The native bridge
-// (setPositionAsync) is the bottleneck, not React, so the visual bar still
-// updates every frame — only the native call is rate-limited.
-const SEEK_THROTTLE_MS = 50;
 
 interface SeekBarProps {
   positionMs: number;
@@ -40,9 +36,7 @@ export function SeekBar({
   // While dragging, this local ratio drives the visual so the bar stays
   // smooth even though native seeks are throttled. null = not dragging.
   const [dragRatio, setDragRatio] = useState<number | null>(null);
-  const lastSeekAt = useRef(0);
-  const lastSeekPosition = useRef<number | null>(null);
-  const pendingPosition = useRef<number | null>(null);
+  const seekThrottle = useDragThrottle();
   const displayProgress = dragRatio ?? progress;
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
@@ -66,14 +60,10 @@ export function SeekBar({
     (e: GestureResponderEvent) => {
       const ratio = ratioFromEvent(e);
       if (ratio === null) return;
-      const position = Math.round(ratio * durationMs);
       setDragRatio(ratio);
-      pendingPosition.current = position;
-      lastSeekAt.current = Date.now();
-      lastSeekPosition.current = position;
-      onSeek(position);
+      seekThrottle.begin(Math.round(ratio * durationMs), onSeek);
     },
-    [ratioFromEvent, durationMs, onSeek],
+    [ratioFromEvent, durationMs, onSeek, seekThrottle],
   );
 
   // Drag move: update the visual every frame, but throttle native seeks.
@@ -81,34 +71,18 @@ export function SeekBar({
     (e: GestureResponderEvent) => {
       const ratio = ratioFromEvent(e);
       if (ratio === null) return;
-      const position = Math.round(ratio * durationMs);
       setDragRatio(ratio);
-      pendingPosition.current = position;
-      const now = Date.now();
-      if (now - lastSeekAt.current >= SEEK_THROTTLE_MS) {
-        lastSeekAt.current = now;
-        lastSeekPosition.current = position;
-        onSeek(position);
-      }
+      seekThrottle.move(Math.round(ratio * durationMs));
     },
-    [ratioFromEvent, durationMs, onSeek],
+    [ratioFromEvent, durationMs, seekThrottle],
   );
 
-  // Drag end (or interruption): fire one final, unthrottled seek so the
-  // committed position is accurate, then drop back to the prop-driven visual.
-  // Skip it when the last position was already seeked (e.g. a pure tap, or a
-  // drag whose final move wasn't throttled) to avoid a redundant native call.
+  // Drag end (or interruption): commit the final seek, then drop back to
+  // the prop-driven visual.
   const handleRelease = useCallback(() => {
-    if (
-      pendingPosition.current !== null &&
-      pendingPosition.current !== lastSeekPosition.current
-    ) {
-      onSeek(pendingPosition.current);
-    }
-    pendingPosition.current = null;
-    lastSeekPosition.current = null;
+    seekThrottle.end();
     setDragRatio(null);
-  }, [onSeek]);
+  }, [seekThrottle]);
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
