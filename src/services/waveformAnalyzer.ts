@@ -7,6 +7,12 @@ const WAV_HEADER_RIFF = 0x52494646;
 const WAV_FORMAT_CHUNK = 0x666d7420;
 const WAV_DATA_CHUNK = 0x64617461;
 
+// `fmt ` chunk audioFormat codes. PCM stores integer samples; IEEE float
+// stores 32/64-bit floats. 32-bit WAVs are almost always float, so they must
+// be distinguished from genuine 32-bit PCM before decoding.
+const WAV_AUDIO_FORMAT_PCM = 1;
+const WAV_AUDIO_FORMAT_IEEE_FLOAT = 3;
+
 // Size of each streamed read window. Bounds peak memory to this plus the
 // (tiny) peaks array, instead of buffering the entire file at once.
 const READ_WINDOW_BYTES = 256 * 1024;
@@ -53,6 +59,7 @@ function readSample(
   view: DataView,
   byteOffset: number,
   bytesPerSample: number,
+  audioFormat: number,
 ): number {
   if (bytesPerSample === 2) {
     return view.getInt16(byteOffset, true) / 32768;
@@ -61,7 +68,10 @@ function readSample(
     return (view.getUint8(byteOffset) - 128) / 128;
   }
   if (bytesPerSample === 4) {
-    return view.getInt32(byteOffset, true) / 2147483648;
+    // 32-bit WAVs are typically IEEE float; only genuine PCM is Int32.
+    return audioFormat === WAV_AUDIO_FORMAT_IEEE_FLOAT
+      ? view.getFloat32(byteOffset, true)
+      : view.getInt32(byteOffset, true) / 2147483648;
   }
   return 0;
 }
@@ -71,7 +81,27 @@ type WavDataLayout = {
   dataSize: number;
   bytesPerSample: number;
   bytesPerFrame: number;
+  audioFormat: number;
 };
+
+/**
+ * Whether the sample decoder supports this format/bit-depth pair. Anything
+ * else (e.g. WAVE_FORMAT_EXTENSIBLE, 64-bit float, compressed codecs) returns
+ * false so the caller falls back to byte-magnitude derivation rather than
+ * emitting garbage peaks.
+ */
+function isSupportedWavFormat(
+  audioFormat: number,
+  bytesPerSample: number,
+): boolean {
+  if (audioFormat === WAV_AUDIO_FORMAT_PCM) {
+    return bytesPerSample === 1 || bytesPerSample === 2 || bytesPerSample === 4;
+  }
+  if (audioFormat === WAV_AUDIO_FORMAT_IEEE_FLOAT) {
+    return bytesPerSample === 4;
+  }
+  return false;
+}
 
 /**
  * Walks the WAV chunk headers using small reads to locate the `data` chunk and
@@ -92,6 +122,7 @@ function locateWavData(reader: ByteReader): WavDataLayout | null {
   let offset = 12;
   let bitsPerSample = 16;
   let numChannels = 1;
+  let audioFormat = WAV_AUDIO_FORMAT_PCM;
 
   while (offset + 8 <= reader.size) {
     const chunkHeader = reader.readAt(offset, 8);
@@ -112,6 +143,7 @@ function locateWavData(reader: ByteReader): WavDataLayout | null {
           fmt.byteOffset,
           fmt.byteLength,
         );
+        audioFormat = fmtView.getUint16(0, true);
         numChannels = fmtView.getUint16(2, true);
         bitsPerSample = fmtView.getUint16(14, true);
       }
@@ -119,11 +151,13 @@ function locateWavData(reader: ByteReader): WavDataLayout | null {
       const bytesPerSample = bitsPerSample / 8;
       const bytesPerFrame = bytesPerSample * Math.max(1, numChannels);
       if (bytesPerFrame <= 0) return null;
+      if (!isSupportedWavFormat(audioFormat, bytesPerSample)) return null;
       return {
         dataOffset: offset + 8,
         dataSize: chunkSize,
         bytesPerSample,
         bytesPerFrame,
+        audioFormat,
       };
     }
 
@@ -146,7 +180,8 @@ function parseWavPeaks(
   const layout = locateWavData(reader);
   if (!layout) return null;
 
-  const { dataOffset, dataSize, bytesPerSample, bytesPerFrame } = layout;
+  const { dataOffset, dataSize, bytesPerSample, bytesPerFrame, audioFormat } =
+    layout;
   const availableBytes = Math.max(
     0,
     Math.min(dataSize, reader.size - dataOffset),
@@ -183,7 +218,12 @@ function parseWavPeaks(
     for (let i = 0; i < readableFrames; i++) {
       const bucket = Math.floor((frame + i) / framesPerBucket);
       if (bucket >= bucketCount) break;
-      const sample = readSample(view, i * bytesPerFrame, bytesPerSample);
+      const sample = readSample(
+        view,
+        i * bytesPerFrame,
+        bytesPerSample,
+        audioFormat,
+      );
       sumSquares[bucket] += sample * sample;
       counts[bucket] += 1;
     }
