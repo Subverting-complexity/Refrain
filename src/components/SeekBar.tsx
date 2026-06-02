@@ -41,6 +41,7 @@ export function SeekBar({
   // smooth even though native seeks are throttled. null = not dragging.
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const lastSeekAt = useRef(0);
+  const lastSeekPosition = useRef<number | null>(null);
   const pendingPosition = useRef<number | null>(null);
   const displayProgress = dragRatio ?? progress;
 
@@ -69,6 +70,7 @@ export function SeekBar({
       setDragRatio(ratio);
       pendingPosition.current = position;
       lastSeekAt.current = Date.now();
+      lastSeekPosition.current = position;
       onSeek(position);
     },
     [ratioFromEvent, durationMs, onSeek],
@@ -85,6 +87,7 @@ export function SeekBar({
       const now = Date.now();
       if (now - lastSeekAt.current >= SEEK_THROTTLE_MS) {
         lastSeekAt.current = now;
+        lastSeekPosition.current = position;
         onSeek(position);
       }
     },
@@ -93,11 +96,17 @@ export function SeekBar({
 
   // Drag end (or interruption): fire one final, unthrottled seek so the
   // committed position is accurate, then drop back to the prop-driven visual.
+  // Skip it when the last position was already seeked (e.g. a pure tap, or a
+  // drag whose final move wasn't throttled) to avoid a redundant native call.
   const handleRelease = useCallback(() => {
-    if (pendingPosition.current !== null) {
+    if (
+      pendingPosition.current !== null &&
+      pendingPosition.current !== lastSeekPosition.current
+    ) {
       onSeek(pendingPosition.current);
-      pendingPosition.current = null;
     }
+    pendingPosition.current = null;
+    lastSeekPosition.current = null;
     setDragRatio(null);
   }, [onSeek]);
 

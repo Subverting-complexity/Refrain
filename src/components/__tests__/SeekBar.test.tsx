@@ -179,6 +179,49 @@ describe('SeekBar', () => {
       expect(onSeek).toHaveBeenLastCalledWith(2500);
     });
 
+    it('does not fire a redundant seek on release after a pure tap', () => {
+      const onSeek = jest.fn();
+      const tree = renderSeekBar({ durationMs: 10000, onSeek });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
+      });
+      act(() => {
+        touchArea.props.onResponderRelease();
+      });
+
+      // Tap already seeked on grant; release must not repeat the same seek.
+      expect(onSeek).toHaveBeenCalledTimes(1);
+      expect(onSeek).toHaveBeenCalledWith(5000);
+    });
+
+    it('does not re-fire on release when the final move already seeked', () => {
+      const onSeek = jest.fn();
+      const tree = renderSeekBar({ durationMs: 10000, onSeek });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 0 } });
+      });
+      // Move past the throttle window so it seeks (3000), recording it.
+      nowSpy.mockReturnValue(1100);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 90 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(2);
+
+      nowSpy.mockReturnValue(1110);
+      act(() => {
+        touchArea.props.onResponderRelease();
+      });
+      // Final position already committed by the move — no extra seek.
+      expect(onSeek).toHaveBeenCalledTimes(2);
+      expect(onSeek).toHaveBeenLastCalledWith(3000);
+    });
+
     it('restores prop-driven visual after release', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
