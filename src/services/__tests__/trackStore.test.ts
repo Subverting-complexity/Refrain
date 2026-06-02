@@ -118,6 +118,21 @@ describe('loadTracks', () => {
     );
   });
 
+  it('sweeps orphan files on load', async () => {
+    jest.resetModules();
+
+    mockGetAllSync.mockReturnValue([{ ...sampleTrack, durationEstimated: 1 }]);
+    mockDirEntries = [
+      { name: 'track-1.mp3', uri: sampleTrack.uri },
+      { name: 'orphan.wav', uri: 'file:///data/tracks/orphan.wav' },
+    ];
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks();
+
+    expect(mockDelete).toHaveBeenCalledWith('file:///data/tracks/orphan.wav');
+  });
+
   it('converts durationEstimated 0 to false', async () => {
     jest.resetModules();
 

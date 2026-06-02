@@ -56,6 +56,7 @@ function rowToTrack(row: TrackRow): Track {
 
 export async function loadTracks(): Promise<Track[]> {
   await migrateFromJson();
+  cleanupOrphanFiles();
   const db = getDatabase();
   const rows = db.getAllSync<TrackRow>(
     'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks ORDER BY importedAt DESC',
