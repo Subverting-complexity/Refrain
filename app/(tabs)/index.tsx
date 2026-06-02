@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ImportButton } from '@/src/components/ImportButton';
@@ -28,9 +28,11 @@ export default function LibraryScreen() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => {
-    loadTracks().then(setTracks);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadTracks().then(setTracks);
+    }, []),
+  );
 
   const addTrack = useCallback((track: Track) => {
     try {
@@ -73,7 +75,7 @@ export default function LibraryScreen() {
     (track: Track) => {
       router.push({
         pathname: '/player',
-        params: { uri: track.uri, filename: track.filename },
+        params: { uri: track.uri, filename: track.filename, trackId: track.id },
       });
     },
     [router],

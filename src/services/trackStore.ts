@@ -17,13 +17,14 @@ async function migrateFromJson(): Promise<void> {
     const db = getDatabase();
     for (const track of tracks) {
       db.runSync(
-        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, fileSizeBytes, importedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         track.id,
         track.filename,
         track.uri,
         track.format,
         track.durationMs,
+        track.durationEstimated === false ? 0 : 1,
         track.fileSizeBytes,
         track.importedAt,
       );
@@ -34,26 +35,56 @@ async function migrateFromJson(): Promise<void> {
   }
 }
 
+interface TrackRow {
+  id: string;
+  filename: string;
+  uri: string;
+  format: string;
+  durationMs: number;
+  durationEstimated: number;
+  fileSizeBytes: number;
+  importedAt: number;
+}
+
+function rowToTrack(row: TrackRow): Track {
+  return {
+    ...row,
+    format: row.format as Track['format'],
+    durationEstimated: row.durationEstimated === 1,
+  };
+}
+
 export async function loadTracks(): Promise<Track[]> {
   await migrateFromJson();
   const db = getDatabase();
-  return db.getAllSync<Track>(
-    'SELECT id, filename, uri, format, durationMs, fileSizeBytes, importedAt FROM tracks ORDER BY importedAt DESC',
+  const rows = db.getAllSync<TrackRow>(
+    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks ORDER BY importedAt DESC',
   );
+  return rows.map(rowToTrack);
 }
 
 export function insertTrack(track: Track): void {
   const db = getDatabase();
   db.runSync(
-    `INSERT INTO tracks (id, filename, uri, format, durationMs, fileSizeBytes, importedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     track.id,
     track.filename,
     track.uri,
     track.format,
     track.durationMs,
+    track.durationEstimated ? 1 : 0,
     track.fileSizeBytes,
     track.importedAt,
+  );
+}
+
+export function updateTrackDuration(id: string, durationMs: number): void {
+  const db = getDatabase();
+  db.runSync(
+    'UPDATE tracks SET durationMs = ?, durationEstimated = 0 WHERE id = ?',
+    durationMs,
+    id,
   );
 }
 

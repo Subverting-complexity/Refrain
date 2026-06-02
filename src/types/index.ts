@@ -6,6 +6,7 @@ export interface Track {
   uri: string;
   format: AudioFormat;
   durationMs: number;
+  durationEstimated: boolean;
   fileSizeBytes: number;
   importedAt: number;
 }

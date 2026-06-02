@@ -12,10 +12,21 @@ export function getDatabase(): SQLite.SQLiteDatabase {
         uri TEXT NOT NULL,
         format TEXT NOT NULL,
         durationMs INTEGER NOT NULL,
+        durationEstimated INTEGER NOT NULL DEFAULT 1,
         fileSizeBytes INTEGER NOT NULL,
         importedAt INTEGER NOT NULL
       );
     `);
+    try {
+      db.execSync(
+        `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
+      );
+    } catch (e: unknown) {
+      // Swallow only "duplicate column" errors; anything else is unexpected
+      if (!(e instanceof Error) || !e.message.includes('duplicate column')) {
+        throw e;
+      }
+    }
   }
   return db;
 }
