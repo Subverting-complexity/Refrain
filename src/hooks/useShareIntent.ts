@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 
 import { importFromUri, isSupportedFilename } from '../services/fileImport';
 import { Track } from '../types';
+import { extractFilename } from '../utils/extractFilename';
 
 interface UseShareIntentOptions {
   onTrackImported: (track: Track) => void;
@@ -20,7 +21,7 @@ export function useShareIntent({
 
   useEffect(() => {
     async function handleUrl(url: string) {
-      const filename = url.split('/').pop() ?? 'shared-audio.mp3';
+      const filename = extractFilename(url);
 
       if (!isSupportedFilename(filename)) {
         onErrorRef.current?.('Unsupported audio format');
