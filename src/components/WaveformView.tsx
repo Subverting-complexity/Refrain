@@ -56,7 +56,10 @@ export function WaveformView({
 
   // The bars are inset by HORIZONTAL_PADDING on each side, so the
   // touchable track spans containerWidth - 2 * HORIZONTAL_PADDING.
-  const trackWidth = () => containerWidth.current - 2 * HORIZONTAL_PADDING;
+  const trackWidth = useCallback(
+    () => containerWidth.current - 2 * HORIZONTAL_PADDING,
+    [],
+  );
 
   const positionFromEvent = useCallback(
     (e: GestureResponderEvent): number | null => {
@@ -70,7 +73,7 @@ export function WaveformView({
       );
       return Math.round(ratio * durationMs);
     },
-    [durationMs],
+    [durationMs, trackWidth],
   );
 
   const detectDragTarget = useCallback(
@@ -90,7 +93,14 @@ export function WaveformView({
       }
       return 'seek';
     },
-    [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
+    [
+      durationMs,
+      markerA,
+      markerB,
+      onMarkerAChange,
+      onMarkerBChange,
+      trackWidth,
+    ],
   );
 
   const handleGrant = useCallback(
