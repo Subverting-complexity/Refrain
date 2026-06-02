@@ -32,7 +32,11 @@ export default function LibraryScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadTracks().then(setTracks);
+      loadTracks()
+        .then(setTracks)
+        .catch(() => {
+          AccessibilityInfo.announceForAccessibility('Failed to load library');
+        });
     }, []),
   );
 
@@ -42,6 +46,8 @@ export default function LibraryScreen() {
       const loaded = await loadTracks();
       setTracks(loaded);
       AccessibilityInfo.announceForAccessibility('Library refreshed');
+    } catch {
+      AccessibilityInfo.announceForAccessibility('Failed to refresh library');
     } finally {
       setRefreshing(false);
     }
