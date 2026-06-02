@@ -320,6 +320,7 @@ describe('WaveformView', () => {
     });
 
     it('continues dragging marker on move after grant near marker', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -337,6 +338,7 @@ describe('WaveformView', () => {
         });
       });
 
+      nowSpy.mockReturnValue(1000);
       act(() => {
         touchArea.props.onResponderGrant({
           nativeEvent: { locationX: 150 },
@@ -345,6 +347,8 @@ describe('WaveformView', () => {
 
       onMarkerAChange.mockClear();
 
+      // Advance past the throttle window so the move commits a native call.
+      nowSpy.mockReturnValue(1100);
       act(() => {
         touchArea.props.onResponderMove({
           nativeEvent: { locationX: 180 },
@@ -355,6 +359,7 @@ describe('WaveformView', () => {
       // so the track spans 276px: (180 - 12) / 276 * 10000 = 6087ms.
       expect(onMarkerAChange).toHaveBeenCalledWith(6087);
       expect(onSeek).not.toHaveBeenCalled();
+      nowSpy.mockRestore();
     });
 
     it('falls back to seek when touch is not near any marker', () => {
@@ -417,6 +422,176 @@ describe('WaveformView', () => {
         node.type === 'View' && node.props.accessibilityRole === 'adjustable',
     )[0];
   }
+
+  describe('seek/marker throttling during drag', () => {
+    let nowSpy: jest.SpyInstance<number, []>;
+
+    beforeEach(() => {
+      nowSpy = jest.spyOn(Date, 'now');
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
+
+    function layout(tree: ReactTestRenderer, width = 300) {
+      const touchArea = getTouchArea(tree);
+      act(() => {
+        touchArea.props.onLayout({ nativeEvent: { layout: { width } } });
+      });
+      return touchArea;
+    }
+
+    it('throttles native seeks during rapid drag moves', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({ durationMs: 10000, onSeek });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(1);
+      expect(onSeek).toHaveBeenLastCalledWith(0);
+
+      // Two moves within the throttle window: no extra native seeks.
+      nowSpy.mockReturnValue(1010);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 60 } });
+      });
+      nowSpy.mockReturnValue(1020);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 90 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(1);
+
+      // A move past the throttle window fires one native seek.
+      nowSpy.mockReturnValue(1100);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the cursor visual smooth while seeks are throttled', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 0,
+        durationMs: 10000,
+        onSeek,
+      });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
+      });
+      // Throttled move (within window): no native seek, but visual advances.
+      nowSpy.mockReturnValue(1010);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(1);
+      // (150 - 12) / 276 * 100 ≈ 50% even though no native seek fired.
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
+    });
+
+    it('fires one final unthrottled seek on release', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({ durationMs: 10000, onSeek });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
+      });
+      // Throttled move — final position must still commit on release.
+      nowSpy.mockReturnValue(1010);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
+      });
+      expect(onSeek).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1020);
+      act(() => {
+        touchArea.props.onResponderRelease();
+      });
+      expect(onSeek).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not fire a redundant seek on release after a pure tap', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({ durationMs: 10000, onSeek });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
+      });
+      act(() => {
+        touchArea.props.onResponderRelease();
+      });
+
+      expect(onSeek).toHaveBeenCalledTimes(1);
+      expect(onSeek).toHaveBeenCalledWith(5000);
+    });
+
+    it('throttles marker updates and commits the final one on release', () => {
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
+      });
+      expect(onMarkerAChange).toHaveBeenCalledTimes(1);
+
+      // Throttled move within the window — no extra native call yet.
+      nowSpy.mockReturnValue(1010);
+      act(() => {
+        touchArea.props.onResponderMove({ nativeEvent: { locationX: 180 } });
+      });
+      expect(onMarkerAChange).toHaveBeenCalledTimes(1);
+
+      // Release commits the final marker position.
+      nowSpy.mockReturnValue(1020);
+      act(() => {
+        touchArea.props.onResponderRelease();
+      });
+      expect(onMarkerAChange).toHaveBeenCalledTimes(2);
+      expect(onMarkerAChange).toHaveBeenLastCalledWith(6087);
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('clears drag visual on responder terminate', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 0,
+        durationMs: 10000,
+        onSeek,
+      });
+      const touchArea = layout(tree);
+
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 288 } });
+      });
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(100);
+
+      act(() => {
+        touchArea.props.onResponderTerminate();
+      });
+      // dragMs cleared → falls back to positionMs prop (0).
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
+    });
+  });
 
   describe('accessibility actions', () => {
     it('exposes increment and decrement actions', () => {

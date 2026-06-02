@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   GestureResponderEvent,
@@ -8,6 +8,7 @@ import {
   ViewStyle,
 } from 'react-native';
 
+import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { WaveformPeaks } from '../types';
@@ -48,7 +49,21 @@ export function WaveformView({
   const { theme } = useTheme();
   const containerWidth = useRef(0);
   const dragTarget = useRef<DragTarget>('seek');
-  const progress = durationMs > 0 ? positionMs / durationMs : 0;
+  const dragThrottle = useDragThrottle();
+
+  // While dragging, this local value drives the visual of whichever element
+  // (cursor or marker) is being moved, so it follows the finger every frame
+  // even though native calls are throttled. null = not dragging.
+  const [dragMs, setDragMs] = useState<number | null>(null);
+
+  const isDragging = dragMs !== null;
+  const displayPositionMs =
+    isDragging && dragTarget.current === 'seek' ? dragMs : positionMs;
+  const displayMarkerA =
+    isDragging && dragTarget.current === 'markerA' ? dragMs : markerA;
+  const displayMarkerB =
+    isDragging && dragTarget.current === 'markerB' ? dragMs : markerB;
+  const progress = durationMs > 0 ? displayPositionMs / durationMs : 0;
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     containerWidth.current = e.nativeEvent.layout.width;
@@ -93,44 +108,48 @@ export function WaveformView({
     [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
   );
 
+  // The callback for the active drag target. markerA/markerB targets are
+  // only chosen by detectDragTarget when their handler exists, so seek (with
+  // its always-present onSeek) is the safe fallback.
+  const callbackForTarget = useCallback(
+    (target: DragTarget): ((ms: number) => void) => {
+      if (target === 'markerA' && onMarkerAChange) return onMarkerAChange;
+      if (target === 'markerB' && onMarkerBChange) return onMarkerBChange;
+      return onSeek;
+    },
+    [onSeek, onMarkerAChange, onMarkerBChange],
+  );
+
+  // Drag start: pick the target, update the visual, and fire immediately
+  // (instant tap response — no throttling on grant).
   const handleGrant = useCallback(
     (e: GestureResponderEvent) => {
       dragTarget.current = detectDragTarget(e);
       const ms = positionFromEvent(e);
       if (ms == null) return;
-
-      if (dragTarget.current === 'markerA') {
-        onMarkerAChange?.(ms);
-      } else if (dragTarget.current === 'markerB') {
-        onMarkerBChange?.(ms);
-      } else {
-        onSeek(ms);
-      }
+      setDragMs(ms);
+      dragThrottle.begin(ms, callbackForTarget(dragTarget.current));
     },
-    [
-      detectDragTarget,
-      positionFromEvent,
-      onSeek,
-      onMarkerAChange,
-      onMarkerBChange,
-    ],
+    [detectDragTarget, positionFromEvent, callbackForTarget, dragThrottle],
   );
 
+  // Drag move: update the visual every frame, but throttle native calls.
   const handleMove = useCallback(
     (e: GestureResponderEvent) => {
       const ms = positionFromEvent(e);
       if (ms == null) return;
-
-      if (dragTarget.current === 'markerA') {
-        onMarkerAChange?.(ms);
-      } else if (dragTarget.current === 'markerB') {
-        onMarkerBChange?.(ms);
-      } else {
-        onSeek(ms);
-      }
+      setDragMs(ms);
+      dragThrottle.move(ms);
     },
-    [positionFromEvent, onSeek, onMarkerAChange, onMarkerBChange],
+    [positionFromEvent, dragThrottle],
   );
+
+  // Drag end (or interruption): commit the final value, then drop back to
+  // the prop-driven visual.
+  const handleRelease = useCallback(() => {
+    dragThrottle.end();
+    setDragMs(null);
+  }, [dragThrottle]);
 
   const bars = useMemo(() => {
     if (peaks.length === 0) return null;
@@ -160,9 +179,13 @@ export function WaveformView({
     if (durationMs <= 0) return null;
     const elements: React.ReactNode[] = [];
 
-    if (markerA != null && markerB != null && markerA < markerB) {
-      const leftPct = (markerA / durationMs) * 100;
-      const widthPct = ((markerB - markerA) / durationMs) * 100;
+    if (
+      displayMarkerA != null &&
+      displayMarkerB != null &&
+      displayMarkerA < displayMarkerB
+    ) {
+      const leftPct = (displayMarkerA / durationMs) * 100;
+      const widthPct = ((displayMarkerB - displayMarkerA) / durationMs) * 100;
       elements.push(
         <View
           key="ab-region"
@@ -178,42 +201,42 @@ export function WaveformView({
       );
     }
 
-    if (markerA != null) {
+    if (displayMarkerA != null) {
       elements.push(
         <View
           key="marker-a"
           style={[
             styles.markerLine,
             {
-              left: `${(markerA / durationMs) * 100}%`,
+              left: `${(displayMarkerA / durationMs) * 100}%`,
               backgroundColor: theme.colors.textSecondary,
             },
           ]}
-          accessibilityLabel={`Loop start marker at ${formatDuration(markerA)}`}
+          accessibilityLabel={`Loop start marker at ${formatDuration(displayMarkerA)}`}
         />,
       );
     }
 
-    if (markerB != null) {
+    if (displayMarkerB != null) {
       elements.push(
         <View
           key="marker-b"
           style={[
             styles.markerLine,
             {
-              left: `${(markerB / durationMs) * 100}%`,
+              left: `${(displayMarkerB / durationMs) * 100}%`,
               backgroundColor: theme.colors.textSecondary,
             },
           ]}
-          accessibilityLabel={`Loop end marker at ${formatDuration(markerB)}`}
+          accessibilityLabel={`Loop end marker at ${formatDuration(displayMarkerB)}`}
         />,
       );
     }
 
     return elements;
   }, [
-    markerA,
-    markerB,
+    displayMarkerA,
+    displayMarkerB,
     durationMs,
     theme.colors.accent,
     theme.colors.textSecondary,
@@ -260,6 +283,8 @@ export function WaveformView({
         onMoveShouldSetResponder={() => true}
         onResponderGrant={handleGrant}
         onResponderMove={handleMove}
+        onResponderRelease={handleRelease}
+        onResponderTerminate={handleRelease}
       >
         <View style={styles.track}>
           <View style={styles.barsContainer}>{bars}</View>
