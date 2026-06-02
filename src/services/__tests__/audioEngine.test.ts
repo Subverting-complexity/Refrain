@@ -48,6 +48,9 @@ function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   statusCallback = null;
+  // setPositionAsync returns a Promise in expo-av; default it to resolve so
+  // callers that attach `.catch` (e.g. the loop-rewind seek) work.
+  mockSetPositionAsync.mockResolvedValue(undefined);
 });
 
 describe('audioEngine', () => {
@@ -654,7 +657,36 @@ describe('audioEngine', () => {
       expect(mockSetPositionAsync).not.toHaveBeenCalled();
     });
 
-    it('does not notify listeners during loop-back seek', async () => {
+    it('publishes markerA as the position on loop rewind so the cursor jumps back', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      // Position overshoots marker B by the polling interval; the published
+      // position must snap back to marker A, not stall at the overshoot.
+      statusCallback?.(
+        makeLoadedStatus({ isPlaying: true, positionMillis: 15050 }),
+      );
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'playing', positionMs: 5000 }),
+      );
+    });
+
+    it('reports error without an unhandled rejection when the loop seek fails', async () => {
+      mockSetPositionAsync.mockRejectedValueOnce(new Error('seek failed'));
       const {
         loadTrack,
         setMarkerA,
@@ -675,7 +707,16 @@ describe('audioEngine', () => {
         makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
       );
 
-      expect(listener).not.toHaveBeenCalled();
+      // Let the rejected seek promise settle.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'error',
+          lastError: 'seek failed',
+        }),
+      );
     });
   });
 });
