@@ -4,6 +4,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
   moduleNameMapper: {
     '\\.(wav|mp3|aac|m4a)$': '<rootDir>/src/__mocks__/audioFileMock.js',
+    '^@/(.*)$': '<rootDir>/$1',
   },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
