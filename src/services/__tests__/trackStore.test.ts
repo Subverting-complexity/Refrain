@@ -3,6 +3,7 @@ import { Track } from '../../types';
 
 const mockRunSync = jest.fn();
 const mockGetAllSync = jest.fn();
+const mockGetFirstSync = jest.fn();
 const mockExecSync = jest.fn();
 const mockCloseSync = jest.fn();
 
@@ -10,6 +11,7 @@ jest.mock('expo-sqlite', () => ({
   openDatabaseSync: jest.fn(() => ({
     runSync: mockRunSync,
     getAllSync: mockGetAllSync,
+    getFirstSync: mockGetFirstSync,
     execSync: mockExecSync,
     closeSync: mockCloseSync,
   })),
@@ -18,17 +20,41 @@ jest.mock('expo-sqlite', () => ({
 const mockText = jest.fn();
 const mockDelete = jest.fn();
 let mockJsonExists = false;
+// Map of file URI -> exists. Files default to existing.
+let mockFileExists: Record<string, boolean> = {};
+// Entries returned by Directory.list().
+let mockDirEntries: { name: string; uri: string }[] = [];
+let mockDirExists = true;
 
-jest.mock('expo-file-system', () => ({
-  File: jest.fn().mockImplementation(() => ({
+jest.mock('expo-file-system', () => {
+  const File = jest.fn().mockImplementation((...args: string[]) => {
+    const uri = args[args.length - 1];
+    return {
+      uri,
+      get exists() {
+        // tracks.json uses the migration flag; track files use the map.
+        if (uri === 'file:///data/tracks.json') return mockJsonExists;
+        return mockFileExists[uri] ?? true;
+      },
+      text: mockText,
+      delete: () => mockDelete(uri),
+    };
+  });
+  const Directory = jest.fn().mockImplementation(() => ({
     get exists() {
-      return mockJsonExists;
+      return mockDirExists;
     },
-    text: mockText,
-    delete: mockDelete,
-  })),
-  Paths: { document: 'file:///data' },
-}));
+    list: () =>
+      mockDirEntries.map((e) =>
+        Object.assign(Object.create(File.prototype), e),
+      ),
+  }));
+  return {
+    File,
+    Directory,
+    Paths: { document: 'file:///data' },
+  };
+});
 
 const sampleTrack: Track = {
   id: 'track-1',
@@ -44,6 +70,9 @@ const sampleTrack: Track = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockJsonExists = false;
+  mockFileExists = {};
+  mockDirEntries = [];
+  mockDirExists = true;
 });
 
 describe('migration from JSON', () => {
@@ -87,6 +116,21 @@ describe('loadTracks', () => {
     expect(mockGetAllSync).toHaveBeenCalledWith(
       expect.stringContaining('SELECT'),
     );
+  });
+
+  it('sweeps orphan files on load', async () => {
+    jest.resetModules();
+
+    mockGetAllSync.mockReturnValue([{ ...sampleTrack, durationEstimated: 1 }]);
+    mockDirEntries = [
+      { name: 'track-1.mp3', uri: sampleTrack.uri },
+      { name: 'orphan.wav', uri: 'file:///data/tracks/orphan.wav' },
+    ];
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks();
+
+    expect(mockDelete).toHaveBeenCalledWith('file:///data/tracks/orphan.wav');
   });
 
   it('converts durationEstimated 0 to false', async () => {
@@ -141,6 +185,7 @@ describe('updateTrackDuration', () => {
 describe('deleteTrack', () => {
   it('deletes a track by id', () => {
     jest.resetModules();
+    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
 
     const { deleteTrack } = require('../trackStore');
     deleteTrack('track-1');
@@ -149,5 +194,105 @@ describe('deleteTrack', () => {
       expect.stringContaining('DELETE FROM tracks'),
       'track-1',
     );
+  });
+
+  it('deletes the audio file from disk on removal', () => {
+    jest.resetModules();
+    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockFileExists[sampleTrack.uri] = true;
+
+    const { deleteTrack } = require('../trackStore');
+    deleteTrack('track-1');
+
+    expect(mockGetFirstSync).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT uri'),
+      'track-1',
+    );
+    expect(mockDelete).toHaveBeenCalledWith(sampleTrack.uri);
+  });
+
+  it('looks up the uri before deleting the row', () => {
+    jest.resetModules();
+    const callOrder: string[] = [];
+    mockGetFirstSync.mockImplementation(() => {
+      callOrder.push('lookup');
+      return { uri: sampleTrack.uri };
+    });
+    mockRunSync.mockImplementation(() => {
+      callOrder.push('delete-row');
+    });
+
+    const { deleteTrack } = require('../trackStore');
+    deleteTrack('track-1');
+
+    expect(callOrder).toEqual(['lookup', 'delete-row']);
+  });
+
+  it('does not throw when the file is already missing', () => {
+    jest.resetModules();
+    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockFileExists[sampleTrack.uri] = false;
+
+    const { deleteTrack } = require('../trackStore');
+
+    expect(() => deleteTrack('track-1')).not.toThrow();
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it('does not attempt a file delete when the track is unknown', () => {
+    jest.resetModules();
+    mockGetFirstSync.mockReturnValue(null);
+
+    const { deleteTrack } = require('../trackStore');
+    deleteTrack('missing');
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM tracks'),
+      'missing',
+    );
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('cleanupOrphanFiles', () => {
+  it('deletes files whose id is not in the database', () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([{ id: 'track-1' }]);
+    mockDirEntries = [
+      { name: 'track-1.mp3', uri: 'file:///data/tracks/track-1.mp3' },
+      { name: 'orphan.wav', uri: 'file:///data/tracks/orphan.wav' },
+    ];
+
+    const { cleanupOrphanFiles } = require('../trackStore');
+    const removed = cleanupOrphanFiles();
+
+    expect(removed).toBe(1);
+    expect(mockDelete).toHaveBeenCalledWith('file:///data/tracks/orphan.wav');
+    expect(mockDelete).not.toHaveBeenCalledWith(
+      'file:///data/tracks/track-1.mp3',
+    );
+  });
+
+  it('returns 0 when the tracks directory does not exist', () => {
+    jest.resetModules();
+    mockDirExists = false;
+
+    const { cleanupOrphanFiles } = require('../trackStore');
+
+    expect(cleanupOrphanFiles()).toBe(0);
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it('returns 0 when there are no orphan files', () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([{ id: 'track-1' }]);
+    mockDirEntries = [
+      { name: 'track-1.mp3', uri: 'file:///data/tracks/track-1.mp3' },
+    ];
+
+    const { cleanupOrphanFiles } = require('../trackStore');
+
+    expect(cleanupOrphanFiles()).toBe(0);
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 });
