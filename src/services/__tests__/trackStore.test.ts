@@ -36,6 +36,7 @@ const sampleTrack: Track = {
   uri: 'file:///data/tracks/track-1.mp3',
   format: 'mp3',
   durationMs: 42_000,
+  durationEstimated: true,
   fileSizeBytes: 1_000_000,
   importedAt: 1700000000000,
 };
@@ -63,6 +64,7 @@ describe('migration from JSON', () => {
       sampleTrack.uri,
       sampleTrack.format,
       sampleTrack.durationMs,
+      1,
       sampleTrack.fileSizeBytes,
       sampleTrack.importedAt,
     );
@@ -71,23 +73,37 @@ describe('migration from JSON', () => {
 });
 
 describe('loadTracks', () => {
-  it('returns tracks from the database', async () => {
+  it('returns tracks from the database with boolean durationEstimated', async () => {
     jest.resetModules();
 
-    mockGetAllSync.mockReturnValue([sampleTrack]);
+    const dbRow = { ...sampleTrack, durationEstimated: 1 };
+    mockGetAllSync.mockReturnValue([dbRow]);
 
     const { loadTracks } = require('../trackStore');
     const tracks = await loadTracks();
 
     expect(tracks).toEqual([sampleTrack]);
+    expect(tracks[0].durationEstimated).toBe(true);
     expect(mockGetAllSync).toHaveBeenCalledWith(
       expect.stringContaining('SELECT'),
     );
   });
+
+  it('converts durationEstimated 0 to false', async () => {
+    jest.resetModules();
+
+    const dbRow = { ...sampleTrack, durationEstimated: 0 };
+    mockGetAllSync.mockReturnValue([dbRow]);
+
+    const { loadTracks } = require('../trackStore');
+    const tracks = await loadTracks();
+
+    expect(tracks[0].durationEstimated).toBe(false);
+  });
 });
 
 describe('insertTrack', () => {
-  it('inserts a track into the database', () => {
+  it('inserts a track into the database with durationEstimated as integer', () => {
     jest.resetModules();
 
     const { insertTrack } = require('../trackStore');
@@ -100,8 +116,24 @@ describe('insertTrack', () => {
       sampleTrack.uri,
       sampleTrack.format,
       sampleTrack.durationMs,
+      1,
       sampleTrack.fileSizeBytes,
       sampleTrack.importedAt,
+    );
+  });
+});
+
+describe('updateTrackDuration', () => {
+  it('updates duration and marks as not estimated', () => {
+    jest.resetModules();
+
+    const { updateTrackDuration } = require('../trackStore');
+    updateTrackDuration('track-1', 45_000);
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE tracks SET durationMs'),
+      45_000,
+      'track-1',
     );
   });
 });

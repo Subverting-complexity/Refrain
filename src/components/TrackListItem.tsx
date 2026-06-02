@@ -49,7 +49,7 @@ export function TrackListItem({
   return (
     <AccessiblePressable
       accessibilityRole="button"
-      accessibilityLabel={`${track.filename}, ~${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
+      accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
       accessibilityHint={
         onPress && onDelete
           ? 'Tap to play, long press to delete'
@@ -93,7 +93,8 @@ export function TrackListItem({
           {track.filename}
         </Text>
         <Text style={theme.typography.caption}>
-          ~{formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
+          {track.durationEstimated ? '~' : ''}
+          {formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
           {formatFileSize(track.fileSizeBytes)}
         </Text>
       </View>

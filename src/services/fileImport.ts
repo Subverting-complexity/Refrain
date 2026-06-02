@@ -97,6 +97,7 @@ async function importFromFile(
       uri: destFile.uri,
       format,
       durationMs: estimateDurationMs(fileSizeBytes, format),
+      durationEstimated: true,
       fileSizeBytes,
       importedAt: Date.now(),
     };

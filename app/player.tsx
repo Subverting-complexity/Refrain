@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,13 +14,15 @@ import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
+import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
-  const { uri, filename } = useLocalSearchParams<{
+  const { uri, filename, trackId } = useLocalSearchParams<{
     uri: string;
     filename: string;
+    trackId: string;
   }>();
 
   const {
@@ -36,6 +39,15 @@ export default function PlayerScreen() {
     setMarkerB,
     clearMarkers,
   } = useAudioPlayer(uri ?? null);
+
+  const durationPersisted = useRef(false);
+  useEffect(() => {
+    if (trackId && durationMs > 0 && !durationPersisted.current) {
+      durationPersisted.current = true;
+      updateTrackDuration(trackId, durationMs);
+    }
+  }, [trackId, durationMs]);
+
   const { peaks } = useWaveformData(uri ?? null);
   const {
     countdownState,

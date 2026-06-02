@@ -125,6 +125,7 @@ describe('pickAndImportFile', () => {
       expect(result.track.format).toBe('mp3');
       expect(result.track.fileSizeBytes).toBe(mockFileSize);
       expect(result.track.durationMs).toBeGreaterThan(0);
+      expect(result.track.durationEstimated).toBe(true);
       expect(mockCopy).toHaveBeenCalled();
     }
   });
