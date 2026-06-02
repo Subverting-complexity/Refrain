@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   GestureResponderEvent,
@@ -14,6 +14,11 @@ import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
 
 const SEEK_STEP_MS = 5000;
+
+// Throttle native seeks during drag to ~20/sec. The native bridge
+// (setPositionAsync) is the bottleneck, not React, so the visual bar still
+// updates every frame — only the native call is rate-limited.
+const SEEK_THROTTLE_MS = 50;
 
 interface SeekBarProps {
   positionMs: number;
@@ -32,21 +37,69 @@ export function SeekBar({
   const progress = durationMs > 0 ? positionMs / durationMs : 0;
   const trackWidth = useRef(0);
 
+  // While dragging, this local ratio drives the visual so the bar stays
+  // smooth even though native seeks are throttled. null = not dragging.
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
+  const lastSeekAt = useRef(0);
+  const pendingPosition = useRef<number | null>(null);
+  const displayProgress = dragRatio ?? progress;
+
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     trackWidth.current = e.nativeEvent.layout.width;
   }, []);
 
-  const seekFromEvent = useCallback(
-    (e: GestureResponderEvent) => {
-      if (durationMs <= 0 || trackWidth.current <= 0) return;
-      const ratio = Math.max(
+  const ratioFromEvent = useCallback(
+    (e: GestureResponderEvent): number | null => {
+      if (durationMs <= 0 || trackWidth.current <= 0) return null;
+      return Math.max(
         0,
         Math.min(1, e.nativeEvent.locationX / trackWidth.current),
       );
-      onSeek(Math.round(ratio * durationMs));
     },
-    [durationMs, onSeek],
+    [durationMs],
   );
+
+  // Tap or drag start: update the visual and seek immediately (instant
+  // tap-to-seek is preserved — no throttling on grant).
+  const handleGrant = useCallback(
+    (e: GestureResponderEvent) => {
+      const ratio = ratioFromEvent(e);
+      if (ratio === null) return;
+      const position = Math.round(ratio * durationMs);
+      setDragRatio(ratio);
+      pendingPosition.current = position;
+      lastSeekAt.current = Date.now();
+      onSeek(position);
+    },
+    [ratioFromEvent, durationMs, onSeek],
+  );
+
+  // Drag move: update the visual every frame, but throttle native seeks.
+  const handleMove = useCallback(
+    (e: GestureResponderEvent) => {
+      const ratio = ratioFromEvent(e);
+      if (ratio === null) return;
+      const position = Math.round(ratio * durationMs);
+      setDragRatio(ratio);
+      pendingPosition.current = position;
+      const now = Date.now();
+      if (now - lastSeekAt.current >= SEEK_THROTTLE_MS) {
+        lastSeekAt.current = now;
+        onSeek(position);
+      }
+    },
+    [ratioFromEvent, durationMs, onSeek],
+  );
+
+  // Drag end (or interruption): fire one final, unthrottled seek so the
+  // committed position is accurate, then drop back to the prop-driven visual.
+  const handleRelease = useCallback(() => {
+    if (pendingPosition.current !== null) {
+      onSeek(pendingPosition.current);
+      pendingPosition.current = null;
+    }
+    setDragRatio(null);
+  }, [onSeek]);
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -68,15 +121,21 @@ export function SeekBar({
       accessibilityLabel={`Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={handleAccessibilityAction}
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
+      accessibilityValue={{
+        min: 0,
+        max: 100,
+        now: Math.round(displayProgress * 100),
+      }}
     >
       <View
         style={styles.barTouchArea}
         onLayout={handleLayout}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={seekFromEvent}
-        onResponderMove={seekFromEvent}
+        onResponderGrant={handleGrant}
+        onResponderMove={handleMove}
+        onResponderRelease={handleRelease}
+        onResponderTerminate={handleRelease}
       >
         <View
           style={[styles.barTrack, { backgroundColor: theme.colors.border }]}
@@ -86,7 +145,7 @@ export function SeekBar({
               styles.barFill,
               {
                 backgroundColor: theme.colors.accent,
-                width: `${progress * 100}%`,
+                width: `${displayProgress * 100}%`,
               },
             ]}
           />
@@ -96,7 +155,7 @@ export function SeekBar({
             styles.thumb,
             {
               backgroundColor: theme.colors.accent,
-              left: `${progress * 100}%`,
+              left: `${displayProgress * 100}%`,
             },
           ]}
         />
