@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -27,12 +28,24 @@ export default function LibraryScreen() {
   const router = useRouter();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       loadTracks().then(setTracks);
     }, []),
   );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const loaded = await loadTracks();
+      setTracks(loaded);
+      AccessibilityInfo.announceForAccessibility('Library refreshed');
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const addTrack = useCallback((track: Track) => {
     try {
@@ -143,6 +156,14 @@ export default function LibraryScreen() {
               />
             )}
             contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={theme.colors.accent}
+                colors={[theme.colors.accent]}
+              />
+            }
           />
         </View>
       )}
