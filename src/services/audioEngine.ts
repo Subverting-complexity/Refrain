@@ -24,6 +24,12 @@ function notify(state: PlaybackState): void {
   }
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  return 'Unknown error';
+}
+
 function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
   if (!avStatus.isLoaded) {
     return { ...IDLE_STATE, markerA, markerB };
@@ -53,6 +59,7 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
       durationMs: 0,
       markerA,
       markerB,
+      lastError: errorMessage(avStatus.error),
     };
     notify(currentState);
     return;
@@ -81,18 +88,18 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
 }
 
 export async function loadTrack(uri: string): Promise<void> {
-  await unloadTrack();
-
-  currentState = {
-    status: 'loading',
-    positionMs: 0,
-    durationMs: 0,
-    markerA: null,
-    markerB: null,
-  };
-  notify(currentState);
-
   try {
+    await unloadTrack();
+
+    currentState = {
+      status: 'loading',
+      positionMs: 0,
+      durationMs: 0,
+      markerA: null,
+      markerB: null,
+    };
+    notify(currentState);
+
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
       staysActiveInBackground: true,
@@ -104,13 +111,14 @@ export async function loadTrack(uri: string): Promise<void> {
       onPlaybackStatusUpdate,
     );
     sound = newSound;
-  } catch {
+  } catch (err) {
     currentState = {
       status: 'error',
       positionMs: 0,
       durationMs: 0,
       markerA: null,
       markerB: null,
+      lastError: errorMessage(err),
     };
     notify(currentState);
   }

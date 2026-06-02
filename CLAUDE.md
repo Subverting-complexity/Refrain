@@ -43,7 +43,14 @@ All checks must pass on PRs to `main`:
 1. **Type check** — `npm run typecheck`
 2. **Lint** — `npm run lint`
 3. **Format** — `npm run format:check`
-4. **Tests + coverage** — `npm test -- --coverage` (80% threshold on branches/functions/lines/statements)
+4. **Tests + coverage** — `npm test -- --coverage`. Thresholds are
+   enforced by `jest.config.js` over `src/**` and `app/**`:
+   - `src/services/` (core business logic): **80%** on
+     branches/functions/lines/statements.
+   - Project-wide regression floor: **54%** statements, **57%**
+     branches, **44%** functions, **55%** lines. This floor catches
+     coverage regressions; raise it toward 80% as the untested
+     screens and modules gain tests.
 
 ## Supplementary Files
 

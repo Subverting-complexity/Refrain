@@ -112,9 +112,10 @@ Issues should include these sections at minimum:
 
 | Status      | Option ID  |
 | ----------- | ---------- |
-| Todo        | `f75ad846` |
-| In Progress | `47fc9ee4` |
-| Done        | `98236657` |
+| Todo        | `ee4b8f56` |
+| In Progress | `bc8d792a` |
+| In Review   | `66276e02` |
+| Done        | `6b4c0f2d` |
 
 ## Bundled Skills
 
