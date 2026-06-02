@@ -1,12 +1,54 @@
 import { extractPeaks } from '../waveformAnalyzer';
 
-const mockArrayBuffer = jest.fn<Promise<ArrayBuffer>, []>();
+// Tracks the largest single readBytes() length requested across a test, so we
+// can assert the analyzer never pulls the whole file in one read.
+let maxReadLength = 0;
+const mockArrayBuffer = jest.fn();
+
+/**
+ * Builds a mock `File` whose `open()` returns an in-memory-backed `FileHandle`:
+ * a seekable cursor (`offset`) over `backing`, where `readBytes(len)` returns at
+ * most `READ_WINDOW`-sized slices and honors end-of-file short reads. The real
+ * native handle behaves the same way.
+ */
+function mockFileFromBuffer(buffer: ArrayBuffer) {
+  const backing = new Uint8Array(buffer);
+  return {
+    size: backing.length,
+    arrayBuffer: mockArrayBuffer,
+    open: () => {
+      let offset = 0;
+      return {
+        size: backing.length,
+        get offset() {
+          return offset;
+        },
+        set offset(value: number) {
+          offset = value;
+        },
+        readBytes: (length: number) => {
+          maxReadLength = Math.max(maxReadLength, length);
+          const end = Math.min(offset + length, backing.length);
+          const slice = backing.slice(offset, end);
+          offset = end;
+          return slice;
+        },
+        close: jest.fn(),
+      };
+    },
+  };
+}
+
+let mockCurrentFile: ReturnType<typeof mockFileFromBuffer>;
 
 jest.mock('expo-file-system', () => ({
-  File: jest.fn().mockImplementation(() => ({
-    arrayBuffer: mockArrayBuffer,
-  })),
+  File: jest.fn().mockImplementation(() => mockCurrentFile),
+  FileMode: { ReadOnly: 'r' },
 }));
+
+function setFileBuffer(buffer: ArrayBuffer) {
+  mockCurrentFile = mockFileFromBuffer(buffer);
+}
 
 function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
   const numChannels = 1;
@@ -55,6 +97,7 @@ function createWavBuffer(samples: number[], bitsPerSample = 16): ArrayBuffer {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  maxReadLength = 0;
 });
 
 describe('extractPeaks', () => {
@@ -63,7 +106,7 @@ describe('extractPeaks', () => {
       const samples = Array.from({ length: 400 }, (_, i) =>
         Math.sin((i / 400) * Math.PI * 2),
       );
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples));
+      setFileBuffer(createWavBuffer(samples));
 
       const peaks = await extractPeaks('file:///test.wav', 10);
 
@@ -78,7 +121,7 @@ describe('extractPeaks', () => {
       const samples = Array.from({ length: 200 }, (_, i) =>
         Math.sin((i / 200) * Math.PI * 2),
       );
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples, 8));
+      setFileBuffer(createWavBuffer(samples, 8));
 
       const peaks = await extractPeaks('file:///test.wav', 5);
 
@@ -93,7 +136,7 @@ describe('extractPeaks', () => {
       const samples = Array.from({ length: 400 }, (_, i) =>
         Math.sin((i / 400) * Math.PI * 2),
       );
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples));
+      setFileBuffer(createWavBuffer(samples));
 
       const peaks = await extractPeaks('file:///test.wav', 10);
 
@@ -102,7 +145,7 @@ describe('extractPeaks', () => {
 
     it('returns minimum amplitude for silent audio', async () => {
       const samples = new Array(200).fill(0);
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples));
+      setFileBuffer(createWavBuffer(samples));
 
       const peaks = await extractPeaks('file:///test.wav', 5);
 
@@ -116,7 +159,7 @@ describe('extractPeaks', () => {
       const samples = Array.from({ length: 400 }, (_, i) =>
         Math.sin((i / 400) * Math.PI * 2),
       );
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples, 32));
+      setFileBuffer(createWavBuffer(samples, 32));
 
       const peaks = await extractPeaks('file:///test.wav', 10);
 
@@ -132,11 +175,44 @@ describe('extractPeaks', () => {
       const samples = Array.from({ length: 2000 }, (_, i) =>
         Math.sin((i / 2000) * Math.PI * 2),
       );
-      mockArrayBuffer.mockResolvedValue(createWavBuffer(samples));
+      setFileBuffer(createWavBuffer(samples));
 
       const peaks = await extractPeaks('file:///test.wav');
 
       expect(peaks).toHaveLength(200);
+    });
+
+    it('streams large WAV files without loading the whole file in one read', async () => {
+      // ~1.4 MB of 16-bit PCM — several times the 256 KB read window.
+      const sampleCount = 700_000;
+      const samples = Array.from({ length: sampleCount }, (_, i) =>
+        Math.sin((i / 1000) * Math.PI * 2),
+      );
+      const buffer = createWavBuffer(samples);
+      setFileBuffer(buffer);
+
+      const peaks = await extractPeaks('file:///large.wav', 200);
+
+      expect(peaks).toHaveLength(200);
+      expect(Math.max(...peaks)).toBeCloseTo(1, 1);
+      peaks.forEach((p) => {
+        expect(p).toBeGreaterThanOrEqual(0.05);
+        expect(p).toBeLessThanOrEqual(1);
+      });
+      // No single read ever pulls the full ~1.4 MB file: reads stay bounded.
+      expect(maxReadLength).toBeLessThanOrEqual(256 * 1024);
+      expect(maxReadLength).toBeLessThan(buffer.byteLength);
+    });
+
+    it('does not read the whole file via arrayBuffer()', async () => {
+      const samples = Array.from({ length: 400 }, (_, i) =>
+        Math.sin((i / 400) * Math.PI * 2),
+      );
+      setFileBuffer(createWavBuffer(samples));
+
+      await extractPeaks('file:///test.wav', 10);
+
+      expect(mockArrayBuffer).not.toHaveBeenCalled();
     });
   });
 
@@ -146,7 +222,7 @@ describe('extractPeaks', () => {
       for (let i = 0; i < bytes.length; i++) {
         bytes[i] = Math.floor(Math.abs(Math.sin(i / 100)) * 255);
       }
-      mockArrayBuffer.mockResolvedValue(bytes.buffer);
+      setFileBuffer(bytes.buffer);
 
       const peaks = await extractPeaks('file:///test.mp3', 10);
 
@@ -163,18 +239,33 @@ describe('extractPeaks', () => {
         bytes[i] = i % 256;
       }
 
-      mockArrayBuffer.mockResolvedValue(bytes.buffer.slice(0));
+      setFileBuffer(bytes.buffer.slice(0));
       const peaks1 = await extractPeaks('file:///test.mp3', 10);
 
-      mockArrayBuffer.mockResolvedValue(bytes.buffer.slice(0));
+      setFileBuffer(bytes.buffer.slice(0));
       const peaks2 = await extractPeaks('file:///test.mp3', 10);
 
       expect(peaks1).toEqual(peaks2);
     });
 
+    it('streams large compressed files in bounded windows', async () => {
+      // 1 MB of non-WAV bytes — exceeds the 256 KB read window.
+      const bytes = new Uint8Array(1024 * 1024);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = Math.floor(Math.abs(Math.sin(i / 500)) * 255);
+      }
+      setFileBuffer(bytes.buffer);
+
+      const peaks = await extractPeaks('file:///large.mp3', 200);
+
+      expect(peaks).toHaveLength(200);
+      expect(maxReadLength).toBeLessThanOrEqual(256 * 1024);
+      expect(maxReadLength).toBeLessThan(bytes.length);
+    });
+
     it('falls back to compressed parsing for truncated WAV', async () => {
       const buffer = new ArrayBuffer(20);
-      mockArrayBuffer.mockResolvedValue(buffer);
+      setFileBuffer(buffer);
 
       const peaks = await extractPeaks('file:///test.wav', 5);
 
