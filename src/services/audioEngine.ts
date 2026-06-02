@@ -79,7 +79,23 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
     markerB != null &&
     newState.positionMs >= markerB
   ) {
-    sound?.setPositionAsync(markerA);
+    const loopStart = markerA;
+    if (sound) {
+      sound.setPositionAsync(loopStart).catch((err) => {
+        currentState = {
+          ...currentState,
+          status: 'error',
+          lastError: errorMessage(err),
+        };
+        notify(currentState);
+      });
+    }
+    // Publish the loop restart immediately so the cursor jumps cleanly
+    // back to marker A instead of stalling at the overshoot position
+    // (up to progressUpdateIntervalMillis past marker B) until the next
+    // status update arrives.
+    currentState = { ...newState, positionMs: loopStart };
+    notify(currentState);
     return;
   }
 
