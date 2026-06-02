@@ -30,6 +30,7 @@ const BAR_WIDTH = 2;
 const BAR_GAP = 1;
 const MARKER_HIT_ZONE_PX = 20;
 const SEEK_STEP_MS = 5000;
+const HORIZONTAL_PADDING = spacing.md;
 
 type DragTarget = 'markerA' | 'markerB' | 'seek';
 
@@ -53,12 +54,19 @@ export function WaveformView({
     containerWidth.current = e.nativeEvent.layout.width;
   }, []);
 
+  // The bars are inset by HORIZONTAL_PADDING on each side, so the
+  // touchable track spans containerWidth - 2 * HORIZONTAL_PADDING.
+  const trackWidth = () => containerWidth.current - 2 * HORIZONTAL_PADDING;
+
   const positionFromEvent = useCallback(
     (e: GestureResponderEvent): number | null => {
-      if (durationMs <= 0 || containerWidth.current <= 0) return null;
+      if (durationMs <= 0 || trackWidth() <= 0) return null;
       const ratio = Math.max(
         0,
-        Math.min(1, e.nativeEvent.locationX / containerWidth.current),
+        Math.min(
+          1,
+          (e.nativeEvent.locationX - HORIZONTAL_PADDING) / trackWidth(),
+        ),
       );
       return Math.round(ratio * durationMs);
     },
@@ -67,15 +75,17 @@ export function WaveformView({
 
   const detectDragTarget = useCallback(
     (e: GestureResponderEvent): DragTarget => {
-      if (containerWidth.current <= 0 || durationMs <= 0) return 'seek';
+      if (trackWidth() <= 0 || durationMs <= 0) return 'seek';
       const touchX = e.nativeEvent.locationX;
 
       if (markerA != null && onMarkerAChange) {
-        const markerAX = (markerA / durationMs) * containerWidth.current;
+        const markerAX =
+          HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth();
         if (Math.abs(touchX - markerAX) <= MARKER_HIT_ZONE_PX) return 'markerA';
       }
       if (markerB != null && onMarkerBChange) {
-        const markerBX = (markerB / durationMs) * containerWidth.current;
+        const markerBX =
+          HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth();
         if (Math.abs(touchX - markerBX) <= MARKER_HIT_ZONE_PX) return 'markerB';
       }
       return 'seek';
@@ -251,19 +261,21 @@ export function WaveformView({
         onResponderGrant={handleGrant}
         onResponderMove={handleMove}
       >
-        <View style={styles.barsContainer}>{bars}</View>
+        <View style={styles.track}>
+          <View style={styles.barsContainer}>{bars}</View>
 
-        {markerElements}
+          {markerElements}
 
-        <View
-          style={[
-            styles.cursor,
-            {
-              left: `${progress * 100}%`,
-              backgroundColor: theme.colors.accent,
-            },
-          ]}
-        />
+          <View
+            style={[
+              styles.cursor,
+              {
+                left: `${progress * 100}%`,
+                backgroundColor: theme.colors.accent,
+              },
+            ]}
+          />
+        </View>
       </View>
     </View>
   );
@@ -277,12 +289,20 @@ const styles = StyleSheet.create({
   },
   touchArea: {
     height: WAVEFORM_HEIGHT,
-    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     position: 'relative',
   },
-  barsContainer: {
+  track: {
     flex: 1,
+    marginHorizontal: HORIZONTAL_PADDING,
+    position: 'relative',
+  },
+  barsContainer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: BAR_GAP,
