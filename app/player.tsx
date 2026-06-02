@@ -31,6 +31,7 @@ export default function PlayerScreen() {
     durationMs,
     markerA,
     markerB,
+    lastError,
     play,
     pause,
     stop,
@@ -118,10 +119,30 @@ export default function PlayerScreen() {
 
       {status === 'error' && (
         <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle" size={20} color={theme.colors.error} />
-          <Text style={[theme.typography.body, { color: theme.colors.error }]}>
-            Unable to load this track
-          </Text>
+          <View style={styles.errorHeadline}>
+            <Ionicons
+              name="alert-circle"
+              size={20}
+              color={theme.colors.error}
+            />
+            <Text
+              style={[theme.typography.body, { color: theme.colors.error }]}
+            >
+              Unable to load this track
+            </Text>
+          </View>
+          {lastError ? (
+            <Text
+              style={[
+                theme.typography.caption,
+                { color: theme.colors.textSecondary },
+              ]}
+              numberOfLines={2}
+              ellipsizeMode="tail"
+            >
+              {lastError}
+            </Text>
+          ) : null}
         </View>
       )}
 
@@ -193,12 +214,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   errorBanner: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.md,
+  },
+  errorHeadline: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.md,
   },
   countdownSettings: {
     marginBottom: spacing.lg,

@@ -95,7 +95,32 @@ describe('audioEngine', () => {
 
       const lastCall = listener.mock.calls[listener.mock.calls.length - 1][0];
       expect(lastCall).toEqual(
-        expect.objectContaining({ status: 'error', positionMs: 0 }),
+        expect.objectContaining({
+          status: 'error',
+          positionMs: 0,
+          lastError: 'unsupported format',
+        }),
+      );
+    });
+
+    it('does not reject and reports error when unloading the previous sound throws', async () => {
+      mockUnloadAsync.mockRejectedValueOnce(new Error('unload failed'));
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      // First load succeeds so a sound exists to be unloaded on the next load.
+      await loadTrack('file:///first.mp3');
+      subscribe(listener);
+      listener.mockClear();
+
+      await expect(loadTrack('file:///second.mp3')).resolves.toBeUndefined();
+
+      const lastCall = listener.mock.calls[listener.mock.calls.length - 1][0];
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          status: 'error',
+          lastError: 'unload failed',
+        }),
       );
     });
 
@@ -429,6 +454,7 @@ describe('audioEngine', () => {
           status: 'error',
           positionMs: 0,
           durationMs: 0,
+          lastError: 'playback error',
         }),
       );
     });
