@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { MarkerControls } from '../MarkerControls';
@@ -54,6 +55,19 @@ function findPressableByLabel(tree: ReactTestRenderer, label: string) {
       node.props.accessibilityLabel === label &&
       typeof node.props.onPress === 'function',
   );
+}
+
+// The AccessiblePressable wrapper (a function component) carries the button's
+// own style function, returning [styles.<button>, dynamic]. We resolve that to
+// assert centering lives on the button style itself, not just the wrapper base.
+function resolveButtonStyle(tree: ReactTestRenderer, label: string) {
+  const wrapper = tree.root.findAll(
+    (node) =>
+      node.props.accessibilityLabel === label &&
+      typeof node.props.style === 'function' &&
+      typeof node.type === 'function',
+  )[0];
+  return StyleSheet.flatten(wrapper.props.style({ pressed: false }));
 }
 
 function findViewByLabel(tree: ReactTestRenderer, label: string) {
@@ -186,6 +200,24 @@ describe('MarkerControls', () => {
       (s: Record<string, unknown>) => s && s.color === '#111d1f',
     );
     expect(hasAccentText).toBe(true);
+  });
+
+  it('centers the A and B marker button labels', () => {
+    const tree = renderControls();
+
+    for (const label of ['Set loop start', 'Set loop end']) {
+      const style = resolveButtonStyle(tree, label);
+      expect(style.justifyContent).toBe('center');
+      expect(style.alignItems).toBe('center');
+    }
+  });
+
+  it('centers the clear button icon', () => {
+    const tree = renderControls({ markerA: 1000, markerB: 5000 });
+
+    const style = resolveButtonStyle(tree, 'Clear loop markers');
+    expect(style.justifyContent).toBe('center');
+    expect(style.alignItems).toBe('center');
   });
 
   it('accepts style prop override', () => {
