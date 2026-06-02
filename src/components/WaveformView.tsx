@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import {
+  AccessibilityActionEvent,
   GestureResponderEvent,
   LayoutChangeEvent,
   StyleSheet,
@@ -28,6 +29,7 @@ const WAVEFORM_HEIGHT = 120;
 const BAR_WIDTH = 2;
 const BAR_GAP = 1;
 const MARKER_HIT_ZONE_PX = 20;
+const SEEK_STEP_MS = 5000;
 
 type DragTarget = 'markerA' | 'markerB' | 'seek';
 
@@ -207,6 +209,19 @@ export function WaveformView({
     theme.colors.textSecondary,
   ]);
 
+  const handleAccessibilityAction = useCallback(
+    (e: AccessibilityActionEvent) => {
+      if (durationMs <= 0) return;
+      const { actionName } = e.nativeEvent;
+      if (actionName === 'increment') {
+        onSeek(Math.min(durationMs, positionMs + SEEK_STEP_MS));
+      } else if (actionName === 'decrement') {
+        onSeek(Math.max(0, positionMs - SEEK_STEP_MS));
+      }
+    },
+    [durationMs, positionMs, onSeek],
+  );
+
   const a11yLabel = useMemo(() => {
     let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
     if (markerA != null && markerB != null) {
@@ -224,6 +239,9 @@ export function WaveformView({
       ]}
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={handleAccessibilityAction}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
       <View
         style={styles.touchArea}

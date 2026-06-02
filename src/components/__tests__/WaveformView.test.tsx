@@ -364,6 +364,105 @@ describe('WaveformView', () => {
     });
   });
 
+  function getAdjustable(tree: ReactTestRenderer) {
+    return tree.root.findAll(
+      (node) =>
+        node.type === 'View' && node.props.accessibilityRole === 'adjustable',
+    )[0];
+  }
+
+  describe('accessibility actions', () => {
+    it('exposes increment and decrement actions', () => {
+      const tree = renderWaveform();
+      const container = getAdjustable(tree);
+      expect(container.props.accessibilityActions).toEqual([
+        { name: 'increment' },
+        { name: 'decrement' },
+      ]);
+    });
+
+    it('announces progress as a percentage via accessibilityValue', () => {
+      const tree = renderWaveform({ positionMs: 5000, durationMs: 20000 });
+      const container = getAdjustable(tree);
+      expect(container.props.accessibilityValue).toEqual({
+        min: 0,
+        max: 100,
+        now: 25,
+      });
+    });
+
+    it('seeks forward 5s on increment', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 5000,
+        durationMs: 20000,
+        onSeek,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'increment' },
+        });
+      });
+      expect(onSeek).toHaveBeenCalledWith(10000);
+    });
+
+    it('seeks back 5s on decrement', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 8000,
+        durationMs: 20000,
+        onSeek,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'decrement' },
+        });
+      });
+      expect(onSeek).toHaveBeenCalledWith(3000);
+    });
+
+    it('clamps increment to duration', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 18000,
+        durationMs: 20000,
+        onSeek,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'increment' },
+        });
+      });
+      expect(onSeek).toHaveBeenCalledWith(20000);
+    });
+
+    it('clamps decrement to zero', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 2000,
+        durationMs: 20000,
+        onSeek,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'decrement' },
+        });
+      });
+      expect(onSeek).toHaveBeenCalledWith(0);
+    });
+
+    it('ignores actions when duration is zero', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({ positionMs: 0, durationMs: 0, onSeek });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'increment' },
+        });
+      });
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+  });
+
   it('accepts style prop override', () => {
     const tree = renderWaveform({ style: { marginTop: 20 } });
 

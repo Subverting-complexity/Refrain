@@ -1,5 +1,6 @@
 import React, { useCallback, useRef } from 'react';
 import {
+  AccessibilityActionEvent,
   GestureResponderEvent,
   LayoutChangeEvent,
   StyleSheet,
@@ -11,6 +12,8 @@ import {
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
+
+const SEEK_STEP_MS = 5000;
 
 interface SeekBarProps {
   positionMs: number;
@@ -45,11 +48,27 @@ export function SeekBar({
     [durationMs, onSeek],
   );
 
+  const handleAccessibilityAction = useCallback(
+    (e: AccessibilityActionEvent) => {
+      if (durationMs <= 0) return;
+      const { actionName } = e.nativeEvent;
+      if (actionName === 'increment') {
+        onSeek(Math.min(durationMs, positionMs + SEEK_STEP_MS));
+      } else if (actionName === 'decrement') {
+        onSeek(Math.max(0, positionMs - SEEK_STEP_MS));
+      }
+    },
+    [durationMs, positionMs, onSeek],
+  );
+
   return (
     <View
       style={[styles.container, style]}
       accessibilityRole="adjustable"
       accessibilityLabel={`Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={handleAccessibilityAction}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
       <View
         style={styles.barTouchArea}
