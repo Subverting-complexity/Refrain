@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 
 import { importFromUri, isSupportedFilename } from '../services/fileImport';
@@ -20,6 +21,11 @@ export function useShareIntent({
   onErrorRef.current = onError;
 
   useEffect(() => {
+    // Share intents are a native-only concept, and expo-file-system's File
+    // API is unsupported on web. On web, getInitialURL returns the page URL,
+    // which would be misread as a shared audio file and crash File import.
+    if (Platform.OS === 'web') return;
+
     async function handleUrl(url: string) {
       const filename = extractFilename(url);
 
