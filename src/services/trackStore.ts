@@ -1,13 +1,22 @@
+import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { Track } from '../types';
 import { getDatabase } from './database';
+
+/**
+ * The `expo-file-system` `File`/`Directory` API is native-only — its web stub
+ * lacks the methods the constructor calls, so `new File(...)` throws on web.
+ * Skip filesystem-backed work (legacy JSON migration, orphan sweep) there.
+ */
+const FILE_SYSTEM_SUPPORTED = Platform.OS !== 'web';
 
 let migrated = false;
 
 async function migrateFromJson(): Promise<void> {
   if (migrated) return;
   migrated = true;
+  if (!FILE_SYSTEM_SUPPORTED) return;
 
   const jsonFile = new File(Paths.document, 'tracks.json');
   if (!jsonFile.exists) return;
@@ -123,6 +132,8 @@ function deleteFileIfExists(uri: string): void {
  * Returns the number of orphan files removed.
  */
 export function cleanupOrphanFiles(): number {
+  if (!FILE_SYSTEM_SUPPORTED) return 0;
+
   const db = getDatabase();
   let removed = 0;
   try {

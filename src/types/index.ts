@@ -29,7 +29,8 @@ export type ImportErrorCode =
   | 'unsupported_format'
   | 'file_not_found'
   | 'copy_failed'
-  | 'metadata_failed';
+  | 'metadata_failed'
+  | 'unsupported_platform';
 
 export type PlaybackStatus =
   | 'idle'
