@@ -29,6 +29,7 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~9.2.0",
+    "fake-indexeddb": "^6.2.5",
     "jest-expo": "^56.0.4",
     "prettier": "^3.5.0",
     "typescript": "~6.0.3"
