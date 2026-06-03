@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 
 import { Track } from '../types';
 import { getDatabase } from './database';
@@ -8,6 +9,10 @@ let migrated = false;
 async function migrateFromJson(): Promise<void> {
   if (migrated) return;
   migrated = true;
+
+  // expo-file-system's File API is native-only and throws on web; the legacy
+  // JSON store never existed there, so there is nothing to migrate.
+  if (Platform.OS === 'web') return;
 
   const jsonFile = new File(Paths.document, 'tracks.json');
   if (!jsonFile.exists) return;
@@ -123,6 +128,9 @@ function deleteFileIfExists(uri: string): void {
  * Returns the number of orphan files removed.
  */
 export function cleanupOrphanFiles(): number {
+  // No native tracks directory exists on web (Directory ctor throws there).
+  if (Platform.OS === 'web') return 0;
+
   const db = getDatabase();
   let removed = 0;
   try {

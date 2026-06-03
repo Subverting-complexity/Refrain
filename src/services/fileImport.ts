@@ -1,7 +1,13 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
+import { Platform } from 'react-native';
 
 import { AudioFormat, ImportErrorCode, ImportOutcome, Track } from '../types';
+
+// expo-file-system's File/Directory API is native-only. Its web stub omits
+// the `validatePath` method that the constructor calls, so `new File(...)`
+// throws on web. Guard every entry point that would construct one.
+const UNSUPPORTED_ON_WEB_MESSAGE = 'File import is not supported on web';
 
 const SUPPORTED_MIME_TYPES = [
   'audio/mpeg',
@@ -38,6 +44,10 @@ function ensureTracksDir(): Directory {
 }
 
 export async function pickAndImportFile(): Promise<ImportOutcome> {
+  if (Platform.OS === 'web') {
+    return makeError('unsupported_platform', UNSUPPORTED_ON_WEB_MESSAGE);
+  }
+
   const result = await File.pickFileAsync({
     mimeTypes: SUPPORTED_MIME_TYPES,
   });
@@ -60,6 +70,10 @@ export async function importFromUri(
   sourceUri: string,
   originalFilename: string,
 ): Promise<ImportOutcome> {
+  if (Platform.OS === 'web') {
+    return makeError('unsupported_platform', UNSUPPORTED_ON_WEB_MESSAGE);
+  }
+
   const sourceFile = new File(sourceUri);
 
   if (!sourceFile.exists) {
