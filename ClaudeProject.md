@@ -46,19 +46,31 @@ Map workflow purposes to your repository's actual label names.
 
 ### Type
 
-| Purpose    | Label        |
-| ---------- | ------------ |
-| type-story | `type/story` |
-| type-bug   | `type/bug`   |
-| type-debt  | `type/debt`  |
-| type-arch  | `type/arch`  |
+Type labels control mode filtering. `/github-workflow:execute` (default)
+picks the highest-priority issue regardless of type; `--mode feature`
+picks stories only; `--mode maintenance` picks from bug/security/debt/arch.
+
+| Purpose       | Label           |
+| ------------- | --------------- |
+| type-story    | `type/story`    |
+| type-bug      | `type/bug`      |
+| type-security | `type/security` |
+| type-debt     | `type/debt`     |
+| type-arch     | `type/arch`     |
 
 ### Status
 
-| Purpose        | Label            |
-| -------------- | ---------------- |
-| status-ready   | `status/ready`   |
-| status-blocked | `status/blocked` |
+The issue-lifecycle state set. Every issue carries exactly one.
+
+| Purpose                | Label                    |
+| ---------------------- | ------------------------ |
+| status-ready           | `status/ready`           |
+| needs-refinement       | `status/needs-refinement`|
+| status-in-progress     | `status/in-progress`     |
+| status-parked          | `status/parked`          |
+| status-blocked         | `status/blocked`         |
+| status-in-review       | `status/in-review`       |
+| status-needs-attention | `status/needs-attention` |
 
 ### Claude
 
@@ -70,6 +82,21 @@ and managed by the code-review skill.
 | --------------- | ----------------- | ------------ |
 | claude-authored | `claude:authored` | finish-story |
 | claude-blocked  | `claude:blocked`  | block-story  |
+
+## Workflow Settings
+
+| Setting          | Value               |
+| ---------------- | ------------------- |
+| ready-gate       | `both`              |
+| agent-gating     | `disabled`          |
+| refinement-skill | `feature-discovery` |
+
+- **ready-gate** `both` — a story is pickable only when it carries the
+  `status/ready` label **and** sits in the board's `Ready` column.
+- **agent-gating** `disabled` — Claude may pick any ready story without a
+  separate human approval label.
+- **refinement-skill** `feature-discovery` — used to refine a
+  `status/needs-refinement` story when it reaches the front of the queue.
 
 ## Session Budget
 
@@ -106,16 +133,19 @@ Issues should include these sections at minimum:
 | --------------- | -------------------------------- |
 | project-number  | `7`                              |
 | project-node-id | `PVT_kwDODj6aos4BZOQd`           |
+| project-title   | `Refrain`                        |
 | status-field-id | `PVTSSF_lADODj6aos4BZOQdzhUOfOE` |
 
 ### Status Options
 
-| Status      | Option ID  |
-| ----------- | ---------- |
-| Todo        | `ee4b8f56` |
-| In Progress | `bc8d792a` |
-| In Review   | `66276e02` |
-| Done        | `6b4c0f2d` |
+| Purpose         | Status      | Option ID  |
+| --------------- | ----------- | ---------- |
+| col-backlog     | Todo        | `ee4b8f56` |
+| col-ready       | Ready       | `38864860` |
+| col-in-progress | In Progress | `bc8d792a` |
+| col-in-review   | In Review   | `66276e02` |
+| col-blocked     | Blocked     | `98abf0db` |
+| col-done        | Done        | `6b4c0f2d` |
 
 ## Bundled Skills
 
