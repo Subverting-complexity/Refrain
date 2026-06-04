@@ -62,15 +62,15 @@ picks stories only; `--mode maintenance` picks from bug/security/debt/arch.
 
 The issue-lifecycle state set. Every issue carries exactly one.
 
-| Purpose                | Label                    |
-| ---------------------- | ------------------------ |
-| status-ready           | `status/ready`           |
-| needs-refinement       | `status/needs-refinement`|
-| status-in-progress     | `status/in-progress`     |
-| status-parked          | `status/parked`          |
-| status-blocked         | `status/blocked`         |
-| status-in-review       | `status/in-review`       |
-| status-needs-attention | `status/needs-attention` |
+| Purpose                | Label                     |
+| ---------------------- | ------------------------- |
+| status-ready           | `status/ready`            |
+| needs-refinement       | `status/needs-refinement` |
+| status-in-progress     | `status/in-progress`      |
+| status-parked          | `status/parked`           |
+| status-blocked         | `status/blocked`          |
+| status-in-review       | `status/in-review`        |
+| status-needs-attention | `status/needs-attention`  |
 
 ### Claude
 
