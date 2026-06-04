@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
+import { isWebAudioGainSupported } from '../services/webAudioGain';
 import { isIOSWeb } from '../utils/platform';
 
 // Keyboard / screen-reader nudge: 5% of the full range per step.
@@ -51,6 +52,12 @@ export function VolumeControl({
   const volumeThrottle = useDragThrottle();
   const displayVolume = clamp01(dragRatio ?? volume);
   const percent = Math.round(displayVolume * 100);
+
+  // The slider truly attenuates everywhere the Web Audio gain graph is
+  // available (including iOS Safari). Only surface the "use device buttons"
+  // hint on iOS web when that graph is unavailable and volume genuinely
+  // can't be controlled programmatically.
+  const showIOSHint = isIOSWeb() && !isWebAudioGainSupported();
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     trackWidth.current = e.nativeEvent.layout.width;
@@ -151,7 +158,7 @@ export function VolumeControl({
           />
         </View>
       </View>
-      {isIOSWeb() ? (
+      {showIOSHint ? (
         <Text
           style={[
             theme.typography.caption,

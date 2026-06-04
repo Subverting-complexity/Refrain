@@ -23,6 +23,11 @@ jest.mock('../../utils/platform', () => ({
   isIOSWeb: () => mockIsIOSWeb(),
 }));
 
+const mockIsWebAudioGainSupported = jest.fn<boolean, []>();
+jest.mock('../../services/webAudioGain', () => ({
+  isWebAudioGainSupported: () => mockIsWebAudioGainSupported(),
+}));
+
 function renderControl(
   props: Partial<React.ComponentProps<typeof VolumeControl>> = {},
 ) {
@@ -54,6 +59,8 @@ function getTouchArea(tree: ReactTestRenderer) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsIOSWeb.mockReturnValue(false);
+  // Default: no Web Audio gain, so the iOS note reflects the legacy fallback.
+  mockIsWebAudioGainSupported.mockReturnValue(false);
 });
 
 describe('VolumeControl', () => {
@@ -137,8 +144,9 @@ describe('VolumeControl', () => {
     expect(onVolumeChange).toHaveBeenLastCalledWith(0.8);
   });
 
-  it('shows the iOS limitation note only on iOS web', () => {
+  it('shows the iOS limitation note only on iOS web without Web Audio gain', () => {
     mockIsIOSWeb.mockReturnValue(true);
+    mockIsWebAudioGainSupported.mockReturnValue(false);
     const tree = renderControl();
     const texts = tree.root.findAllByType('Text' as never);
     const hasNote = texts.some((t) =>
@@ -150,6 +158,18 @@ describe('VolumeControl', () => {
 
   it('hides the iOS note on non-iOS platforms', () => {
     mockIsIOSWeb.mockReturnValue(false);
+    const tree = renderControl();
+    const texts = tree.root.findAllByType('Text' as never);
+    const hasNote = texts.some((t) =>
+      JSON.stringify(t.props.children).includes('device buttons'),
+    );
+
+    expect(hasNote).toBe(false);
+  });
+
+  it('hides the iOS note on iOS web when Web Audio gain attenuates volume', () => {
+    mockIsIOSWeb.mockReturnValue(true);
+    mockIsWebAudioGainSupported.mockReturnValue(true);
     const tree = renderControl();
     const texts = tree.root.findAllByType('Text' as never);
     const hasNote = texts.some((t) =>
