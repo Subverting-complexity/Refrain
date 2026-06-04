@@ -166,3 +166,77 @@ describe('pickAndImportFile', () => {
     expect(mockPutBlob).not.toHaveBeenCalled();
   });
 });
+
+describe('pickAndImportFile — focus-based dismissal fallback', () => {
+  // Fake DOM input whose `change`/`cancel` listeners are fired manually, plus
+  // a fake `window` so the focus heuristic can be exercised. Mirrors a browser
+  // that never fires `cancel` on dialog dismissal (e.g. some Safari versions).
+  function installFakeDomWithWindow(file: File | null) {
+    const inputListeners: Record<string, () => void> = {};
+    const windowListeners: Record<string, () => void> = {};
+    const input = {
+      type: '',
+      accept: '',
+      style: { display: '' },
+      files: file ? [file] : [],
+      addEventListener: (name: string, cb: () => void) => {
+        inputListeners[name] = cb;
+      },
+      remove: jest.fn(),
+      click: jest.fn(),
+    };
+    (global as unknown as { document: unknown }).document = {
+      createElement: jest.fn(() => input),
+      body: { appendChild: jest.fn() },
+    };
+    (global as unknown as { window: unknown }).window = {
+      addEventListener: (name: string, cb: () => void) => {
+        windowListeners[name] = cb;
+      },
+      removeEventListener: jest.fn((name: string) => {
+        delete windowListeners[name];
+      }),
+    };
+    return { inputListeners, windowListeners, input };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    delete (global as unknown as { window?: unknown }).window;
+  });
+
+  it('resolves cancelled when focus returns and no change fires within the grace period', async () => {
+    const { windowListeners } = installFakeDomWithWindow(null);
+
+    const promise = pickAndImportFile();
+    // Window regains focus after the dialog closes, then the grace period
+    // elapses with no `change`/`cancel` — treat as dismissed.
+    windowListeners.focus?.();
+    jest.advanceTimersByTime(1000);
+
+    const result = await promise;
+    expect(result).toMatchObject({ success: false, error: 'cancelled' });
+    expect(mockPutBlob).not.toHaveBeenCalled();
+  });
+
+  it('does not prematurely cancel when a change fires shortly after focus', async () => {
+    const file = { name: 'late.mp3', size: 4321 } as unknown as File;
+    const { inputListeners, windowListeners } = installFakeDomWithWindow(file);
+
+    const promise = pickAndImportFile();
+    // Focus returns first, then a slightly delayed `change` settles the pick
+    // before the grace period elapses.
+    windowListeners.focus?.();
+    jest.advanceTimersByTime(500);
+    inputListeners.change?.();
+    jest.advanceTimersByTime(1000);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    expect(mockPutBlob).toHaveBeenCalledWith('uuid-1', file);
+  });
+});
