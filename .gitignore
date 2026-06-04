@@ -7,6 +7,10 @@ web-build/
 .DS_Store
 coverage/
 
+# github-workflow plugin per-session scratch (claim refs, plan notes)
+.claude/plan.md
+.claude/claim-issue-*.sha
+
 # Visual Studio
 .vs/
 
