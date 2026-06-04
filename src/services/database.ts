@@ -17,18 +17,32 @@ export function getDatabase(): SQLite.SQLiteDatabase {
         importedAt INTEGER NOT NULL
       );
     `);
-    try {
-      db.execSync(
-        `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
-      );
-    } catch (e: unknown) {
-      // Swallow only "duplicate column" errors; anything else is unexpected
-      if (!(e instanceof Error) || !e.message.includes('duplicate column')) {
-        throw e;
-      }
-    }
+    migrateTracksSchema(db);
   }
   return db;
+}
+
+/**
+ * Bring a legacy `tracks` table up to the current schema.
+ *
+ * `durationEstimated` is part of the `CREATE TABLE` above, so a freshly
+ * created database already has the column. Databases created before the
+ * column existed do not. Rather than issue the `ALTER` unconditionally and
+ * swallow the guaranteed "duplicate column" error on every fresh DB, inspect
+ * the existing columns and only add what is missing.
+ */
+function migrateTracksSchema(database: SQLite.SQLiteDatabase): void {
+  const columns = database.getAllSync<{ name: string }>(
+    `PRAGMA table_info(tracks);`,
+  );
+  const hasDurationEstimated = columns.some(
+    (column) => column.name === 'durationEstimated',
+  );
+  if (!hasDurationEstimated) {
+    database.execSync(
+      `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
+    );
+  }
 }
 
 export function closeDatabase(): void {
