@@ -14,6 +14,13 @@ import { getObjectUrl, putBlob } from './webBlobStore.web';
 
 const ACCEPT = 'audio/*,.mp3,.wav,.aac,.m4a';
 
+/**
+ * Grace period after the window regains focus before a file picker with no
+ * `change` event is treated as dismissed. Long enough not to race a slow
+ * `change`, short enough to recover the UI quickly.
+ */
+const DISMISS_GRACE_MS = 1000;
+
 const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
   mp3: 'mp3',
   wav: 'wav',
@@ -136,10 +143,31 @@ function openFilePicker(): Promise<File | null> {
     input.accept = ACCEPT;
     input.style.display = 'none';
 
+    // Some browsers (e.g. certain Safari versions) never fire `cancel` when
+    // the dialog is dismissed, which would leave this promise unsettled and
+    // the import spinner stuck. As a fallback, watch for the window
+    // regaining focus and, if no `change` has settled within a short grace
+    // period, treat the dialog as dismissed. Only used where a real `window`
+    // with event support exists (the node test environment lacks it).
+    const win =
+      typeof window !== 'undefined' &&
+      typeof window.addEventListener === 'function'
+        ? window
+        : undefined;
+
     let settled = false;
+    let dismissTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const onFocus = () => {
+      if (dismissTimer !== undefined) clearTimeout(dismissTimer);
+      dismissTimer = setTimeout(() => finish(null), DISMISS_GRACE_MS);
+    };
+
     const finish = (file: File | null) => {
       if (settled) return;
       settled = true;
+      if (dismissTimer !== undefined) clearTimeout(dismissTimer);
+      win?.removeEventListener('focus', onFocus);
       input.remove();
       resolve(file);
     };
@@ -149,6 +177,7 @@ function openFilePicker(): Promise<File | null> {
     });
     // `cancel` fires in modern browsers when the dialog is dismissed.
     input.addEventListener('cancel', () => finish(null));
+    win?.addEventListener('focus', onFocus);
 
     document.body.appendChild(input);
     input.click();
