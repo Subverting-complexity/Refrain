@@ -4,6 +4,7 @@ const mockPlayAsync = jest.fn();
 const mockPauseAsync = jest.fn();
 const mockStopAsync = jest.fn();
 const mockSetPositionAsync = jest.fn();
+const mockSetVolumeAsync = jest.fn();
 const mockUnloadAsync = jest.fn();
 const mockSetOnPlaybackStatusUpdate = jest.fn();
 let statusCallback: ((status: unknown) => void) | null = null;
@@ -16,6 +17,7 @@ const mockCreateAsync = jest.fn().mockImplementation((_source, _opts, cb) => {
       pauseAsync: mockPauseAsync,
       stopAsync: mockStopAsync,
       setPositionAsync: mockSetPositionAsync,
+      setVolumeAsync: mockSetVolumeAsync,
       unloadAsync: mockUnloadAsync,
       setOnPlaybackStatusUpdate: mockSetOnPlaybackStatusUpdate,
     },
@@ -31,6 +33,14 @@ jest.mock('expo-av', () => ({
     },
     setAudioModeAsync: mockSetAudioModeAsync,
   },
+}));
+
+const mockGetNumber = jest.fn<number, [string, number]>();
+const mockSetNumber = jest.fn<void, [string, number]>();
+
+jest.mock('../settingsStore', () => ({
+  getNumber: (key: string, fallback: number) => mockGetNumber(key, fallback),
+  setNumber: (key: string, value: number) => mockSetNumber(key, value),
 }));
 
 function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
@@ -51,6 +61,9 @@ beforeEach(() => {
   // setPositionAsync returns a Promise in expo-av; default it to resolve so
   // callers that attach `.catch` (e.g. the loop-rewind seek) work.
   mockSetPositionAsync.mockResolvedValue(undefined);
+  mockSetVolumeAsync.mockResolvedValue(undefined);
+  // Default: no persisted volume, so the engine uses its fallback.
+  mockGetNumber.mockImplementation((_key, fallback) => fallback);
 });
 
 describe('audioEngine', () => {
@@ -395,7 +408,123 @@ describe('audioEngine', () => {
         durationMs: 0,
         markerA: null,
         markerB: null,
+        volume: 1,
       });
+    });
+  });
+
+  describe('volume', () => {
+    it('defaults to full volume', () => {
+      const { getVolume } = require('../audioEngine');
+      expect(getVolume()).toBe(1);
+    });
+
+    it('seeds the loaded sound with the current volume', async () => {
+      const { loadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+
+      expect(mockCreateAsync).toHaveBeenCalledWith(
+        { uri: 'file:///test.mp3' },
+        expect.objectContaining({ volume: 1 }),
+        expect.any(Function),
+      );
+    });
+
+    it('setVolume clamps, applies to the sound, persists, and notifies', async () => {
+      const { loadTrack, setVolume, subscribe } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setVolume(0.3);
+
+      expect(mockSetVolumeAsync).toHaveBeenCalledWith(0.3);
+      expect(mockSetNumber).toHaveBeenCalledWith('playback.volume', 0.3);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ volume: 0.3 }),
+      );
+    });
+
+    it('clamps out-of-range values to 0..1', () => {
+      const { setVolume, getVolume } = require('../audioEngine');
+
+      setVolume(5);
+      expect(getVolume()).toBe(1);
+
+      setVolume(-2);
+      expect(getVolume()).toBe(0);
+    });
+
+    it('setVolume works with no sound loaded and still persists', () => {
+      const { setVolume, getVolume } = require('../audioEngine');
+
+      setVolume(0.5);
+
+      expect(getVolume()).toBe(0.5);
+      expect(mockSetVolumeAsync).not.toHaveBeenCalled();
+      expect(mockSetNumber).toHaveBeenCalledWith('playback.volume', 0.5);
+    });
+
+    it('does not throw when persisting the volume fails', () => {
+      mockSetNumber.mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+      const { setVolume, getVolume } = require('../audioEngine');
+
+      expect(() => setVolume(0.7)).not.toThrow();
+      expect(getVolume()).toBe(0.7);
+    });
+
+    it('does not surface an error when the volume call rejects', async () => {
+      mockSetVolumeAsync.mockRejectedValueOnce(new Error('volume failed'));
+      const { loadTrack, setVolume, subscribe } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setVolume(0.2);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(listener).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'error' }),
+      );
+    });
+
+    it('loadPersistedVolume hydrates from storage and notifies', () => {
+      mockGetNumber.mockImplementation(() => 0.6);
+      const {
+        loadPersistedVolume,
+        getVolume,
+        subscribe,
+      } = require('../audioEngine');
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      loadPersistedVolume();
+
+      expect(mockGetNumber).toHaveBeenCalledWith('playback.volume', 1);
+      expect(getVolume()).toBe(0.6);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ volume: 0.6 }),
+      );
+    });
+
+    it('loadPersistedVolume falls back to default on storage error', () => {
+      mockGetNumber.mockImplementation(() => {
+        throw new Error('db error');
+      });
+      const { loadPersistedVolume, getVolume } = require('../audioEngine');
+
+      expect(() => loadPersistedVolume()).not.toThrow();
+      expect(getVolume()).toBe(1);
     });
   });
 

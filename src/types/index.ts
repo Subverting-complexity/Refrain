@@ -44,6 +44,8 @@ export interface PlaybackState {
   durationMs: number;
   markerA: number | null;
   markerB: number | null;
+  /** App-level playback volume in the range 0..1. */
+  volume: number;
   /** Human-readable reason the track failed to load/play. Set only when status is 'error'. */
   lastError?: string;
 }

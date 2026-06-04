@@ -16,6 +16,10 @@ export function getDatabase(): SQLite.SQLiteDatabase {
         fileSizeBytes INTEGER NOT NULL,
         importedAt INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL
+      );
     `);
     try {
       db.execSync(

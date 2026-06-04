@@ -9,6 +9,7 @@ const IDLE_STATE: PlaybackState = {
   durationMs: 0,
   markerA: null,
   markerB: null,
+  volume: 1,
 };
 
 export function useAudioPlayer(trackUri: string | null) {
@@ -17,6 +18,12 @@ export function useAudioPlayer(trackUri: string | null) {
   useEffect(() => {
     const unsubscribe = audioEngine.subscribe(setState);
     return unsubscribe;
+  }, []);
+
+  // Hydrate the persisted volume once on mount, before the track loads, so
+  // playback starts at the user's saved level rather than the default.
+  useEffect(() => {
+    audioEngine.loadPersistedVolume();
   }, []);
 
   useEffect(() => {
@@ -43,6 +50,7 @@ export function useAudioPlayer(trackUri: string | null) {
     [],
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
+  const setVolume = useCallback((v: number) => audioEngine.setVolume(v), []);
 
   return {
     ...state,
@@ -53,5 +61,6 @@ export function useAudioPlayer(trackUri: string | null) {
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    setVolume,
   };
 }

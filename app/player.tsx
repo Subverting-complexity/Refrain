@@ -9,6 +9,7 @@ import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { TransportControls } from '@/src/components/TransportControls';
+import { VolumeControl } from '@/src/components/VolumeControl';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
@@ -32,6 +33,7 @@ export default function PlayerScreen() {
     markerA,
     markerB,
     lastError,
+    volume,
     play,
     pause,
     stop,
@@ -39,6 +41,7 @@ export default function PlayerScreen() {
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    setVolume,
   } = useAudioPlayer(uri ?? null);
 
   const durationPersisted = useRef(false);
@@ -171,6 +174,12 @@ export default function PlayerScreen() {
           style={styles.seekBar}
         />
 
+        <VolumeControl
+          volume={volume}
+          onVolumeChange={setVolume}
+          style={styles.volume}
+        />
+
         <TransportControls
           status={isCounting ? 'playing' : status}
           onPlay={handlePlay}
@@ -229,6 +238,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   seekBar: {
+    marginBottom: spacing.lg,
+  },
+  volume: {
     marginBottom: spacing.xl,
   },
   transport: {
