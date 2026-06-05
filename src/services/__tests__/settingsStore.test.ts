@@ -2,6 +2,7 @@
 
 const mockRunSync = jest.fn();
 const mockGetFirstSync = jest.fn();
+const mockGetAllSync = jest.fn();
 const mockExecSync = jest.fn();
 const mockCloseSync = jest.fn();
 
@@ -9,6 +10,7 @@ jest.mock('expo-sqlite', () => ({
   openDatabaseSync: jest.fn(() => ({
     runSync: mockRunSync,
     getFirstSync: mockGetFirstSync,
+    getAllSync: mockGetAllSync,
     execSync: mockExecSync,
     closeSync: mockCloseSync,
   })),
@@ -18,6 +20,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.resetModules();
   mockGetFirstSync.mockReturnValue(undefined);
+  // getDatabase() runs the tracks-schema migration, which reads the table's
+  // columns via getAllSync. Report the column as present so no ALTER is issued.
+  mockGetAllSync.mockReturnValue([{ name: 'durationEstimated' }]);
 });
 
 describe('settingsStore', () => {
