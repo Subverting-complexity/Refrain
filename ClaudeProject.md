@@ -87,12 +87,18 @@ and managed by the code-review skill.
 
 | Setting          | Value               |
 | ---------------- | ------------------- |
-| ready-gate       | `both`              |
+| ready-gate       | `none`              |
 | agent-gating     | `disabled`          |
 | refinement-skill | `feature-discovery` |
 
-- **ready-gate** `both` — a story is pickable only when it carries the
-  `status/ready` label **and** sits in the board's `Ready` column.
+- **ready-gate** `none` — the workflow is **not** gated on a ready
+  signal. A story is pickable regardless of whether it carries the
+  `status/ready` label or sits in the board's `Ready` column. Pick the
+  highest-priority open, unassigned issue and start it — the only
+  exclusions are issues that are `status/blocked` or carry
+  `status/needs-refinement` (and, when `agent-gating` is `enabled`,
+  issues lacking the `claude-ready` label). Set this to `label`,
+  `board-column`, or `both` to re-enable gating on the ready signal.
 - **agent-gating** `disabled` — Claude may pick any ready story without a
   separate human approval label.
 - **refinement-skill** `feature-discovery` — used to refine a
