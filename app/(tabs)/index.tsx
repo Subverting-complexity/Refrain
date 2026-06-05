@@ -11,9 +11,11 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ImportButton } from '@/src/components/ImportButton';
+import { Toast } from '@/src/components/Toast';
 import { TrackListItem } from '@/src/components/TrackListItem';
 import { useShareIntent } from '@/src/hooks/useShareIntent';
 import { useTheme } from '@/src/hooks/useTheme';
+import { useToast } from '@/src/hooks/useToast';
 import { pickAndImportFile } from '@/src/services/fileImport';
 import {
   deleteTrack,
@@ -29,6 +31,7 @@ export default function LibraryScreen() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [importing, setImporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const { toast, showToast, hideToast } = useToast();
 
   useFocusEffect(
     useCallback(() => {
@@ -36,8 +39,9 @@ export default function LibraryScreen() {
         .then(setTracks)
         .catch(() => {
           AccessibilityInfo.announceForAccessibility('Failed to load library');
+          showToast('Failed to load library', 'error');
         });
-    }, []),
+    }, [showToast]),
   );
 
   const handleRefresh = useCallback(async () => {
@@ -48,31 +52,41 @@ export default function LibraryScreen() {
       AccessibilityInfo.announceForAccessibility('Library refreshed');
     } catch {
       AccessibilityInfo.announceForAccessibility('Failed to refresh library');
+      showToast('Failed to refresh library', 'error');
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [showToast]);
 
-  const addTrack = useCallback((track: Track) => {
-    try {
-      insertTrack(track);
-      setTracks((prev) => [track, ...prev]);
-    } catch {
-      AccessibilityInfo.announceForAccessibility(
-        'Failed to save track to library',
-      );
-    }
-  }, []);
+  const addTrack = useCallback(
+    (track: Track) => {
+      try {
+        insertTrack(track);
+        setTracks((prev) => [track, ...prev]);
+      } catch {
+        AccessibilityInfo.announceForAccessibility(
+          'Failed to save track to library',
+        );
+        showToast('Failed to save track to library', 'error');
+      }
+    },
+    [showToast],
+  );
 
-  const handleDelete = useCallback((id: string) => {
-    try {
-      deleteTrack(id);
-      setTracks((prev) => prev.filter((t) => t.id !== id));
-      AccessibilityInfo.announceForAccessibility('Track deleted');
-    } catch {
-      AccessibilityInfo.announceForAccessibility('Failed to delete track');
-    }
-  }, []);
+  const handleDelete = useCallback(
+    (id: string) => {
+      try {
+        deleteTrack(id);
+        setTracks((prev) => prev.filter((t) => t.id !== id));
+        AccessibilityInfo.announceForAccessibility('Track deleted');
+        showToast('Track deleted', 'success');
+      } catch {
+        AccessibilityInfo.announceForAccessibility('Failed to delete track');
+        showToast('Failed to delete track', 'error');
+      }
+    },
+    [showToast],
+  );
 
   const handleShareImport = useCallback(
     (track: Track) => {
@@ -80,15 +94,20 @@ export default function LibraryScreen() {
       AccessibilityInfo.announceForAccessibility(
         `Received ${track.filename} from share`,
       );
+      showToast(`Received ${track.filename} from share`, 'success');
     },
-    [addTrack],
+    [addTrack, showToast],
   );
 
-  const handleShareError = useCallback((message: string) => {
-    AccessibilityInfo.announceForAccessibility(
-      `Share import failed: ${message}`,
-    );
-  }, []);
+  const handleShareError = useCallback(
+    (message: string) => {
+      AccessibilityInfo.announceForAccessibility(
+        `Share import failed: ${message}`,
+      );
+      showToast(`Share import failed: ${message}`, 'error');
+    },
+    [showToast],
+  );
 
   const handleTrackPress = useCallback(
     (track: Track) => {
@@ -114,15 +133,17 @@ export default function LibraryScreen() {
         AccessibilityInfo.announceForAccessibility(
           `Imported ${result.track.filename} successfully`,
         );
+        showToast(`Imported ${result.track.filename} successfully`, 'success');
       } else if (result.error !== 'cancelled') {
         AccessibilityInfo.announceForAccessibility(
           `Import failed: ${result.message}`,
         );
+        showToast(`Import failed: ${result.message}`, 'error');
       }
     } finally {
       setImporting(false);
     }
-  }, [addTrack]);
+  }, [addTrack, showToast]);
 
   return (
     <SafeAreaView
@@ -173,6 +194,11 @@ export default function LibraryScreen() {
           />
         </View>
       )}
+      <Toast
+        message={toast?.message ?? null}
+        variant={toast?.variant ?? 'success'}
+        onDismiss={hideToast}
+      />
     </SafeAreaView>
   );
 }
