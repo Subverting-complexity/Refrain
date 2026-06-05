@@ -25,10 +25,15 @@ function makeState(overrides: Partial<CountdownState> = {}): CountdownState {
   };
 }
 
-function renderOverlay(state: CountdownState): ReactTestRenderer {
+function renderOverlay(
+  state: CountdownState,
+  onCancel?: () => void,
+): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(<CountdownOverlay countdownState={state} />);
+    tree = create(
+      <CountdownOverlay countdownState={state} onCancel={onCancel} />,
+    );
   });
   return tree;
 }
@@ -60,5 +65,37 @@ describe('CountdownOverlay', () => {
     const tree = renderOverlay(makeState({ beatsRemaining: 2 }));
     const container = tree.root.findByProps({ accessibilityRole: 'alert' });
     expect(container.props.accessibilityLabel).toBe('Countdown: 2');
+  });
+
+  describe('cancel target', () => {
+    it('exposes a cancel button when onCancel is provided', () => {
+      const onCancel = jest.fn();
+      const tree = renderOverlay(makeState(), onCancel);
+      const button = tree.root.findByProps({ accessibilityRole: 'button' });
+      expect(button.props.accessibilityLabel).toBe('Cancel count-in');
+    });
+
+    it('calls onCancel when the overlay is pressed', () => {
+      const onCancel = jest.fn();
+      const tree = renderOverlay(makeState(), onCancel);
+      const button = tree.root.findByProps({ accessibilityRole: 'button' });
+      act(() => {
+        button.props.onPress();
+      });
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+
+    it('still announces the countdown via the alert live region when cancellable', () => {
+      const tree = renderOverlay(makeState({ beatsRemaining: 2 }), jest.fn());
+      const alert = tree.root.findByProps({ accessibilityRole: 'alert' });
+      expect(alert.props.accessibilityLabel).toBe('Countdown: 2');
+    });
+
+    it('renders a non-interactive overlay (no button) when onCancel is absent', () => {
+      const tree = renderOverlay(makeState());
+      expect(
+        tree.root.findAllByProps({ accessibilityRole: 'button' }),
+      ).toHaveLength(0);
+    });
   });
 });

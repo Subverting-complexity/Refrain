@@ -80,7 +80,10 @@ export default function PlayerScreen() {
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={['bottom']}
     >
-      <CountdownOverlay countdownState={countdownState} />
+      <CountdownOverlay
+        countdownState={countdownState}
+        onCancel={cancelCountdown}
+      />
 
       <View style={styles.waveformArea}>
         {peaks.length > 0 ? (

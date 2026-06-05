@@ -3,14 +3,22 @@ import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
 import { CountdownState } from '../types';
+import { AccessiblePressable } from './AccessiblePressable';
 
 interface CountdownOverlayProps {
   countdownState: CountdownState;
+  /**
+   * Called when the user taps the overlay to cancel a running count-in.
+   * When provided, the whole overlay becomes a cancel target; without it
+   * the overlay is a non-interactive announcement only.
+   */
+  onCancel?: () => void;
   style?: ViewStyle;
 }
 
 export function CountdownOverlay({
   countdownState,
+  onCancel,
   style,
 }: CountdownOverlayProps) {
   const { theme } = useTheme();
@@ -24,9 +32,9 @@ export function CountdownOverlay({
       ? 'GO'
       : String(countdownState.beatsRemaining);
 
-  return (
+  const content = (
     <View
-      style={[styles.container, style]}
+      style={styles.announcer}
       accessibilityRole="alert"
       accessibilityLabel={`Countdown: ${display}`}
       accessibilityLiveRegion="assertive"
@@ -39,6 +47,22 @@ export function CountdownOverlay({
       </Text>
     </View>
   );
+
+  if (onCancel) {
+    return (
+      <AccessiblePressable
+        style={[styles.container, style]}
+        onPress={onCancel}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel count-in"
+        accessibilityHint="Stops the count-in and returns to the track without playing"
+      >
+        {content}
+      </AccessiblePressable>
+    );
+  }
+
+  return <View style={[styles.container, style]}>{content}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -47,6 +71,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+  },
+  announcer: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
