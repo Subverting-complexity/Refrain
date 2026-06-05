@@ -64,6 +64,29 @@ findings.
 - 80% coverage threshold on branches/functions/lines/statements
 - Tests written alongside code, not after
 
+## Auto-Merge on Approval
+
+| Setting                 | Value  |
+| ----------------------- | ------ |
+| auto-merge-on-approval  | `true` |
+| require-ci-before-merge | `true` |
+
+- **auto-merge-on-approval** `true` — once the code-review skill approves
+  a PR and posts its review comment, it squash-merges the PR
+  unattended.
+- **require-ci-before-merge** `true` — GitHub cannot enforce required
+  status checks on this private repo (Free plan: branch protection with
+  required checks returns 403), so the plugin enforces the gate instead.
+  The code-review skill waits for a green CI run and **pauses** an
+  approved PR that has no checks or a red/pending check, rather than
+  merging it. The gating CI check is the `Quality Gate` job in
+  `.github/workflows/ci.yml`.
+
+> To switch to GitHub-enforced merge gating (and drop the
+> `require-ci-before-merge` fallback), the repo must go public or move to
+> GitHub Pro/Team/Enterprise, then re-run `/github-workflow:setup harden`
+> to apply branch protection with the `Quality Gate` required check.
+
 ## Review Comment Footer
 
 ```
