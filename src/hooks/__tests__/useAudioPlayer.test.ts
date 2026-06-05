@@ -10,11 +10,14 @@ const IDLE_STATE: PlaybackState = {
   durationMs: 0,
   markerA: null,
   markerB: null,
+  volume: 1,
 };
 
 let subscriber: ((state: PlaybackState) => void) | null = null;
 const mockLoadTrack = jest.fn<Promise<void>, [string]>();
 const mockUnloadTrack = jest.fn<Promise<void>, []>();
+const mockSetVolume = jest.fn<void, [number]>();
+const mockLoadPersistedVolume = jest.fn<void, []>();
 
 jest.mock('../../services/audioEngine', () => ({
   subscribe: (cb: (state: PlaybackState) => void) => {
@@ -33,6 +36,8 @@ jest.mock('../../services/audioEngine', () => ({
   setMarkerA: jest.fn(),
   setMarkerB: jest.fn(),
   clearMarkers: jest.fn(),
+  setVolume: (v: number) => mockSetVolume(v),
+  loadPersistedVolume: () => mockLoadPersistedVolume(),
 }));
 
 let lastResult: ReturnType<typeof useAudioPlayer>;
@@ -106,5 +111,31 @@ describe('useAudioPlayer', () => {
     });
 
     expect(mockUnloadTrack).toHaveBeenCalled();
+  });
+
+  it('loads the persisted volume once on mount', () => {
+    renderHook(null);
+
+    expect(mockLoadPersistedVolume).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes volume from engine state', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      subscriber?.({ ...IDLE_STATE, volume: 0.4 });
+    });
+
+    expect(lastResult.volume).toBe(0.4);
+  });
+
+  it('forwards setVolume to the engine', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      lastResult.setVolume(0.25);
+    });
+
+    expect(mockSetVolume).toHaveBeenCalledWith(0.25);
   });
 });
