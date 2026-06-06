@@ -116,8 +116,16 @@ function findToastMessage(tree: ReactTestRenderer): string | undefined {
 }
 
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   mockAudioPlayerState.markerB = null;
+});
+
+afterEach(() => {
+  act(() => {
+    jest.runAllTimers();
+  });
+  jest.useRealTimers();
 });
 
 describe('PlayerScreen marker B feedback', () => {
