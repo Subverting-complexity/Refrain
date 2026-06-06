@@ -1,4 +1,3 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 
 import { useTheme } from '@/src/hooks/useTheme';
@@ -9,12 +8,9 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-        },
+        // Single-tab navigator: hide the orphaned bottom tab bar until a
+        // second destination exists. See issue #83.
+        tabBarStyle: { display: 'none' },
         headerStyle: { backgroundColor: theme.colors.background },
         headerTintColor: theme.colors.textPrimary,
         headerShadowVisible: false,
@@ -24,10 +20,6 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Library',
-          tabBarAccessibilityLabel: 'Track library',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="library-outline" size={size} color={color} />
-          ),
         }}
       />
     </Tabs>
