@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { AccessibilityInfo, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
