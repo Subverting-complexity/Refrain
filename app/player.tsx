@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -103,112 +103,117 @@ export default function PlayerScreen() {
         onCancel={cancelCountdown}
       />
 
-      <View style={styles.waveformArea}>
-        {peaks.length > 0 ? (
-          <WaveformView
-            peaks={peaks}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.waveformArea}>
+          {peaks.length > 0 ? (
+            <WaveformView
+              peaks={peaks}
+              positionMs={positionMs}
+              durationMs={durationMs}
+              onSeek={seekTo}
+              markerA={markerA ?? undefined}
+              markerB={markerB ?? undefined}
+              onMarkerAChange={setMarkerA}
+              onMarkerBChange={setMarkerB}
+            />
+          ) : (
+            <View
+              style={[
+                styles.artworkPlaceholder,
+                { backgroundColor: theme.colors.surface },
+              ]}
+            >
+              <Ionicons
+                name="musical-notes"
+                size={64}
+                color={theme.colors.accent}
+              />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.trackInfo}>
+          <Text
+            style={[theme.typography.heading, styles.trackName]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {filename ?? 'Unknown track'}
+          </Text>
+        </View>
+
+        {status === 'error' && (
+          <View style={styles.errorBanner}>
+            <View style={styles.errorHeadline}>
+              <Ionicons
+                name="alert-circle"
+                size={20}
+                color={theme.colors.error}
+              />
+              <Text
+                style={[theme.typography.body, { color: theme.colors.error }]}
+              >
+                Unable to load this track
+              </Text>
+            </View>
+            {lastError ? (
+              <Text
+                style={[
+                  theme.typography.caption,
+                  { color: theme.colors.textSecondary },
+                ]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
+                {lastError}
+              </Text>
+            ) : null}
+          </View>
+        )}
+
+        <View style={styles.controls}>
+          <CountdownSettings
+            config={countdownConfig}
+            onConfigChange={setCountdownConfig}
+            style={styles.countdownSettings}
+          />
+
+          <MarkerControls
+            status={status}
+            positionMs={positionMs}
+            markerA={markerA}
+            markerB={markerB}
+            onSetMarkerA={setMarkerA}
+            onSetMarkerB={handleSetMarkerB}
+            onClearMarkers={clearMarkers}
+            style={styles.markers}
+          />
+
+          <SeekBar
             positionMs={positionMs}
             durationMs={durationMs}
             onSeek={seekTo}
-            markerA={markerA ?? undefined}
-            markerB={markerB ?? undefined}
-            onMarkerAChange={setMarkerA}
-            onMarkerBChange={setMarkerB}
+            style={styles.seekBar}
           />
-        ) : (
-          <View
-            style={[
-              styles.artworkPlaceholder,
-              { backgroundColor: theme.colors.surface },
-            ]}
-          >
-            <Ionicons
-              name="musical-notes"
-              size={64}
-              color={theme.colors.accent}
-            />
-          </View>
-        )}
-      </View>
 
-      <View style={styles.trackInfo}>
-        <Text
-          style={[theme.typography.heading, styles.trackName]}
-          numberOfLines={2}
-          ellipsizeMode="tail"
-        >
-          {filename ?? 'Unknown track'}
-        </Text>
-      </View>
+          <VolumeControl
+            volume={volume}
+            onVolumeChange={setVolume}
+            style={styles.volume}
+          />
 
-      {status === 'error' && (
-        <View style={styles.errorBanner}>
-          <View style={styles.errorHeadline}>
-            <Ionicons
-              name="alert-circle"
-              size={20}
-              color={theme.colors.error}
-            />
-            <Text
-              style={[theme.typography.body, { color: theme.colors.error }]}
-            >
-              Unable to load this track
-            </Text>
-          </View>
-          {lastError ? (
-            <Text
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.textSecondary },
-              ]}
-              numberOfLines={2}
-              ellipsizeMode="tail"
-            >
-              {lastError}
-            </Text>
-          ) : null}
+          <TransportControls
+            status={isCounting ? 'playing' : status}
+            onPlay={handlePlay}
+            onPause={isCounting ? cancelCountdown : pause}
+            onStop={stop}
+            style={styles.transport}
+          />
         </View>
-      )}
-
-      <View style={styles.controls}>
-        <CountdownSettings
-          config={countdownConfig}
-          onConfigChange={setCountdownConfig}
-          style={styles.countdownSettings}
-        />
-
-        <MarkerControls
-          status={status}
-          positionMs={positionMs}
-          markerA={markerA}
-          markerB={markerB}
-          onSetMarkerA={setMarkerA}
-          onSetMarkerB={handleSetMarkerB}
-          onClearMarkers={clearMarkers}
-          style={styles.markers}
-        />
-
-        <SeekBar
-          positionMs={positionMs}
-          durationMs={durationMs}
-          onSeek={seekTo}
-          style={styles.seekBar}
-        />
-
-        <VolumeControl
-          volume={volume}
-          onVolumeChange={setVolume}
-          style={styles.volume}
-        />
-
-        <TransportControls
-          status={isCounting ? 'playing' : status}
-          onPlay={handlePlay}
-          onPause={isCounting ? cancelCountdown : pause}
-          onStop={stop}
-          style={styles.transport}
-        />
-      </View>
+      </ScrollView>
 
       <Toast
         message={toast?.message ?? null}
@@ -223,8 +228,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  waveformArea: {
+  scroll: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  waveformArea: {
+    flexGrow: 1,
+    minHeight: 200,
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,
   },
