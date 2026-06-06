@@ -28,9 +28,9 @@ export function CountdownOverlay({
   }
 
   const display =
-    countdownState.beatsRemaining <= 0
+    countdownState.displayValue <= 0
       ? 'GO'
-      : String(countdownState.beatsRemaining);
+      : String(countdownState.displayValue);
 
   const content = (
     <View

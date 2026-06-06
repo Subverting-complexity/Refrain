@@ -72,4 +72,6 @@ export interface CountdownState {
   beatsRemaining: number;
   totalBeats: number;
   currentBeat: number;
+  /** Number to display in the overlay. Equals beatsRemaining for bars-type; equals seconds remaining for seconds-type. */
+  displayValue: number;
 }

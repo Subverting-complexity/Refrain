@@ -15,6 +15,7 @@ const IDLE_STATE: CountdownState = {
   beatsRemaining: 0,
   totalBeats: 0,
   currentBeat: 0,
+  displayValue: 0,
 };
 
 interface UseCountdownOptions {
