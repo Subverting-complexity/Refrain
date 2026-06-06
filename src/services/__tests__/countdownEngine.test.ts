@@ -155,6 +155,7 @@ describe('countdownEngine', () => {
           totalBeats: 4,
           beatsRemaining: 4,
           currentBeat: 0,
+          displayValue: 4,
         }),
       );
     });
@@ -187,6 +188,97 @@ describe('countdownEngine', () => {
       jest.advanceTimersByTime(2000);
 
       expect(mockCreateAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('displayValue for bars-type duration', () => {
+    it('equals beatsRemaining on initial state', async () => {
+      const listener = jest.fn();
+      countdownEngine.subscribe(listener);
+      listener.mockClear();
+
+      await countdownEngine.start(silentConfig(), jest.fn());
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ beatsRemaining: 4, displayValue: 4 }),
+      );
+    });
+
+    it('counts down with beatsRemaining as ticks fire', async () => {
+      const states: CountdownState[] = [];
+      countdownEngine.subscribe((s) => states.push({ ...s }));
+      await countdownEngine.start(silentConfig(), jest.fn());
+
+      jest.advanceTimersByTime(500); // beat 1
+      jest.advanceTimersByTime(500); // beat 2
+
+      const counting = states.filter((s) => s.phase === 'counting');
+      expect(counting[0].displayValue).toBe(4); // initial
+      expect(counting[1].displayValue).toBe(3); // after beat 1
+      expect(counting[2].displayValue).toBe(2); // after beat 2
+    });
+  });
+
+  describe('displayValue for seconds-type duration', () => {
+    it('shows total seconds on initial state, not total beats', async () => {
+      const listener = jest.fn();
+      countdownEngine.subscribe(listener);
+      listener.mockClear();
+
+      // 3s at 120 BPM = 6 beats, but displayValue should start at 3
+      await countdownEngine.start(
+        silentConfig({ duration: { type: 'seconds', seconds: 3 } }),
+        jest.fn(),
+      );
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ beatsRemaining: 6, displayValue: 3 }),
+      );
+    });
+
+    it('decrements in seconds as beats fire', async () => {
+      const states: CountdownState[] = [];
+      countdownEngine.subscribe((s) => states.push({ ...s }));
+
+      // 3s at 120 BPM = 6 beats (totalBeats=6)
+      await countdownEngine.start(
+        silentConfig({ duration: { type: 'seconds', seconds: 3 } }),
+        jest.fn(),
+      );
+
+      // The drift-corrected timer fires beat 1 at 500ms, then immediately
+      // fires beat 2 with a 0ms delay (both within the same 500ms advance).
+      // Beat 3 is scheduled with a 500ms delay, so the 2nd advance fires it.
+      jest.advanceTimersByTime(500); // fires beats 1 & 2 (0-delay chain)
+      jest.advanceTimersByTime(500); // fires beat 3
+      jest.advanceTimersByTime(500); // fires beat 4
+
+      const counting = states.filter((s) => s.phase === 'counting');
+      // counting[0]: initial, beatsRemaining=6, ceil(6/6*3)=3
+      expect(counting[0].displayValue).toBe(3);
+      // counting[1]: beat 1, beatsRemaining=5, ceil(5/6*3)=ceil(2.5)=3
+      expect(counting[1].displayValue).toBe(3);
+      // counting[2]: beat 2, beatsRemaining=4, ceil(4/6*3)=ceil(2.0)=2
+      expect(counting[2].displayValue).toBe(2);
+      // counting[3]: beat 3, beatsRemaining=3, ceil(3/6*3)=ceil(1.5)=2
+      expect(counting[3].displayValue).toBe(2);
+      // counting[4]: beat 4, beatsRemaining=2, ceil(2/6*3)=ceil(1.0)=1
+      expect(counting[4].displayValue).toBe(1);
+    });
+
+    it('never shows a value below 1 while counting', async () => {
+      const states: CountdownState[] = [];
+      countdownEngine.subscribe((s) => states.push({ ...s }));
+
+      await countdownEngine.start(
+        silentConfig({ duration: { type: 'seconds', seconds: 1 } }),
+        jest.fn(),
+      );
+
+      jest.advanceTimersByTime(1000);
+
+      const counting = states.filter((s) => s.phase === 'counting');
+      expect(counting.every((s) => s.displayValue >= 1)).toBe(true);
     });
   });
 

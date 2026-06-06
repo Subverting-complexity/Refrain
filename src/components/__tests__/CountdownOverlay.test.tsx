@@ -21,6 +21,7 @@ function makeState(overrides: Partial<CountdownState> = {}): CountdownState {
     beatsRemaining: 3,
     totalBeats: 4,
     currentBeat: 1,
+    displayValue: 3,
     ...overrides,
   };
 }
@@ -49,20 +50,30 @@ describe('CountdownOverlay', () => {
     expect(tree.toJSON()).toBeNull();
   });
 
-  it('renders beat count during countdown', () => {
+  it('renders the displayValue during countdown', () => {
     const tree = renderOverlay(makeState());
     const json = tree.toJSON();
     expect(JSON.stringify(json)).toContain('3');
   });
 
-  it('renders GO when beatsRemaining is 0', () => {
-    const tree = renderOverlay(makeState({ beatsRemaining: 0 }));
+  it('shows seconds remaining for a seconds-type countdown (displayValue differs from beatsRemaining)', () => {
+    // 3s at 120 BPM = 6 beats, but displayValue is 3 (seconds)
+    const tree = renderOverlay(
+      makeState({ beatsRemaining: 6, totalBeats: 6, displayValue: 3 }),
+    );
+    const json = tree.toJSON();
+    expect(JSON.stringify(json)).toContain('3');
+    expect(JSON.stringify(json)).not.toContain('"6"');
+  });
+
+  it('renders GO when displayValue is 0', () => {
+    const tree = renderOverlay(makeState({ displayValue: 0 }));
     const json = tree.toJSON();
     expect(JSON.stringify(json)).toContain('GO');
   });
 
   it('has accessibility label', () => {
-    const tree = renderOverlay(makeState({ beatsRemaining: 2 }));
+    const tree = renderOverlay(makeState({ displayValue: 2 }));
     const container = tree.root.findByProps({ accessibilityRole: 'alert' });
     expect(container.props.accessibilityLabel).toBe('Countdown: 2');
   });
@@ -86,7 +97,7 @@ describe('CountdownOverlay', () => {
     });
 
     it('still announces the countdown via the alert live region when cancellable', () => {
-      const tree = renderOverlay(makeState({ beatsRemaining: 2 }), jest.fn());
+      const tree = renderOverlay(makeState({ displayValue: 2 }), jest.fn());
       const alert = tree.root.findByProps({ accessibilityRole: 'alert' });
       expect(alert.props.accessibilityLabel).toBe('Countdown: 2');
     });

@@ -9,6 +9,7 @@ const IDLE_STATE: CountdownState = {
   beatsRemaining: 0,
   totalBeats: 0,
   currentBeat: 0,
+  displayValue: 0,
 };
 
 const DEFAULT_BPM = 120;
@@ -65,6 +66,21 @@ async function playClick(): Promise<void> {
 }
 
 let startTimestamp = 0;
+let activeDuration: CountdownDuration | null = null;
+let activeTotalBeats = 0;
+
+function computeDisplayValue(beatsRemaining: number): number {
+  if (!activeDuration || activeDuration.type === 'bars') {
+    return beatsRemaining;
+  }
+  // For seconds-type: map remaining beats proportionally to remaining seconds.
+  // This is beat-count-based (not wall-clock-based) so it works correctly with
+  // the drift-corrected timer that may fire zero-delay ticks at the same timestamp.
+  return Math.max(
+    1,
+    Math.ceil((beatsRemaining / activeTotalBeats) * activeDuration.seconds),
+  );
+}
 
 async function tick(
   config: CountdownConfig,
@@ -82,6 +98,7 @@ async function tick(
       beatsRemaining: 0,
       totalBeats: currentState.totalBeats,
       currentBeat: currentState.totalBeats,
+      displayValue: 0,
     };
     notify(currentState);
     onFinished();
@@ -89,11 +106,13 @@ async function tick(
   }
 
   const nextBeat = currentState.currentBeat + 1;
+  const nextBeatsRemaining = currentState.beatsRemaining - 1;
   currentState = {
     phase: 'counting',
-    beatsRemaining: currentState.beatsRemaining - 1,
+    beatsRemaining: nextBeatsRemaining,
     totalBeats: currentState.totalBeats,
     currentBeat: nextBeat,
+    displayValue: computeDisplayValue(nextBeatsRemaining),
   };
   notify(currentState);
 
@@ -117,21 +136,24 @@ export async function start(
   }
 
   const totalBeats = computeTotalBeats(config.duration, config.bpm);
+  activeDuration = config.duration;
+  activeTotalBeats = totalBeats;
 
   if (config.mode === 'metronome') {
     await loadClick();
   }
 
+  startTimestamp = Date.now();
   currentState = {
     phase: 'counting',
     beatsRemaining: totalBeats,
     totalBeats,
     currentBeat: 0,
+    displayValue: computeDisplayValue(totalBeats),
   };
   notify(currentState);
 
   const interval = beatIntervalMs(config.bpm);
-  startTimestamp = Date.now();
   timerId = setTimeout(() => {
     void tick(config, onFinished);
   }, interval);
@@ -142,6 +164,8 @@ export function cancel(): void {
     clearTimeout(timerId);
     timerId = null;
   }
+  activeDuration = null;
+  activeTotalBeats = 0;
   if (currentState.phase !== 'idle') {
     currentState = { ...IDLE_STATE };
     notify(currentState);
