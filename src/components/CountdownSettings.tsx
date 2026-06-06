@@ -35,6 +35,7 @@ export function CountdownSettings({
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
   const [bpmText, setBpmText] = useState(String(config.bpm));
+  const [bpmValid, setBpmValid] = useState(true);
 
   const toggleEnabled = () => {
     onConfigChange({ ...config, enabled: !config.enabled });
@@ -53,12 +54,28 @@ export function CountdownSettings({
     setBpmText(digits);
     const parsed = parseInt(digits, 10);
     if (!isNaN(parsed) && parsed > 0 && parsed <= 300) {
+      setBpmValid(true);
       onConfigChange({ ...config, bpm: parsed });
+    } else {
+      setBpmValid(false);
     }
   };
 
   const handleBpmBlur = () => {
-    setBpmText(String(config.bpm));
+    if (bpmText === '') {
+      setBpmText(String(config.bpm));
+      setBpmValid(true);
+      return;
+    }
+    const parsed = parseInt(bpmText, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      setBpmText('1');
+      onConfigChange({ ...config, bpm: 1 });
+    } else if (parsed > 300) {
+      setBpmText('300');
+      onConfigChange({ ...config, bpm: 300 });
+    }
+    setBpmValid(true);
   };
 
   const showBpm =
@@ -183,26 +200,43 @@ export function CountdownSettings({
           </View>
 
           {showBpm && (
-            <View style={styles.row}>
-              <Text style={[theme.typography.bodySmall, styles.label]}>
-                BPM
-              </Text>
-              <TextInput
-                accessibilityLabel="BPM"
-                keyboardType="number-pad"
-                value={bpmText}
-                onChangeText={handleBpmChange}
-                onBlur={handleBpmBlur}
-                maxLength={3}
+            <View style={styles.bpmSection}>
+              <View style={styles.row}>
+                <Text style={[theme.typography.bodySmall, styles.label]}>
+                  BPM
+                </Text>
+                <TextInput
+                  accessibilityLabel="BPM"
+                  keyboardType="number-pad"
+                  value={bpmText}
+                  onChangeText={handleBpmChange}
+                  onBlur={handleBpmBlur}
+                  maxLength={3}
+                  style={[
+                    styles.bpmInput,
+                    {
+                      color: theme.colors.textPrimary,
+                      backgroundColor: theme.colors.surface,
+                      borderColor: bpmValid
+                        ? theme.colors.border
+                        : theme.colors.error,
+                    },
+                  ]}
+                />
+              </View>
+              <Text
                 style={[
-                  styles.bpmInput,
+                  theme.typography.caption,
+                  styles.bpmHint,
                   {
-                    color: theme.colors.textPrimary,
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.border,
+                    color: bpmValid
+                      ? theme.colors.textSecondary
+                      : theme.colors.error,
                   },
                 ]}
-              />
+              >
+                1–300
+              </Text>
             </View>
           )}
         </>
@@ -259,5 +293,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     textAlign: 'center',
     fontSize: 16,
+  },
+  bpmSection: {
+    gap: spacing.xs,
+  },
+  bpmHint: {
+    textAlign: 'right',
   },
 });
