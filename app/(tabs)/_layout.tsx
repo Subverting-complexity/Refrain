@@ -9,7 +9,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         // Single-tab navigator: hide the orphaned bottom tab bar until a
-        // second destination exists. See issue #83.
+        // second destination exists.
         tabBarStyle: { display: 'none' },
         headerStyle: { backgroundColor: theme.colors.background },
         headerTintColor: theme.colors.textPrimary,
