@@ -46,7 +46,7 @@ export function useAudioPlayer(trackUri: string | null) {
     [],
   );
   const setMarkerB = useCallback(
-    (ms: number) => audioEngine.setMarkerB(ms),
+    (ms: number): boolean => audioEngine.setMarkerB(ms),
     [],
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);

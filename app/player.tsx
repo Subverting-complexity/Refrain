@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -8,15 +8,19 @@ import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
+import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
 import { VolumeControl } from '@/src/components/VolumeControl';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useToast } from '@/src/hooks/useToast';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
+
+const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
@@ -55,6 +59,20 @@ export default function PlayerScreen() {
       }
     }
   }, [trackId, durationMs]);
+
+  const { toast, showToast, hideToast } = useToast();
+
+  // The B button rejects placements at or before A. Surface that instead of
+  // failing silently: announce for screen readers and show a visible toast.
+  const handleSetMarkerB = useCallback(
+    (positionMs: number) => {
+      if (!setMarkerB(positionMs)) {
+        AccessibilityInfo.announceForAccessibility(MARKER_B_BEFORE_A_MESSAGE);
+        showToast(MARKER_B_BEFORE_A_MESSAGE, 'error');
+      }
+    },
+    [setMarkerB, showToast],
+  );
 
   const { peaks } = useWaveformData(uri ?? null);
   const {
@@ -165,7 +183,7 @@ export default function PlayerScreen() {
           markerA={markerA}
           markerB={markerB}
           onSetMarkerA={setMarkerA}
-          onSetMarkerB={setMarkerB}
+          onSetMarkerB={handleSetMarkerB}
           onClearMarkers={clearMarkers}
           style={styles.markers}
         />
@@ -191,6 +209,12 @@ export default function PlayerScreen() {
           style={styles.transport}
         />
       </View>
+
+      <Toast
+        message={toast?.message ?? null}
+        variant={toast?.variant}
+        onDismiss={hideToast}
+      />
     </SafeAreaView>
   );
 }

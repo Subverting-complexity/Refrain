@@ -17,6 +17,7 @@ let subscriber: ((state: PlaybackState) => void) | null = null;
 const mockLoadTrack = jest.fn<Promise<void>, [string]>();
 const mockUnloadTrack = jest.fn<Promise<void>, []>();
 const mockSetVolume = jest.fn<void, [number]>();
+const mockSetMarkerB = jest.fn<boolean, [number]>();
 const mockLoadPersistedVolume = jest.fn<void, []>();
 
 jest.mock('../../services/audioEngine', () => ({
@@ -34,7 +35,7 @@ jest.mock('../../services/audioEngine', () => ({
   stop: jest.fn(),
   seekTo: jest.fn(),
   setMarkerA: jest.fn(),
-  setMarkerB: jest.fn(),
+  setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
   setVolume: (v: number) => mockSetVolume(v),
   loadPersistedVolume: () => mockLoadPersistedVolume(),
@@ -137,5 +138,23 @@ describe('useAudioPlayer', () => {
     });
 
     expect(mockSetVolume).toHaveBeenCalledWith(0.25);
+  });
+
+  it('forwards setMarkerB and returns the engine result', () => {
+    renderHook('file:///test.mp3');
+
+    mockSetMarkerB.mockReturnValueOnce(true);
+    let applied: boolean | undefined;
+    act(() => {
+      applied = lastResult.setMarkerB(10000);
+    });
+    expect(mockSetMarkerB).toHaveBeenCalledWith(10000);
+    expect(applied).toBe(true);
+
+    mockSetMarkerB.mockReturnValueOnce(false);
+    act(() => {
+      applied = lastResult.setMarkerB(1000);
+    });
+    expect(applied).toBe(false);
   });
 });

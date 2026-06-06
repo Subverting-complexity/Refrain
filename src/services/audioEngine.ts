@@ -308,11 +308,18 @@ export function setMarkerA(positionMs: number): void {
   notify(currentState);
 }
 
-export function setMarkerB(positionMs: number): void {
-  if (markerA != null && positionMs <= markerA) return;
+/**
+ * Set the B (loop end) marker. Returns `true` when the placement is
+ * applied, or `false` when it is rejected because B would fall at or
+ * before A (the A < B invariant must hold). Callers use the boolean to
+ * surface feedback instead of failing silently.
+ */
+export function setMarkerB(positionMs: number): boolean {
+  if (markerA != null && positionMs <= markerA) return false;
   markerB = positionMs;
   currentState = { ...currentState, markerB };
   notify(currentState);
+  return true;
 }
 
 export function clearMarkers(): void {
