@@ -666,8 +666,9 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      setMarkerB(10000);
+      const applied = setMarkerB(10000);
 
+      expect(applied).toBe(true);
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ markerA: 5000, markerB: 10000 }),
       );
@@ -689,9 +690,28 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      setMarkerB(5000);
+      const applied = setMarkerB(5000);
 
+      expect(applied).toBe(false);
       expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('returns true when no A marker is set', async () => {
+      const { loadTrack, setMarkerB, subscribe } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      const applied = setMarkerB(5000);
+
+      expect(applied).toBe(true);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerB: 5000 }),
+      );
     });
   });
 

@@ -108,6 +108,20 @@ export function WaveformView({
     [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
   );
 
+  // Keep a dragged marker valid relative to its sibling. The B handle can
+  // never be placed at or before A (the A < B invariant the engine enforces),
+  // so clamp it to just past A — the handle visibly stops at the boundary
+  // instead of snapping back silently when dropped before A.
+  const clampForTarget = useCallback(
+    (target: DragTarget, ms: number): number => {
+      if (target === 'markerB' && markerA != null) {
+        return Math.min(durationMs, Math.max(ms, markerA + 1));
+      }
+      return ms;
+    },
+    [markerA, durationMs],
+  );
+
   // The callback for the active drag target. markerA/markerB targets are
   // only chosen by detectDragTarget when their handler exists, so seek (with
   // its always-present onSeek) is the safe fallback.
@@ -125,23 +139,31 @@ export function WaveformView({
   const handleGrant = useCallback(
     (e: GestureResponderEvent) => {
       dragTarget.current = detectDragTarget(e);
-      const ms = positionFromEvent(e);
-      if (ms == null) return;
+      const raw = positionFromEvent(e);
+      if (raw == null) return;
+      const ms = clampForTarget(dragTarget.current, raw);
       setDragMs(ms);
       dragThrottle.begin(ms, callbackForTarget(dragTarget.current));
     },
-    [detectDragTarget, positionFromEvent, callbackForTarget, dragThrottle],
+    [
+      detectDragTarget,
+      positionFromEvent,
+      clampForTarget,
+      callbackForTarget,
+      dragThrottle,
+    ],
   );
 
   // Drag move: update the visual every frame, but throttle native calls.
   const handleMove = useCallback(
     (e: GestureResponderEvent) => {
-      const ms = positionFromEvent(e);
-      if (ms == null) return;
+      const raw = positionFromEvent(e);
+      if (raw == null) return;
+      const ms = clampForTarget(dragTarget.current, raw);
       setDragMs(ms);
       dragThrottle.move(ms);
     },
-    [positionFromEvent, dragThrottle],
+    [positionFromEvent, clampForTarget, dragThrottle],
   );
 
   // Drag end (or interruption): commit the final value, then drop back to

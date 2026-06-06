@@ -362,6 +362,52 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
+    it('clamps the B handle so it cannot be dragged before marker A', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 2000,
+        markerB: 8000,
+        durationMs: 10000,
+        onMarkerBChange,
+        onSeek,
+      });
+
+      const touchArea = getTouchArea(tree);
+
+      act(() => {
+        touchArea.props.onLayout({
+          nativeEvent: { layout: { width: 300 } },
+        });
+      });
+
+      // Grab the B handle (markerB X ≈ 233px on a 276px track).
+      nowSpy.mockReturnValue(1000);
+      act(() => {
+        touchArea.props.onResponderGrant({
+          nativeEvent: { locationX: 233 },
+        });
+      });
+
+      onMarkerBChange.mockClear();
+
+      // Drag well before A; the value must clamp to just past A (2001ms),
+      // never to or below A.
+      nowSpy.mockReturnValue(1100);
+      act(() => {
+        touchArea.props.onResponderMove({
+          nativeEvent: { locationX: 30 },
+        });
+      });
+
+      expect(onMarkerBChange).toHaveBeenCalledWith(2001);
+      onMarkerBChange.mock.calls.forEach(([ms]) => {
+        expect(ms).toBeGreaterThan(2000);
+      });
+      nowSpy.mockRestore();
+    });
+
     it('falls back to seek when touch is not near any marker', () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
