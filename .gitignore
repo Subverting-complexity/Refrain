@@ -7,6 +7,10 @@ web-build/
 .DS_Store
 coverage/
 
+# Local store-build logs (tools/ps/)
+tools/ps/ios-build-log.json
+tools/ps/android-build-log.json
+
 # github-workflow plugin per-session scratch (claim refs, plan notes)
 .claude/plan.md
 .claude/claim-issue-*.sha
