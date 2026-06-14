@@ -8,6 +8,7 @@
     "scheme": "refrain",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.subvertingcomplexity.refrain",
       "supportsTablet": true,
       "infoPlist": {
         "CFBundleDocumentTypes": [
@@ -25,6 +26,7 @@
       }
     },
     "android": {
+      "package": "com.subvertingcomplexity.refrain",
       "adaptiveIcon": {
         "backgroundColor": "#111d1f",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -74,6 +76,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b3f9dbaa-1728-42db-ac27-e8951eabb6b3"
+      }
     }
   }
 }
