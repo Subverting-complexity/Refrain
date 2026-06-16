@@ -18,6 +18,52 @@ jest.mock('../../hooks/useTheme', () => ({
   }),
 }));
 
+// Stub gesture-handler: GestureDetector renders its child and Gesture.Pan()
+// records its callbacks so the test can drive begin/update/finalize with
+// synthetic { x } events — the surface the native handler drives on a device.
+jest.mock('react-native-gesture-handler', () => {
+  let last: { handlers: Record<string, (e: unknown) => void> } | null = null;
+  const makePan = () => {
+    const handlers: Record<string, (e: unknown) => void> = {};
+    const api = {
+      runOnJS: () => api,
+      minDistance: () => api,
+      enabled: () => api,
+      onBegin: (f: (e: unknown) => void) => {
+        handlers.begin = f;
+        return api;
+      },
+      onStart: (f: (e: unknown) => void) => {
+        handlers.start = f;
+        return api;
+      },
+      onUpdate: (f: (e: unknown) => void) => {
+        handlers.update = f;
+        return api;
+      },
+      onEnd: (f: (e: unknown) => void) => {
+        handlers.end = f;
+        return api;
+      },
+      onFinalize: (f: (e: unknown) => void) => {
+        handlers.finalize = f;
+        return api;
+      },
+    };
+    last = { handlers };
+    return api;
+  };
+  return {
+    Gesture: { Pan: makePan },
+    GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+    __getHandlers: () => last?.handlers,
+  };
+});
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RNGH = require('react-native-gesture-handler');
+const handlers = () => RNGH.__getHandlers();
+
 function renderSeekBar(
   props: Partial<React.ComponentProps<typeof SeekBar>> = {},
 ) {
@@ -44,11 +90,25 @@ function getAdjustable(tree: ReactTestRenderer) {
 
 function getTouchArea(tree: ReactTestRenderer) {
   return tree.root.findAll(
-    (node) =>
-      node.type === 'View' &&
-      typeof node.props.onResponderGrant === 'function' &&
-      typeof node.props.onLayout === 'function',
+    (node) => node.type === 'View' && typeof node.props.onLayout === 'function',
   )[0];
+}
+
+function layout(tree: ReactTestRenderer, width = 300) {
+  const touchArea = getTouchArea(tree);
+  act(() => {
+    touchArea.props.onLayout({ nativeEvent: { layout: { width } } });
+  });
+}
+
+function begin(x: number) {
+  act(() => handlers().begin({ x }));
+}
+function move(x: number) {
+  act(() => handlers().update({ x }));
+}
+function finalize() {
+  act(() => handlers().finalize({}));
 }
 
 describe('SeekBar', () => {
@@ -63,14 +123,9 @@ describe('SeekBar', () => {
   it('calls onSeek when the bar is tapped', () => {
     const onSeek = jest.fn();
     const tree = renderSeekBar({ durationMs: 10000, onSeek });
-    const touchArea = getTouchArea(tree);
+    layout(tree);
 
-    act(() => {
-      touchArea.props.onLayout({ nativeEvent: { layout: { width: 300 } } });
-    });
-    act(() => {
-      touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-    });
+    begin(150);
 
     expect(onSeek).toHaveBeenCalledWith(5000);
   });
@@ -96,42 +151,26 @@ describe('SeekBar', () => {
       nowSpy.mockRestore();
     });
 
-    function layout(tree: ReactTestRenderer, width = 300) {
-      const touchArea = getTouchArea(tree);
-      act(() => {
-        touchArea.props.onLayout({ nativeEvent: { layout: { width } } });
-      });
-      return touchArea;
-    }
-
     it('throttles native seeks during rapid drag moves', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 0 } });
-      });
+      begin(0);
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenLastCalledWith(0);
 
       // Two moves within the 50ms throttle window: no extra native seeks.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 30 } });
-      });
+      move(30);
       nowSpy.mockReturnValue(1020);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 60 } });
-      });
+      move(60);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       // A move past the throttle window fires one native seek.
       nowSpy.mockReturnValue(1100);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 90 } });
-      });
+      move(90);
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(3000);
     });
@@ -139,18 +178,14 @@ describe('SeekBar', () => {
     it('updates the visual every frame even while seeks are throttled', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 0 } });
-      });
+      begin(0);
 
       // Throttled move (within window) — no native seek but visual moves.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 30 } });
-      });
+      move(30);
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(10);
     });
@@ -158,23 +193,17 @@ describe('SeekBar', () => {
     it('fires one final unthrottled seek on release', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 0 } });
-      });
+      begin(0);
       // Throttled move — the final position must still be committed on release.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 75 } });
-      });
+      move(75);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1020);
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      finalize();
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(2500);
     });
@@ -182,15 +211,11 @@ describe('SeekBar', () => {
     it('does not fire a redundant seek on release after a pure tap', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-      });
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      begin(150);
+      finalize();
 
       // Tap already seeked on grant; release must not repeat the same seek.
       expect(onSeek).toHaveBeenCalledTimes(1);
@@ -200,23 +225,17 @@ describe('SeekBar', () => {
     it('does not re-fire on release when the final move already seeked', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 0 } });
-      });
+      begin(0);
       // Move past the throttle window so it seeks (3000), recording it.
       nowSpy.mockReturnValue(1100);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 90 } });
-      });
+      move(90);
       expect(onSeek).toHaveBeenCalledTimes(2);
 
       nowSpy.mockReturnValue(1110);
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      finalize();
       // Final position already committed by the move — no extra seek.
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(3000);
@@ -229,54 +248,42 @@ describe('SeekBar', () => {
         durationMs: 10000,
         onSeek,
       });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-      });
+      begin(150);
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
 
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      finalize();
       // dragRatio cleared → falls back to positionMs prop (0).
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
     });
 
-    it('clears drag state on responder terminate', () => {
+    it('clears the drag visual when the gesture finalizes', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 0,
         durationMs: 10000,
         onSeek,
       });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 300 } });
-      });
+      begin(300);
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(100);
 
-      act(() => {
-        touchArea.props.onResponderTerminate();
-      });
+      finalize();
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
     });
 
     it('ignores drag when duration is zero', () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 0, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-      });
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      begin(150);
+      finalize();
       expect(onSeek).not.toHaveBeenCalled();
     });
   });

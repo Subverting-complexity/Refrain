@@ -44,6 +44,12 @@ export interface PlaybackState {
   durationMs: number;
   markerA: number | null;
   markerB: number | null;
+  /**
+   * Whether A/B looping is active. When true and both markers are set,
+   * playback rewinds to A on reaching B. Toggling this off keeps the
+   * markers but lets playback run straight through them.
+   */
+  loopEnabled: boolean;
   /** App-level playback volume in the range 0..1. */
   volume: number;
   /** Human-readable reason the track failed to load/play. Set only when status is 'error'. */

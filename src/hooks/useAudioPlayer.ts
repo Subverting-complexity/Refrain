@@ -9,6 +9,7 @@ const IDLE_STATE: PlaybackState = {
   durationMs: 0,
   markerA: null,
   markerB: null,
+  loopEnabled: true,
   volume: 1,
 };
 
@@ -50,6 +51,10 @@ export function useAudioPlayer(trackUri: string | null) {
     [],
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
+  const setLoopEnabled = useCallback(
+    (enabled: boolean) => audioEngine.setLoopEnabled(enabled),
+    [],
+  );
   const setVolume = useCallback((v: number) => audioEngine.setVolume(v), []);
 
   return {
@@ -61,6 +66,7 @@ export function useAudioPlayer(trackUri: string | null) {
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    setLoopEnabled,
     setVolume,
   };
 }

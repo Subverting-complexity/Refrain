@@ -39,8 +39,10 @@ function renderControls(
         positionMs={5000}
         markerA={null}
         markerB={null}
+        loopEnabled={true}
         onSetMarkerA={jest.fn()}
         onSetMarkerB={jest.fn()}
+        onToggleLoop={jest.fn()}
         onClearMarkers={jest.fn()}
         {...props}
       />,
@@ -70,11 +72,12 @@ function resolveButtonStyle(tree: ReactTestRenderer, label: string) {
   return StyleSheet.flatten(wrapper.props.style({ pressed: false }));
 }
 
-function findViewByLabel(tree: ReactTestRenderer, label: string) {
+function findCaption(tree: ReactTestRenderer, fragment: string) {
   return tree.root.findAll(
     (node) =>
-      node.props.accessibilityLabel === label &&
-      typeof node.props.onPress !== 'function',
+      node.type === 'Text' &&
+      typeof node.props.children === 'string' &&
+      node.props.children.includes(fragment),
   );
 }
 
@@ -173,18 +176,90 @@ describe('MarkerControls', () => {
     expect(clear.props.disabled).toBe(false);
   });
 
-  it('shows loop badge when both markers are set', () => {
-    const tree = renderControls({ markerA: 1000, markerB: 5000 });
+  it('renders the loop toggle', () => {
+    const tree = renderControls({
+      markerA: 1000,
+      markerB: 5000,
+      loopEnabled: true,
+    });
 
-    const badge = findViewByLabel(tree, 'Loop active');
-    expect(badge.length).toBeGreaterThanOrEqual(1);
+    expect(
+      findPressableByLabel(tree, 'Turn loop off').length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it('hides loop badge when only one marker is set', () => {
+  it('disables the loop toggle until both markers are set', () => {
     const tree = renderControls({ markerA: 1000, markerB: null });
 
-    const badge = findViewByLabel(tree, 'Loop active');
-    expect(badge.length).toBe(0);
+    const toggle = findPressableByLabel(tree, 'Turn loop on')[0];
+    expect(toggle.props.disabled).toBe(true);
+    expect(toggle.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+  });
+
+  it('enables and checks the loop toggle when both markers set and looping', () => {
+    const tree = renderControls({
+      markerA: 1000,
+      markerB: 5000,
+      loopEnabled: true,
+    });
+
+    const toggle = findPressableByLabel(tree, 'Turn loop off')[0];
+    expect(toggle.props.disabled).toBe(false);
+    expect(toggle.props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true, disabled: false }),
+    );
+  });
+
+  it('shows the loop toggle unchecked when looping is off', () => {
+    const tree = renderControls({
+      markerA: 1000,
+      markerB: 5000,
+      loopEnabled: false,
+    });
+
+    const toggle = findPressableByLabel(tree, 'Turn loop on')[0];
+    expect(toggle.props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: false, disabled: false }),
+    );
+  });
+
+  it('calls onToggleLoop with the negated state when pressed', () => {
+    const onToggleLoop = jest.fn();
+    const tree = renderControls({
+      markerA: 1000,
+      markerB: 5000,
+      loopEnabled: true,
+      onToggleLoop,
+    });
+
+    const toggle = findPressableByLabel(tree, 'Turn loop off')[0];
+    act(() => {
+      toggle.props.onPress();
+    });
+
+    expect(onToggleLoop).toHaveBeenCalledWith(false);
+  });
+
+  it('shows a guidance caption for the current marker state', () => {
+    expect(
+      findCaption(renderControls(), 'Tap A').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      findCaption(renderControls({ markerA: 1000 }), 'Now tap B').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      findCaption(
+        renderControls({ markerA: 1000, markerB: 5000, loopEnabled: true }),
+        'Looping',
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('hides the caption when playback is idle', () => {
+    const tree = renderControls({ status: 'idle' });
+    expect(findCaption(tree, 'Tap A')).toHaveLength(0);
   });
 
   it('highlights A button with accent color when markerA is set', () => {

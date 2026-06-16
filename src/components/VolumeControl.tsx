@@ -1,13 +1,13 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
-  GestureResponderEvent,
   LayoutChangeEvent,
   StyleSheet,
   Text,
   View,
   ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
@@ -63,38 +63,57 @@ export function VolumeControl({
     trackWidth.current = e.nativeEvent.layout.width;
   }, []);
 
-  const ratioFromEvent = useCallback(
-    (e: GestureResponderEvent): number | null => {
-      if (trackWidth.current <= 0) return null;
-      return clamp01(e.nativeEvent.locationX / trackWidth.current);
-    },
-    [],
-  );
+  const ratioFromX = useCallback((x: number): number | null => {
+    if (trackWidth.current <= 0) return null;
+    return clamp01(x / trackWidth.current);
+  }, []);
 
-  const handleGrant = useCallback(
-    (e: GestureResponderEvent) => {
-      const ratio = ratioFromEvent(e);
+  const beginDrag = useCallback(
+    (x: number) => {
+      const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
       volumeThrottle.begin(ratio, onVolumeChange);
     },
-    [ratioFromEvent, onVolumeChange, volumeThrottle],
+    [ratioFromX, onVolumeChange, volumeThrottle],
   );
 
-  const handleMove = useCallback(
-    (e: GestureResponderEvent) => {
-      const ratio = ratioFromEvent(e);
+  const moveDrag = useCallback(
+    (x: number) => {
+      const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
       volumeThrottle.move(ratio);
     },
-    [ratioFromEvent, volumeThrottle],
+    [ratioFromX, volumeThrottle],
   );
 
-  const handleRelease = useCallback(() => {
+  const endDrag = useCallback(() => {
     volumeThrottle.end();
     setDragRatio(null);
   }, [volumeThrottle]);
+
+  // Route through refs so the Pan is created once (see WaveformView).
+  const beginRef = useRef(beginDrag);
+  const moveRef = useRef(moveDrag);
+  const endRef = useRef(endDrag);
+  beginRef.current = beginDrag;
+  moveRef.current = moveDrag;
+  endRef.current = endDrag;
+
+  // Same Pan setup as the other sliders: `minDistance(0)` claims the touch so
+  // the surrounding ScrollView can't steal the drag, `runOnJS` keeps callbacks
+  // on the JS thread.
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .minDistance(0)
+        .onBegin((e) => beginRef.current(e.x))
+        .onUpdate((e) => moveRef.current(e.x))
+        .onFinalize(() => endRef.current()),
+    [],
+  );
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -124,39 +143,35 @@ export function VolumeControl({
           color={theme.colors.textSecondary}
           style={styles.icon}
         />
-        <View
-          style={styles.barTouchArea}
-          onLayout={handleLayout}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={handleGrant}
-          onResponderMove={handleMove}
-          onResponderRelease={handleRelease}
-          onResponderTerminate={handleRelease}
-        >
-          <View
-            style={[styles.barTrack, { backgroundColor: theme.colors.border }]}
-          >
+        <GestureDetector gesture={pan}>
+          <View style={styles.barTouchArea} onLayout={handleLayout}>
             <View
               style={[
-                styles.barFill,
+                styles.barTrack,
+                { backgroundColor: theme.colors.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: theme.colors.accent,
+                    width: `${displayVolume * 100}%`,
+                  },
+                ]}
+              />
+            </View>
+            <View
+              style={[
+                styles.thumb,
                 {
                   backgroundColor: theme.colors.accent,
-                  width: `${displayVolume * 100}%`,
+                  left: `${displayVolume * 100}%`,
                 },
               ]}
             />
           </View>
-          <View
-            style={[
-              styles.thumb,
-              {
-                backgroundColor: theme.colors.accent,
-                left: `${displayVolume * 100}%`,
-              },
-            ]}
-          />
-        </View>
+        </GestureDetector>
       </View>
       {showIOSHint ? (
         <Text
