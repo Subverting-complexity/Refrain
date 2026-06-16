@@ -899,6 +899,58 @@ describe('audioEngine', () => {
       );
     });
 
+    it('loops back when the track finishes naturally with B near the end', async () => {
+      const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(59900);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('publishes playing status when looping back on track finish', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(59900);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'playing', positionMs: 5000 }),
+      );
+    });
+
     it('reports error without an unhandled rejection when the loop seek fails', async () => {
       mockSeekTo.mockRejectedValueOnce(new Error('seek failed'));
       const {

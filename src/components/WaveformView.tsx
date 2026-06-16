@@ -97,17 +97,28 @@ export function WaveformView({
     (x: number): DragTarget => {
       if (trackWidth() <= 0 || durationMs <= 0) return 'seek';
 
+      let closestTarget: DragTarget = 'seek';
+      let closestDist = MARKER_HIT_ZONE_PX + 1;
+
       if (markerA != null && onMarkerAChange) {
         const markerAX =
           HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth();
-        if (Math.abs(x - markerAX) <= MARKER_HIT_ZONE_PX) return 'markerA';
+        const distA = Math.abs(x - markerAX);
+        if (distA <= MARKER_HIT_ZONE_PX && distA < closestDist) {
+          closestTarget = 'markerA';
+          closestDist = distA;
+        }
       }
       if (markerB != null && onMarkerBChange) {
         const markerBX =
           HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth();
-        if (Math.abs(x - markerBX) <= MARKER_HIT_ZONE_PX) return 'markerB';
+        const distB = Math.abs(x - markerBX);
+        if (distB <= MARKER_HIT_ZONE_PX && distB < closestDist) {
+          closestTarget = 'markerB';
+          closestDist = distB;
+        }
       }
-      return 'seek';
+      return closestTarget;
     },
     [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
   );
@@ -250,7 +261,7 @@ export function WaveformView({
             {
               left: `${leftPct}%`,
               width: `${widthPct}%`,
-              backgroundColor: theme.colors.accent + '1A',
+              backgroundColor: theme.colors.accent + '33',
             },
           ]}
         />,
