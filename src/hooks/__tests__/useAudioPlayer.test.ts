@@ -10,6 +10,7 @@ const IDLE_STATE: PlaybackState = {
   durationMs: 0,
   markerA: null,
   markerB: null,
+  loopEnabled: true,
   volume: 1,
 };
 
@@ -18,6 +19,7 @@ const mockLoadTrack = jest.fn<Promise<void>, [string]>();
 const mockUnloadTrack = jest.fn<Promise<void>, []>();
 const mockSetVolume = jest.fn<void, [number]>();
 const mockSetMarkerB = jest.fn<boolean, [number]>();
+const mockSetLoopEnabled = jest.fn<void, [boolean]>();
 const mockLoadPersistedVolume = jest.fn<void, []>();
 
 jest.mock('../../services/audioEngine', () => ({
@@ -37,6 +39,7 @@ jest.mock('../../services/audioEngine', () => ({
   setMarkerA: jest.fn(),
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
+  setLoopEnabled: (enabled: boolean) => mockSetLoopEnabled(enabled),
   setVolume: (v: number) => mockSetVolume(v),
   loadPersistedVolume: () => mockLoadPersistedVolume(),
 }));
@@ -156,5 +159,15 @@ describe('useAudioPlayer', () => {
       applied = lastResult.setMarkerB(1000);
     });
     expect(applied).toBe(false);
+  });
+
+  it('forwards setLoopEnabled to the engine', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      lastResult.setLoopEnabled(false);
+    });
+
+    expect(mockSetLoopEnabled).toHaveBeenCalledWith(false);
   });
 });

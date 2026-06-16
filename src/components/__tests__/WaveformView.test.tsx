@@ -8,6 +8,7 @@ jest.mock('../../hooks/useTheme', () => ({
     theme: {
       colors: {
         accent: '#7edbb8',
+        accentText: '#111d1f',
         border: '#2a4a4e',
         surface: '#1a2e30',
         textSecondary: '#8ba89e',
@@ -17,6 +18,53 @@ jest.mock('../../hooks/useTheme', () => ({
     },
   }),
 }));
+
+// Stub gesture-handler: GestureDetector renders its child, and Gesture.Pan()
+// returns a fluent recorder so the test can invoke the begin/update/finalize
+// callbacks directly with synthetic { x } events — the same surface the native
+// handler drives on a device.
+jest.mock('react-native-gesture-handler', () => {
+  let last: { handlers: Record<string, (e: unknown) => void> } | null = null;
+  const makePan = () => {
+    const handlers: Record<string, (e: unknown) => void> = {};
+    const api = {
+      runOnJS: () => api,
+      minDistance: () => api,
+      enabled: () => api,
+      onBegin: (f: (e: unknown) => void) => {
+        handlers.begin = f;
+        return api;
+      },
+      onStart: (f: (e: unknown) => void) => {
+        handlers.start = f;
+        return api;
+      },
+      onUpdate: (f: (e: unknown) => void) => {
+        handlers.update = f;
+        return api;
+      },
+      onEnd: (f: (e: unknown) => void) => {
+        handlers.end = f;
+        return api;
+      },
+      onFinalize: (f: (e: unknown) => void) => {
+        handlers.finalize = f;
+        return api;
+      },
+    };
+    last = { handlers };
+    return api;
+  };
+  return {
+    Gesture: { Pan: makePan },
+    GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+    __getHandlers: () => last?.handlers,
+  };
+});
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RNGH = require('react-native-gesture-handler');
+const handlers = () => RNGH.__getHandlers();
 
 const DEFAULT_PEAKS = [0.2, 0.5, 0.8, 1.0, 0.6];
 
@@ -52,11 +100,25 @@ function renderWaveform(
 
 function getTouchArea(tree: ReactTestRenderer) {
   return tree.root.findAll(
-    (node) =>
-      node.type === 'View' &&
-      typeof node.props.onResponderGrant === 'function' &&
-      typeof node.props.onLayout === 'function',
+    (node) => node.type === 'View' && typeof node.props.onLayout === 'function',
   )[0];
+}
+
+function layout(tree: ReactTestRenderer, width = 300) {
+  const touchArea = getTouchArea(tree);
+  act(() => {
+    touchArea.props.onLayout({ nativeEvent: { layout: { width } } });
+  });
+}
+
+function begin(x: number) {
+  act(() => handlers().begin({ x }));
+}
+function move(x: number) {
+  act(() => handlers().update({ x }));
+}
+function finalize() {
+  act(() => handlers().finalize({}));
 }
 
 describe('WaveformView', () => {
@@ -142,20 +204,9 @@ describe('WaveformView', () => {
   it('calls onSeek when touch area is tapped', () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek });
+    layout(tree);
 
-    const touchArea = getTouchArea(tree);
-
-    act(() => {
-      touchArea.props.onLayout({
-        nativeEvent: { layout: { width: 300 } },
-      });
-    });
-
-    act(() => {
-      touchArea.props.onResponderGrant({
-        nativeEvent: { locationX: 150 },
-      });
-    });
+    begin(150);
 
     expect(onSeek).toHaveBeenCalledWith(5000);
   });
@@ -163,22 +214,11 @@ describe('WaveformView', () => {
   it('maps a tap at the bars left edge to position 0 (padding-aware)', () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek, durationMs: 10000 });
-
-    const touchArea = getTouchArea(tree);
-
-    act(() => {
-      touchArea.props.onLayout({
-        nativeEvent: { layout: { width: 300 } },
-      });
-    });
+    layout(tree);
 
     // The bars start HORIZONTAL_PADDING (spacing.md = 12) in from the edge,
     // so a tap there is the start of the track, not a positive offset.
-    act(() => {
-      touchArea.props.onResponderGrant({
-        nativeEvent: { locationX: 12 },
-      });
-    });
+    begin(12);
 
     expect(onSeek).toHaveBeenCalledWith(0);
   });
@@ -186,21 +226,10 @@ describe('WaveformView', () => {
   it('maps a tap at the bars right edge to the full duration', () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek, durationMs: 10000 });
-
-    const touchArea = getTouchArea(tree);
-
-    act(() => {
-      touchArea.props.onLayout({
-        nativeEvent: { layout: { width: 300 } },
-      });
-    });
+    layout(tree);
 
     // Right edge of the bars sits at width - HORIZONTAL_PADDING = 288.
-    act(() => {
-      touchArea.props.onResponderGrant({
-        nativeEvent: { locationX: 288 },
-      });
-    });
+    begin(288);
 
     expect(onSeek).toHaveBeenCalledWith(10000);
   });
@@ -222,6 +251,17 @@ describe('WaveformView', () => {
     );
 
     expect(markerLines).toHaveLength(2);
+  });
+
+  it('renders labelled grab handles for the markers', () => {
+    const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
+
+    const handleLabels = tree.root
+      .findAll((node) => node.type === 'Text')
+      .map((n) => n.props.children)
+      .filter((c) => c === 'A' || c === 'B');
+
+    expect(handleLabels).toEqual(expect.arrayContaining(['A', 'B']));
   });
 
   it('renders highlighted region between A/B markers', () => {
@@ -271,20 +311,9 @@ describe('WaveformView', () => {
         onMarkerAChange,
         onSeek,
       });
+      layout(tree);
 
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
-
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 152 },
-        });
-      });
+      begin(152);
 
       expect(onMarkerAChange).toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
@@ -300,20 +329,9 @@ describe('WaveformView', () => {
         onMarkerBChange,
         onSeek,
       });
+      layout(tree);
 
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
-
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 242 },
-        });
-      });
+      begin(242);
 
       expect(onMarkerBChange).toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
@@ -329,31 +347,15 @@ describe('WaveformView', () => {
         onMarkerAChange,
         onSeek,
       });
-
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 150 },
-        });
-      });
-
+      begin(150);
       onMarkerAChange.mockClear();
 
       // Advance past the throttle window so the move commits a native call.
       nowSpy.mockReturnValue(1100);
-      act(() => {
-        touchArea.props.onResponderMove({
-          nativeEvent: { locationX: 180 },
-        });
-      });
+      move(180);
 
       // Bars are inset by HORIZONTAL_PADDING (spacing.md = 12) on each side,
       // so the track spans 276px: (180 - 12) / 276 * 10000 = 6087ms.
@@ -373,33 +375,17 @@ describe('WaveformView', () => {
         onMarkerBChange,
         onSeek,
       });
-
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
+      layout(tree);
 
       // Grab the B handle (markerB X ≈ 233px on a 276px track).
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 233 },
-        });
-      });
-
+      begin(233);
       onMarkerBChange.mockClear();
 
       // Drag well before A; the value must clamp to just past A (2001ms),
       // never to or below A.
       nowSpy.mockReturnValue(1100);
-      act(() => {
-        touchArea.props.onResponderMove({
-          nativeEvent: { locationX: 30 },
-        });
-      });
+      move(30);
 
       expect(onMarkerBChange).toHaveBeenCalledWith(2001);
       onMarkerBChange.mock.calls.forEach(([ms]) => {
@@ -417,20 +403,9 @@ describe('WaveformView', () => {
         onMarkerAChange,
         onSeek,
       });
+      layout(tree);
 
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
-
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 30 },
-        });
-      });
+      begin(30);
 
       expect(onSeek).toHaveBeenCalled();
       expect(onMarkerAChange).not.toHaveBeenCalled();
@@ -443,20 +418,9 @@ describe('WaveformView', () => {
         durationMs: 10000,
         onSeek,
       });
+      layout(tree);
 
-      const touchArea = getTouchArea(tree);
-
-      act(() => {
-        touchArea.props.onLayout({
-          nativeEvent: { layout: { width: 300 } },
-        });
-      });
-
-      act(() => {
-        touchArea.props.onResponderGrant({
-          nativeEvent: { locationX: 150 },
-        });
-      });
+      begin(150);
 
       expect(onSeek).toHaveBeenCalled();
     });
@@ -480,42 +444,26 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    function layout(tree: ReactTestRenderer, width = 300) {
-      const touchArea = getTouchArea(tree);
-      act(() => {
-        touchArea.props.onLayout({ nativeEvent: { layout: { width } } });
-      });
-      return touchArea;
-    }
-
     it('throttles native seeks during rapid drag moves', () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
-      });
+      begin(12);
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenLastCalledWith(0);
 
       // Two moves within the throttle window: no extra native seeks.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 60 } });
-      });
+      move(60);
       nowSpy.mockReturnValue(1020);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 90 } });
-      });
+      move(90);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       // A move past the throttle window fires one native seek.
       nowSpy.mockReturnValue(1100);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
-      });
+      move(150);
       expect(onSeek).toHaveBeenCalledTimes(2);
     });
 
@@ -526,17 +474,13 @@ describe('WaveformView', () => {
         durationMs: 10000,
         onSeek,
       });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
-      });
+      begin(12);
       // Throttled move (within window): no native seek, but visual advances.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
-      });
+      move(150);
       expect(onSeek).toHaveBeenCalledTimes(1);
       // (150 - 12) / 276 * 100 ≈ 50% even though no native seek fired.
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
@@ -545,38 +489,28 @@ describe('WaveformView', () => {
     it('fires one final unthrottled seek on release', () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 12 } });
-      });
+      begin(12);
       // Throttled move — final position must still commit on release.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 150 } });
-      });
+      move(150);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1020);
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      finalize();
       expect(onSeek).toHaveBeenCalledTimes(2);
     });
 
     it('does not fire a redundant seek on release after a pure tap', () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-      });
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      begin(150);
+      finalize();
 
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenCalledWith(5000);
@@ -591,49 +525,39 @@ describe('WaveformView', () => {
         onMarkerAChange,
         onSeek,
       });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 150 } });
-      });
+      begin(150);
       expect(onMarkerAChange).toHaveBeenCalledTimes(1);
 
       // Throttled move within the window — no extra native call yet.
       nowSpy.mockReturnValue(1010);
-      act(() => {
-        touchArea.props.onResponderMove({ nativeEvent: { locationX: 180 } });
-      });
+      move(180);
       expect(onMarkerAChange).toHaveBeenCalledTimes(1);
 
       // Release commits the final marker position.
       nowSpy.mockReturnValue(1020);
-      act(() => {
-        touchArea.props.onResponderRelease();
-      });
+      finalize();
       expect(onMarkerAChange).toHaveBeenCalledTimes(2);
       expect(onMarkerAChange).toHaveBeenLastCalledWith(6087);
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('clears drag visual on responder terminate', () => {
+    it('clears the drag visual when the gesture finalizes', () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 0,
         durationMs: 10000,
         onSeek,
       });
-      const touchArea = layout(tree);
+      layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      act(() => {
-        touchArea.props.onResponderGrant({ nativeEvent: { locationX: 288 } });
-      });
+      begin(288);
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(100);
 
-      act(() => {
-        touchArea.props.onResponderTerminate();
-      });
+      finalize();
       // dragMs cleared → falls back to positionMs prop (0).
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
     });

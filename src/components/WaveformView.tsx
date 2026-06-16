@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
-  GestureResponderEvent,
   LayoutChangeEvent,
   StyleSheet,
+  Text,
   View,
   ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
@@ -29,11 +30,19 @@ interface WaveformViewProps {
 const WAVEFORM_HEIGHT = 120;
 const BAR_WIDTH = 2;
 const BAR_GAP = 1;
-const MARKER_HIT_ZONE_PX = 20;
+// The grab zone around a marker. Generous so a fingertip can land the thin
+// line, and matched to the visible handle width so the handle reads as the
+// thing you grab.
+const MARKER_HIT_ZONE_PX = 24;
+const HANDLE_WIDTH = 22;
+const HANDLE_HEIGHT = 20;
 const SEEK_STEP_MS = 5000;
 const HORIZONTAL_PADDING = spacing.md;
 
 type DragTarget = 'markerA' | 'markerB' | 'seek';
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
 
 export function WaveformView({
   peaks,
@@ -73,35 +82,30 @@ export function WaveformView({
   // touchable track spans containerWidth - 2 * HORIZONTAL_PADDING.
   const trackWidth = () => containerWidth.current - 2 * HORIZONTAL_PADDING;
 
-  const positionFromEvent = useCallback(
-    (e: GestureResponderEvent): number | null => {
+  // Map a touch x (relative to the touch area) to a position in ms, clamped
+  // to the track. Returns null before layout or for a zero-length track.
+  const positionFromX = useCallback(
+    (x: number): number | null => {
       if (durationMs <= 0 || trackWidth() <= 0) return null;
-      const ratio = Math.max(
-        0,
-        Math.min(
-          1,
-          (e.nativeEvent.locationX - HORIZONTAL_PADDING) / trackWidth(),
-        ),
-      );
+      const ratio = clamp((x - HORIZONTAL_PADDING) / trackWidth(), 0, 1);
       return Math.round(ratio * durationMs);
     },
     [durationMs],
   );
 
   const detectDragTarget = useCallback(
-    (e: GestureResponderEvent): DragTarget => {
+    (x: number): DragTarget => {
       if (trackWidth() <= 0 || durationMs <= 0) return 'seek';
-      const touchX = e.nativeEvent.locationX;
 
       if (markerA != null && onMarkerAChange) {
         const markerAX =
           HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth();
-        if (Math.abs(touchX - markerAX) <= MARKER_HIT_ZONE_PX) return 'markerA';
+        if (Math.abs(x - markerAX) <= MARKER_HIT_ZONE_PX) return 'markerA';
       }
       if (markerB != null && onMarkerBChange) {
         const markerBX =
           HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth();
-        if (Math.abs(touchX - markerBX) <= MARKER_HIT_ZONE_PX) return 'markerB';
+        if (Math.abs(x - markerBX) <= MARKER_HIT_ZONE_PX) return 'markerB';
       }
       return 'seek';
     },
@@ -136,10 +140,10 @@ export function WaveformView({
 
   // Drag start: pick the target, update the visual, and fire immediately
   // (instant tap response — no throttling on grant).
-  const handleGrant = useCallback(
-    (e: GestureResponderEvent) => {
-      dragTarget.current = detectDragTarget(e);
-      const raw = positionFromEvent(e);
+  const beginDrag = useCallback(
+    (x: number) => {
+      dragTarget.current = detectDragTarget(x);
+      const raw = positionFromX(x);
       if (raw == null) return;
       const ms = clampForTarget(dragTarget.current, raw);
       setDragMs(ms);
@@ -147,7 +151,7 @@ export function WaveformView({
     },
     [
       detectDragTarget,
-      positionFromEvent,
+      positionFromX,
       clampForTarget,
       callbackForTarget,
       dragThrottle,
@@ -155,23 +159,50 @@ export function WaveformView({
   );
 
   // Drag move: update the visual every frame, but throttle native calls.
-  const handleMove = useCallback(
-    (e: GestureResponderEvent) => {
-      const raw = positionFromEvent(e);
+  const moveDrag = useCallback(
+    (x: number) => {
+      const raw = positionFromX(x);
       if (raw == null) return;
       const ms = clampForTarget(dragTarget.current, raw);
       setDragMs(ms);
       dragThrottle.move(ms);
     },
-    [positionFromEvent, clampForTarget, dragThrottle],
+    [positionFromX, clampForTarget, dragThrottle],
   );
 
   // Drag end (or interruption): commit the final value, then drop back to
   // the prop-driven visual.
-  const handleRelease = useCallback(() => {
+  const endDrag = useCallback(() => {
     dragThrottle.end();
     setDragMs(null);
   }, [dragThrottle]);
+
+  // Route the gesture through refs to the latest callbacks so the Pan object
+  // itself is created once. A marker drag updates markerA/markerB mid-gesture
+  // (throttled), which would otherwise rebuild the gesture ~20x/sec and risk
+  // RNGH dropping the active drag.
+  const beginRef = useRef(beginDrag);
+  const moveRef = useRef(moveDrag);
+  const endRef = useRef(endDrag);
+  beginRef.current = beginDrag;
+  moveRef.current = moveDrag;
+  endRef.current = endDrag;
+
+  // A single Pan drives taps and drags. `minDistance(0)` makes it claim the
+  // touch the instant a finger lands on the waveform, so the surrounding
+  // ScrollView can't steal a drag (the bug where markers wouldn't move).
+  // `runOnJS` keeps the callbacks on the JS thread so they can touch React
+  // state and the throttle directly.
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .minDistance(0)
+        .onBegin((e) => beginRef.current(e.x))
+        .onUpdate((e) => moveRef.current(e.x))
+        .onFinalize(() => endRef.current()),
+    [],
+  );
 
   const bars = useMemo(() => {
     if (peaks.length === 0) return null;
@@ -223,37 +254,46 @@ export function WaveformView({
       );
     }
 
-    if (displayMarkerA != null) {
+    const pushMarker = (key: string, label: string, ms: number) => {
+      const leftPct = (ms / durationMs) * 100;
       elements.push(
         <View
-          key="marker-a"
+          key={`${key}-line`}
           style={[
             styles.markerLine,
             {
-              left: `${(displayMarkerA / durationMs) * 100}%`,
+              left: `${leftPct}%`,
               backgroundColor: theme.colors.textSecondary,
             },
           ]}
-          accessibilityLabel={`Loop start marker at ${formatDuration(displayMarkerA)}`}
+          accessibilityLabel={`Loop ${label} marker at ${formatDuration(ms)}`}
         />,
       );
-    }
+      // A labelled handle at the top makes the otherwise-invisible drag
+      // affordance obvious and gives the finger a clear target to grab.
+      elements.push(
+        <View
+          key={`${key}-handle`}
+          style={[
+            styles.markerHandle,
+            { left: `${leftPct}%`, backgroundColor: theme.colors.accent },
+          ]}
+          pointerEvents="none"
+        >
+          <Text
+            style={[
+              styles.markerHandleText,
+              { color: theme.colors.accentText },
+            ]}
+          >
+            {label === 'start' ? 'A' : 'B'}
+          </Text>
+        </View>,
+      );
+    };
 
-    if (displayMarkerB != null) {
-      elements.push(
-        <View
-          key="marker-b"
-          style={[
-            styles.markerLine,
-            {
-              left: `${(displayMarkerB / durationMs) * 100}%`,
-              backgroundColor: theme.colors.textSecondary,
-            },
-          ]}
-          accessibilityLabel={`Loop end marker at ${formatDuration(displayMarkerB)}`}
-        />,
-      );
-    }
+    if (displayMarkerA != null) pushMarker('marker-a', 'start', displayMarkerA);
+    if (displayMarkerB != null) pushMarker('marker-b', 'end', displayMarkerB);
 
     return elements;
   }, [
@@ -261,6 +301,7 @@ export function WaveformView({
     displayMarkerB,
     durationMs,
     theme.colors.accent,
+    theme.colors.accentText,
     theme.colors.textSecondary,
   ]);
 
@@ -298,32 +339,25 @@ export function WaveformView({
       onAccessibilityAction={handleAccessibilityAction}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
-      <View
-        style={styles.touchArea}
-        onLayout={handleLayout}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={handleGrant}
-        onResponderMove={handleMove}
-        onResponderRelease={handleRelease}
-        onResponderTerminate={handleRelease}
-      >
-        <View style={styles.track}>
-          <View style={styles.barsContainer}>{bars}</View>
+      <GestureDetector gesture={pan}>
+        <View style={styles.touchArea} onLayout={handleLayout}>
+          <View style={styles.track}>
+            <View style={styles.barsContainer}>{bars}</View>
 
-          {markerElements}
+            {markerElements}
 
-          <View
-            style={[
-              styles.cursor,
-              {
-                left: `${progress * 100}%`,
-                backgroundColor: theme.colors.accent,
-              },
-            ]}
-          />
+            <View
+              style={[
+                styles.cursor,
+                {
+                  left: `${progress * 100}%`,
+                  backgroundColor: theme.colors.accent,
+                },
+              ]}
+            />
+          </View>
         </View>
-      </View>
+      </GestureDetector>
     </View>
   );
 }
@@ -372,6 +406,20 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 2,
     borderRadius: 1,
+  },
+  markerHandle: {
+    position: 'absolute',
+    top: 0,
+    width: HANDLE_WIDTH,
+    height: HANDLE_HEIGHT,
+    marginLeft: -HANDLE_WIDTH / 2,
+    borderRadius: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  markerHandleText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   markerRegion: {
     position: 'absolute',

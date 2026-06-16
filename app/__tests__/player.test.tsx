@@ -12,6 +12,7 @@ const mockAudioPlayerState = {
   durationMs: 10000,
   markerA: 5000,
   markerB: null as number | null,
+  loopEnabled: true,
   lastError: undefined as string | undefined,
   volume: 1,
   play: jest.fn(),
@@ -21,8 +22,34 @@ const mockAudioPlayerState = {
   setMarkerA: jest.fn(),
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
+  setLoopEnabled: jest.fn(),
   setVolume: jest.fn(),
 };
+
+// Render the gesture-handler ScrollView as a plain View and stub the gesture
+// API; the screen only needs them to mount (the waveform itself falls back to
+// the placeholder when there are no peaks).
+jest.mock('react-native-gesture-handler', () => {
+  const { View } = require('react-native');
+  const panApi: Record<string, () => unknown> = {};
+  [
+    'runOnJS',
+    'minDistance',
+    'enabled',
+    'onBegin',
+    'onStart',
+    'onUpdate',
+    'onEnd',
+    'onFinalize',
+  ].forEach((m) => {
+    panApi[m] = () => panApi;
+  });
+  return {
+    ScrollView: View,
+    GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+    Gesture: { Pan: () => panApi },
+  };
+});
 
 jest.mock('@/src/hooks/useAudioPlayer', () => ({
   useAudioPlayer: () => mockAudioPlayerState,

@@ -31,6 +31,10 @@ let statusSubscription: EventSubscription | null = null;
 const listeners = new Set<PlaybackListener>();
 let markerA: number | null = null;
 let markerB: number | null = null;
+// Whether the A/B loop is armed. Defaults to on so setting both markers
+// loops immediately; the user can toggle it off to keep markers but play
+// straight through. Reset to the default on every new track.
+let loopEnabled = true;
 // App-level playback volume (0..1). Applied to every loaded track and
 // persisted so it survives reload and track changes.
 let volume = DEFAULT_VOLUME;
@@ -52,7 +56,7 @@ function getWebMediaElement(p: AudioPlayer): HTMLMediaElement | null {
   return candidate instanceof HTMLMediaElement ? candidate : null;
 }
 
-const IDLE_STATE: Omit<PlaybackState, 'volume'> = {
+const IDLE_STATE: Omit<PlaybackState, 'volume' | 'loopEnabled'> = {
   status: 'idle',
   positionMs: 0,
   durationMs: 0,
@@ -61,7 +65,7 @@ const IDLE_STATE: Omit<PlaybackState, 'volume'> = {
 };
 
 function idleState(): PlaybackState {
-  return { ...IDLE_STATE, volume };
+  return { ...IDLE_STATE, volume, loopEnabled };
 }
 
 let currentState: PlaybackState = idleState();
@@ -80,7 +84,7 @@ function errorMessage(err: unknown): string {
 
 function parseStatus(status: AudioStatus): PlaybackState {
   if (!status.isLoaded) {
-    return { ...IDLE_STATE, markerA, markerB, volume };
+    return { ...IDLE_STATE, markerA, markerB, loopEnabled, volume };
   }
 
   let playbackStatus: PlaybackStatus = 'paused';
@@ -96,6 +100,7 @@ function parseStatus(status: AudioStatus): PlaybackState {
     durationMs: secToMs(status.duration),
     markerA,
     markerB,
+    loopEnabled,
     volume,
   };
 }
@@ -108,6 +113,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       durationMs: 0,
       markerA,
       markerB,
+      loopEnabled,
       volume,
       lastError: errorMessage(status.error),
     };
@@ -125,6 +131,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   if (
     status.isLoaded &&
     status.playing &&
+    loopEnabled &&
     markerA != null &&
     markerB != null &&
     newState.positionMs >= markerB
@@ -163,6 +170,7 @@ export async function loadTrack(uri: string): Promise<void> {
       durationMs: 0,
       markerA: null,
       markerB: null,
+      loopEnabled,
       volume,
     };
     notify(currentState);
@@ -205,6 +213,7 @@ export async function loadTrack(uri: string): Promise<void> {
       durationMs: 0,
       markerA: null,
       markerB: null,
+      loopEnabled,
       volume,
       lastError: errorMessage(err),
     };
@@ -259,6 +268,7 @@ export async function unloadTrack(): Promise<void> {
   }
   markerA = null;
   markerB = null;
+  loopEnabled = true;
   currentState = idleState();
   notify(currentState);
 }
@@ -347,6 +357,17 @@ export function clearMarkers(): void {
   markerA = null;
   markerB = null;
   currentState = { ...currentState, markerA: null, markerB: null };
+  notify(currentState);
+}
+
+/**
+ * Arm or disarm the A/B loop without touching the markers. When disabled,
+ * playback runs straight through marker B instead of rewinding to A, so the
+ * user can audition the surrounding context and re-arm the loop later.
+ */
+export function setLoopEnabled(enabled: boolean): void {
+  loopEnabled = enabled;
+  currentState = { ...currentState, loopEnabled };
   notify(currentState);
 }
 

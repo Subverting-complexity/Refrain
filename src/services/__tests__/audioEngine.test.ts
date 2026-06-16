@@ -395,6 +395,7 @@ describe('audioEngine', () => {
         durationMs: 0,
         markerA: null,
         markerB: null,
+        loopEnabled: true,
         volume: 1,
       });
     });
@@ -725,6 +726,55 @@ describe('audioEngine', () => {
     });
   });
 
+  describe('setLoopEnabled', () => {
+    it('defaults loopEnabled to true', () => {
+      const { getState } = require('../audioEngine');
+      expect(getState().loopEnabled).toBe(true);
+    });
+
+    it('toggles loopEnabled and notifies without touching markers', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      setLoopEnabled(false);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          loopEnabled: false,
+          markerA: 5000,
+          markerB: 10000,
+        }),
+      );
+    });
+
+    it('resets loopEnabled to true when a new track loads', async () => {
+      const { loadTrack, setLoopEnabled, getState } = require('../audioEngine');
+
+      await loadTrack('file:///first.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setLoopEnabled(false);
+      expect(getState().loopEnabled).toBe(false);
+
+      await loadTrack('file:///second.mp3');
+
+      expect(getState().loopEnabled).toBe(true);
+    });
+  });
+
   describe('loop-back behavior', () => {
     it('seeks to markerA when position reaches markerB during playback', async () => {
       const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
@@ -780,6 +830,47 @@ describe('audioEngine', () => {
       statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 50 }));
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not loop back when looping is disabled', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      setLoopEnabled(false);
+      mockSeekTo.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('resumes looping when re-enabled', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      setLoopEnabled(false);
+      setLoopEnabled(true);
+      mockSeekTo.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
     });
 
     it('publishes markerA as the position on loop rewind so the cursor jumps back', async () => {

@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import {
-  AccessibilityInfo,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -42,6 +37,7 @@ export default function PlayerScreen() {
     durationMs,
     markerA,
     markerB,
+    loopEnabled,
     lastError,
     volume,
     play,
@@ -51,6 +47,7 @@ export default function PlayerScreen() {
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    setLoopEnabled,
     setVolume,
   } = useAudioPlayer(uri ?? null);
 
@@ -192,8 +189,10 @@ export default function PlayerScreen() {
             positionMs={positionMs}
             markerA={markerA}
             markerB={markerB}
+            loopEnabled={loopEnabled}
             onSetMarkerA={setMarkerA}
             onSetMarkerB={handleSetMarkerB}
+            onToggleLoop={setLoopEnabled}
             onClearMarkers={clearMarkers}
             style={styles.markers}
           />

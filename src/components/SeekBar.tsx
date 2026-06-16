@@ -1,13 +1,13 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
-  GestureResponderEvent,
   LayoutChangeEvent,
   StyleSheet,
   Text,
   View,
   ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
@@ -15,6 +15,9 @@ import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
 
 const SEEK_STEP_MS = 5000;
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
 
 interface SeekBarProps {
   positionMs: number;
@@ -43,46 +46,65 @@ export function SeekBar({
     trackWidth.current = e.nativeEvent.layout.width;
   }, []);
 
-  const ratioFromEvent = useCallback(
-    (e: GestureResponderEvent): number | null => {
+  const ratioFromX = useCallback(
+    (x: number): number | null => {
       if (durationMs <= 0 || trackWidth.current <= 0) return null;
-      return Math.max(
-        0,
-        Math.min(1, e.nativeEvent.locationX / trackWidth.current),
-      );
+      return clamp(x / trackWidth.current, 0, 1);
     },
     [durationMs],
   );
 
   // Tap or drag start: update the visual and seek immediately (instant
   // tap-to-seek is preserved — no throttling on grant).
-  const handleGrant = useCallback(
-    (e: GestureResponderEvent) => {
-      const ratio = ratioFromEvent(e);
+  const beginDrag = useCallback(
+    (x: number) => {
+      const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
       seekThrottle.begin(Math.round(ratio * durationMs), onSeek);
     },
-    [ratioFromEvent, durationMs, onSeek, seekThrottle],
+    [ratioFromX, durationMs, onSeek, seekThrottle],
   );
 
   // Drag move: update the visual every frame, but throttle native seeks.
-  const handleMove = useCallback(
-    (e: GestureResponderEvent) => {
-      const ratio = ratioFromEvent(e);
+  const moveDrag = useCallback(
+    (x: number) => {
+      const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
       seekThrottle.move(Math.round(ratio * durationMs));
     },
-    [ratioFromEvent, durationMs, seekThrottle],
+    [ratioFromX, durationMs, seekThrottle],
   );
 
   // Drag end (or interruption): commit the final seek, then drop back to
   // the prop-driven visual.
-  const handleRelease = useCallback(() => {
+  const endDrag = useCallback(() => {
     seekThrottle.end();
     setDragRatio(null);
   }, [seekThrottle]);
+
+  // Route through refs so the Pan is created once (see WaveformView).
+  const beginRef = useRef(beginDrag);
+  const moveRef = useRef(moveDrag);
+  const endRef = useRef(endDrag);
+  beginRef.current = beginDrag;
+  moveRef.current = moveDrag;
+  endRef.current = endDrag;
+
+  // Mirror WaveformView: a single Pan with `minDistance(0)` claims the touch
+  // immediately so the surrounding ScrollView can't steal a scrub, and
+  // `runOnJS` keeps the callbacks on the JS thread for React state/throttle.
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .minDistance(0)
+        .onBegin((e) => beginRef.current(e.x))
+        .onUpdate((e) => moveRef.current(e.x))
+        .onFinalize(() => endRef.current()),
+    [],
+  );
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -110,39 +132,32 @@ export function SeekBar({
         now: Math.round(displayProgress * 100),
       }}
     >
-      <View
-        style={styles.barTouchArea}
-        onLayout={handleLayout}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={handleGrant}
-        onResponderMove={handleMove}
-        onResponderRelease={handleRelease}
-        onResponderTerminate={handleRelease}
-      >
-        <View
-          style={[styles.barTrack, { backgroundColor: theme.colors.border }]}
-        >
+      <GestureDetector gesture={pan}>
+        <View style={styles.barTouchArea} onLayout={handleLayout}>
+          <View
+            style={[styles.barTrack, { backgroundColor: theme.colors.border }]}
+          >
+            <View
+              style={[
+                styles.barFill,
+                {
+                  backgroundColor: theme.colors.accent,
+                  width: `${displayProgress * 100}%`,
+                },
+              ]}
+            />
+          </View>
           <View
             style={[
-              styles.barFill,
+              styles.thumb,
               {
                 backgroundColor: theme.colors.accent,
-                width: `${displayProgress * 100}%`,
+                left: `${displayProgress * 100}%`,
               },
             ]}
           />
         </View>
-        <View
-          style={[
-            styles.thumb,
-            {
-              backgroundColor: theme.colors.accent,
-              left: `${displayProgress * 100}%`,
-            },
-          ]}
-        />
-      </View>
+      </GestureDetector>
       <View style={styles.timeRow}>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
           {formatDuration(positionMs)}

@@ -28,6 +28,51 @@ jest.mock('../../services/webAudioGain', () => ({
   isWebAudioGainSupported: () => mockIsWebAudioGainSupported(),
 }));
 
+// Stub gesture-handler: GestureDetector renders its child and Gesture.Pan()
+// records its callbacks so the test can drive begin/update/finalize directly.
+jest.mock('react-native-gesture-handler', () => {
+  let last: { handlers: Record<string, (e: unknown) => void> } | null = null;
+  const makePan = () => {
+    const handlers: Record<string, (e: unknown) => void> = {};
+    const api = {
+      runOnJS: () => api,
+      minDistance: () => api,
+      enabled: () => api,
+      onBegin: (f: (e: unknown) => void) => {
+        handlers.begin = f;
+        return api;
+      },
+      onStart: (f: (e: unknown) => void) => {
+        handlers.start = f;
+        return api;
+      },
+      onUpdate: (f: (e: unknown) => void) => {
+        handlers.update = f;
+        return api;
+      },
+      onEnd: (f: (e: unknown) => void) => {
+        handlers.end = f;
+        return api;
+      },
+      onFinalize: (f: (e: unknown) => void) => {
+        handlers.finalize = f;
+        return api;
+      },
+    };
+    last = { handlers };
+    return api;
+  };
+  return {
+    Gesture: { Pan: makePan },
+    GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+    __getHandlers: () => last?.handlers,
+  };
+});
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const RNGH = require('react-native-gesture-handler');
+const handlers = () => RNGH.__getHandlers();
+
 function renderControl(
   props: Partial<React.ComponentProps<typeof VolumeControl>> = {},
 ) {
@@ -49,11 +94,25 @@ function getAdjustable(tree: ReactTestRenderer) {
 
 function getTouchArea(tree: ReactTestRenderer) {
   return tree.root.findAll(
-    (node) =>
-      node.type === 'View' &&
-      typeof node.props.onResponderGrant === 'function' &&
-      typeof node.props.onLayout === 'function',
+    (node) => node.type === 'View' && typeof node.props.onLayout === 'function',
   )[0];
+}
+
+function layout(tree: ReactTestRenderer, width: number) {
+  const touch = getTouchArea(tree);
+  act(() => {
+    touch.props.onLayout({ nativeEvent: { layout: { width } } });
+  });
+}
+
+function begin(x: number) {
+  act(() => handlers().begin({ x }));
+}
+function move(x: number) {
+  act(() => handlers().update({ x }));
+}
+function finalize() {
+  act(() => handlers().finalize({}));
 }
 
 beforeEach(() => {
@@ -107,41 +166,33 @@ describe('VolumeControl', () => {
   it('seeks volume from a tap based on touch position', () => {
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0, onVolumeChange });
-    const touch = getTouchArea(tree);
+    layout(tree, 200);
 
-    act(() => {
-      touch.props.onLayout({ nativeEvent: { layout: { width: 200 } } });
-    });
-    act(() => {
-      touch.props.onResponderGrant({ nativeEvent: { locationX: 50 } });
-    });
+    begin(50);
 
     // 50 / 200 = 0.25
     expect(onVolumeChange).toHaveBeenCalledWith(0.25);
   });
 
   it('updates volume while dragging and commits on release', () => {
+    const nowSpy = jest.spyOn(Date, 'now');
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0, onVolumeChange });
-    const touch = getTouchArea(tree);
+    layout(tree, 100);
 
-    act(() => {
-      touch.props.onLayout({ nativeEvent: { layout: { width: 100 } } });
-    });
-    act(() => {
-      touch.props.onResponderGrant({ nativeEvent: { locationX: 10 } });
-    });
-    act(() => {
-      touch.props.onResponderMove({ nativeEvent: { locationX: 80 } });
-    });
-    act(() => {
-      touch.props.onResponderRelease();
-    });
+    nowSpy.mockReturnValue(1000);
+    begin(10);
+    // Throttled move within the window — visual updates, no native call yet.
+    nowSpy.mockReturnValue(1010);
+    move(80);
+    nowSpy.mockReturnValue(1020);
+    finalize();
 
     // Grant fires immediately (0.1); the final value (0.8) is committed on
     // release even though the intervening move was throttled.
     expect(onVolumeChange).toHaveBeenCalledWith(0.1);
     expect(onVolumeChange).toHaveBeenLastCalledWith(0.8);
+    nowSpy.mockRestore();
   });
 
   it('shows the iOS limitation note only on iOS web without Web Audio gain', () => {
