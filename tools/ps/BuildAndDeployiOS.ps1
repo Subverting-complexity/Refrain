@@ -265,6 +265,31 @@ if ($existingLog.Count -gt 0) {
     Write-Host "  No previous iOS builds logged." -ForegroundColor Gray
 }
 
+# -- Pin the Apple ID for credential sign-in ----------------------------------
+# EAS prompts for an Apple ID during certificate/profile generation and defaults
+# to the Expo account email, which may be the wrong Apple account. Pin it to the
+# appleId from eas.json (single source of truth) unless the caller already set
+# EXPO_APPLE_ID explicitly.
+if (-not $env:EXPO_APPLE_ID) {
+    $easJson = Join-Path $AppDir 'eas.json'
+    if (Test-Path $easJson) {
+        try {
+            $easConfig = Get-Content $easJson -Raw | ConvertFrom-Json
+            $submitAppleId = $easConfig.submit.production.ios.appleId
+            if ($submitAppleId -and $submitAppleId -notlike 'YOUR_*') {
+                $env:EXPO_APPLE_ID = $submitAppleId
+                Write-Ok "Apple ID pinned from eas.json: $submitAppleId"
+            } else {
+                Write-Warn "No valid submit.production.ios.appleId in eas.json. EAS will prompt for the Apple ID."
+            }
+        } catch {
+            Write-Warn "Could not parse eas.json for the Apple ID. EAS will prompt."
+        }
+    }
+} else {
+    Write-Ok "Apple ID from EXPO_APPLE_ID: $env:EXPO_APPLE_ID"
+}
+
 # -- Build --------------------------------------------------------------------
 Write-Step "Starting EAS $Profile build for iOS (cloud)"
 Write-Host "  Build runs on Expo's macOS cloud runners." -ForegroundColor DarkGray
