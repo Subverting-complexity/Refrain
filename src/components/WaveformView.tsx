@@ -118,12 +118,15 @@ export function WaveformView({
   // instead of snapping back silently when dropped before A.
   const clampForTarget = useCallback(
     (target: DragTarget, ms: number): number => {
+      if (target === 'markerA' && markerB != null) {
+        return Math.max(0, Math.min(ms, markerB - 1));
+      }
       if (target === 'markerB' && markerA != null) {
         return Math.min(durationMs, Math.max(ms, markerA + 1));
       }
       return ms;
     },
-    [markerA, durationMs],
+    [markerA, markerB, durationMs],
   );
 
   // The callback for the active drag target. markerA/markerB targets are
