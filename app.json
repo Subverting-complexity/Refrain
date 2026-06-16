@@ -23,7 +23,8 @@
               "public.aac-audio"
             ]
           }
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
