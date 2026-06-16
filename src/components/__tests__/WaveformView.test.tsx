@@ -394,6 +394,36 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
+    it('clamps the A handle so it cannot be dragged past marker B', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 2000,
+        markerB: 8000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+      layout(tree);
+
+      // Grab the A handle (markerA X ≈ 67px on a 276px track).
+      nowSpy.mockReturnValue(1000);
+      begin(67);
+      onMarkerAChange.mockClear();
+
+      // Drag well past B; the value must clamp to just before B (7999ms),
+      // never to or beyond B.
+      nowSpy.mockReturnValue(1100);
+      move(270);
+
+      expect(onMarkerAChange).toHaveBeenCalledWith(7999);
+      onMarkerAChange.mock.calls.forEach(([ms]) => {
+        expect(ms).toBeLessThan(8000);
+      });
+      nowSpy.mockRestore();
+    });
+
     it('falls back to seek when touch is not near any marker', () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
