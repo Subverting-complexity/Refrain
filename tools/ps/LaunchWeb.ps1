@@ -6,7 +6,7 @@
     Starts `expo start --web` on http://localhost:8081 and opens the default
     browser when Metro is ready. The web target is a dev-time UI smoke test,
     not a shipping platform: native-backed subsystems (audio playback via
-    expo-av, the expo-sqlite store, expo-file-system imports) behave
+    expo-audio, the expo-sqlite store, expo-file-system imports) behave
     differently in a browser than on device, so use web only to click
     through screen layouts, theming, and navigation.
 

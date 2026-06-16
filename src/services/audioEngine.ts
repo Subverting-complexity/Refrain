@@ -1,4 +1,10 @@
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import {
+  AudioPlayer,
+  AudioStatus,
+  createAudioPlayer,
+  setAudioModeAsync,
+} from 'expo-audio';
+import type { EventSubscription } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
 import * as settingsStore from './settingsStore';
@@ -10,12 +16,18 @@ export type PlaybackListener = (state: PlaybackState) => void;
 const VOLUME_SETTING_KEY = 'playback.volume';
 const DEFAULT_VOLUME = 1;
 
+// expo-audio reports time in seconds; the engine's public contract is in
+// milliseconds (markers, positionMs/durationMs), so convert at the boundary.
+const secToMs = (seconds: number): number => Math.round(seconds * 1000);
+const msToSec = (ms: number): number => ms / 1000;
+
 function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_VOLUME;
   return Math.max(0, Math.min(1, value));
 }
 
-let sound: Audio.Sound | null = null;
+let player: AudioPlayer | null = null;
+let statusSubscription: EventSubscription | null = null;
 const listeners = new Set<PlaybackListener>();
 let markerA: number | null = null;
 let markerB: number | null = null;
@@ -23,20 +35,20 @@ let markerB: number | null = null;
 // persisted so it survives reload and track changes.
 let volume = DEFAULT_VOLUME;
 // True once the current web track is routed through the Web Audio gain graph
-// (iOS-Safari true attenuation). When false, volume goes through expo-av's
-// native `setVolumeAsync` path. Always false on native platforms.
+// (iOS-Safari true attenuation). When false, volume goes through the
+// AudioPlayer's `volume` property. Always false on native platforms.
 let webGainActive = false;
 
 /**
- * The internal `HTMLAudioElement` backing an expo-av web `Sound`, or null when
- * unavailable. Relies on the private `_key` field, so it is guarded heavily:
- * a missing field or an expo-av internal change yields null and the caller
+ * The internal `HTMLAudioElement` backing an expo-audio web player, or null when
+ * unavailable. Relies on the private `media` field, so it is guarded heavily:
+ * a missing field or an expo-audio internal change yields null and the caller
  * falls back to the native volume path.
  */
-function getWebMediaElement(s: Audio.Sound): HTMLMediaElement | null {
+function getWebMediaElement(p: AudioPlayer): HTMLMediaElement | null {
   if (Platform.OS !== 'web') return null;
   if (typeof HTMLMediaElement === 'undefined') return null;
-  const candidate = (s as unknown as { _key?: unknown })._key;
+  const candidate = (p as unknown as { media?: unknown }).media;
   return candidate instanceof HTMLMediaElement ? candidate : null;
 }
 
@@ -66,30 +78,30 @@ function errorMessage(err: unknown): string {
   return 'Unknown error';
 }
 
-function parseStatus(avStatus: AVPlaybackStatus): PlaybackState {
-  if (!avStatus.isLoaded) {
+function parseStatus(status: AudioStatus): PlaybackState {
+  if (!status.isLoaded) {
     return { ...IDLE_STATE, markerA, markerB, volume };
   }
 
-  let status: PlaybackStatus = 'paused';
-  if (avStatus.isPlaying) {
-    status = 'playing';
-  } else if (avStatus.isBuffering) {
-    status = 'loading';
+  let playbackStatus: PlaybackStatus = 'paused';
+  if (status.playing) {
+    playbackStatus = 'playing';
+  } else if (status.isBuffering) {
+    playbackStatus = 'loading';
   }
 
   return {
-    status,
-    positionMs: avStatus.positionMillis,
-    durationMs: avStatus.durationMillis ?? 0,
+    status: playbackStatus,
+    positionMs: secToMs(status.currentTime),
+    durationMs: secToMs(status.duration),
     markerA,
     markerB,
     volume,
   };
 }
 
-function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
-  if (!avStatus.isLoaded && avStatus.error) {
+function onPlaybackStatusUpdate(status: AudioStatus): void {
+  if (status.error) {
     currentState = {
       status: 'error',
       positionMs: 0,
@@ -97,29 +109,29 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
       markerA,
       markerB,
       volume,
-      lastError: errorMessage(avStatus.error),
+      lastError: errorMessage(status.error),
     };
     notify(currentState);
     return;
   }
 
-  const newState = parseStatus(avStatus);
+  const newState = parseStatus(status);
 
-  if (avStatus.isLoaded && avStatus.didJustFinish) {
+  if (status.isLoaded && status.didJustFinish) {
     newState.status = 'paused';
     newState.positionMs = newState.durationMs;
   }
 
   if (
-    avStatus.isLoaded &&
-    avStatus.isPlaying &&
+    status.isLoaded &&
+    status.playing &&
     markerA != null &&
     markerB != null &&
     newState.positionMs >= markerB
   ) {
     const loopStart = markerA;
-    if (sound) {
-      sound.setPositionAsync(loopStart).catch((err) => {
+    if (player) {
+      player.seekTo(msToSec(loopStart)).catch((err) => {
         currentState = {
           ...currentState,
           status: 'error',
@@ -130,8 +142,8 @@ function onPlaybackStatusUpdate(avStatus: AVPlaybackStatus): void {
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
-    // (up to progressUpdateIntervalMillis past marker B) until the next
-    // status update arrives.
+    // (up to updateInterval past marker B) until the next status update
+    // arrives.
     currentState = { ...newState, positionMs: loopStart };
     notify(currentState);
     return;
@@ -155,26 +167,27 @@ export async function loadTrack(uri: string): Promise<void> {
     };
     notify(currentState);
 
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
     });
 
-    const { sound: newSound } = await Audio.Sound.createAsync(
-      { uri },
-      // Seed the current volume at creation so the very first frame plays at
-      // the persisted level; setVolume() handles later live changes.
-      { shouldPlay: false, volume, progressUpdateIntervalMillis: 100 },
+    const newPlayer = createAudioPlayer({ uri }, { updateInterval: 100 });
+    // Seed the current volume so the very first frame plays at the persisted
+    // level; setVolume() handles later live changes.
+    newPlayer.volume = volume;
+    statusSubscription = newPlayer.addListener(
+      'playbackStatusUpdate',
       onPlaybackStatusUpdate,
     );
-    sound = newSound;
+    player = newPlayer;
 
     // On web, try to route through a Web Audio gain graph so volume actually
     // attenuates on iOS Safari. On success the media element plays at full
     // volume and gain does the attenuation, avoiding double-application on
-    // desktop. Any failure falls back to expo-av's `setVolumeAsync` path.
+    // desktop. Any failure falls back to the player's `volume` property.
     webGainActive = false;
-    const media = getWebMediaElement(newSound);
+    const media = getWebMediaElement(newPlayer);
     if (media && webAudioGain.attach(media)) {
       try {
         media.volume = 1;
@@ -200,7 +213,7 @@ export async function loadTrack(uri: string): Promise<void> {
 }
 
 export async function play(): Promise<void> {
-  if (!sound) return;
+  if (!player) return;
   // Resume the audio graph on this user gesture so iOS's autoplay policy
   // can't leave the rerouted output silently suspended.
   if (webGainActive) webAudioGain.resume();
@@ -209,25 +222,26 @@ export async function play(): Promise<void> {
     currentState.positionMs >= currentState.durationMs &&
     currentState.durationMs > 0
   ) {
-    await sound.setPositionAsync(markerA ?? 0);
+    await player.seekTo(msToSec(markerA ?? 0));
   }
-  await sound.playAsync();
+  player.play();
 }
 
 export async function pause(): Promise<void> {
-  if (!sound) return;
-  await sound.pauseAsync();
+  if (!player) return;
+  player.pause();
 }
 
 export async function stop(): Promise<void> {
-  if (!sound) return;
-  await sound.stopAsync();
-  await sound.setPositionAsync(markerA ?? 0);
+  if (!player) return;
+  // expo-audio has no stop(); emulate by pausing and rewinding.
+  player.pause();
+  await player.seekTo(msToSec(markerA ?? 0));
 }
 
 export async function seekTo(positionMs: number): Promise<void> {
-  if (!sound) return;
-  await sound.setPositionAsync(positionMs);
+  if (!player) return;
+  await player.seekTo(msToSec(positionMs));
 }
 
 export async function unloadTrack(): Promise<void> {
@@ -235,10 +249,13 @@ export async function unloadTrack(): Promise<void> {
     webAudioGain.detach();
     webGainActive = false;
   }
-  if (sound) {
-    sound.setOnPlaybackStatusUpdate(null);
-    await sound.unloadAsync();
-    sound = null;
+  if (statusSubscription) {
+    statusSubscription.remove();
+    statusSubscription = null;
+  }
+  if (player) {
+    player.remove();
+    player = null;
   }
   markerA = null;
   markerB = null;
@@ -257,8 +274,8 @@ export function getVolume(): number {
  * Platform note: when the web track is routed through the Web Audio gain graph
  * (`webGainActive`), volume is applied via the gain node so it attenuates even
  * on iOS Safari, where programmatic `HTMLMediaElement.volume` is ignored.
- * Otherwise `setVolumeAsync` adjusts app-level gain on iOS/Android native and
- * desktop web. The value is always stored and reflected in the UI so
+ * Otherwise the player's `volume` property adjusts app-level gain on iOS/Android
+ * native and desktop web. The value is always stored and reflected in the UI so
  * behaviour is consistent across platforms.
  */
 export function setVolume(value: number): void {
@@ -268,10 +285,14 @@ export function setVolume(value: number): void {
     // wake a context the autoplay policy left suspended.
     webAudioGain.setGain(volume);
     webAudioGain.resume();
-  } else if (sound) {
-    // expo-av rejects if the sound unloaded mid-flight; swallow so a volume
-    // tweak can never surface as a playback error.
-    void sound.setVolumeAsync(volume).catch(() => undefined);
+  } else if (player) {
+    // Setting volume can throw if the player was released mid-flight; swallow
+    // so a volume tweak can never surface as a playback error.
+    try {
+      player.volume = volume;
+    } catch {
+      // best-effort
+    }
   }
   try {
     settingsStore.setNumber(VOLUME_SETTING_KEY, volume);

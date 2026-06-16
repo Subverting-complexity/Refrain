@@ -1,25 +1,17 @@
 import { CountdownConfig, CountdownState } from '../../types';
 
-const mockPlayAsync = jest.fn().mockResolvedValue({});
-const mockSetPositionAsync = jest.fn().mockResolvedValue({});
-const mockUnloadAsync = jest.fn().mockResolvedValue({});
-const mockCreateAsync = jest.fn().mockResolvedValue({
-  sound: {
-    playAsync: mockPlayAsync,
-    setPositionAsync: mockSetPositionAsync,
-    unloadAsync: mockUnloadAsync,
-  },
-});
+const mockPlay = jest.fn();
+const mockSeekTo = jest.fn().mockResolvedValue(undefined);
+const mockRemove = jest.fn();
+const mockCreateAudioPlayer = jest.fn().mockImplementation(() => ({
+  play: mockPlay,
+  seekTo: mockSeekTo,
+  remove: mockRemove,
+}));
 
-jest.mock('expo-av', () => {
-  return {
-    Audio: {
-      Sound: {
-        createAsync: (...args: unknown[]) => mockCreateAsync(...args),
-      },
-    },
-  };
-});
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
+}));
 
 import * as countdownEngine from '../countdownEngine';
 
@@ -51,10 +43,10 @@ describe('countdownEngine', () => {
   beforeEach(async () => {
     jest.useFakeTimers();
     await countdownEngine.unload();
-    mockPlayAsync.mockClear();
-    mockSetPositionAsync.mockClear();
-    mockUnloadAsync.mockClear();
-    mockCreateAsync.mockClear();
+    mockPlay.mockClear();
+    mockSeekTo.mockClear();
+    mockRemove.mockClear();
+    mockCreateAudioPlayer.mockClear();
   });
 
   afterEach(async () => {
@@ -187,7 +179,7 @@ describe('countdownEngine', () => {
 
       jest.advanceTimersByTime(2000);
 
-      expect(mockCreateAsync).not.toHaveBeenCalled();
+      expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
     });
   });
 
@@ -287,12 +279,12 @@ describe('countdownEngine', () => {
       const onFinished = jest.fn();
       await countdownEngine.start(metronomeConfig(), onFinished);
 
-      expect(mockCreateAsync).toHaveBeenCalled();
+      expect(mockCreateAudioPlayer).toHaveBeenCalled();
 
       jest.advanceTimersByTime(500);
       await Promise.resolve();
       await Promise.resolve();
-      expect(mockPlayAsync).toHaveBeenCalled();
+      expect(mockPlay).toHaveBeenCalled();
     });
   });
 
@@ -321,7 +313,7 @@ describe('countdownEngine', () => {
       await countdownEngine.start(metronomeConfig(), jest.fn());
       await countdownEngine.unload();
 
-      expect(mockUnloadAsync).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
       expect(countdownEngine.getState().phase).toBe('idle');
     });
   });

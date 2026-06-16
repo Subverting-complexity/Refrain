@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 /**
  * True when running in mobile Safari / any iOS browser (all iOS browsers use
  * WebKit). These engines ignore programmatic `HTMLMediaElement.volume`
- * changes, so `expo-av`'s web volume path silently no-ops there. Callers use
+ * changes, so `expo-audio`'s web volume path silently no-ops there. Callers use
  * this to surface the limitation in the UI instead of presenting a slider
  * that appears to do nothing.
  *

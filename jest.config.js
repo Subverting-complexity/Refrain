@@ -2,6 +2,10 @@
 module.exports = {
   preset: 'jest-expo',
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
+  // Never pick up test files inside local git worktrees under .claude/ — they
+  // are stale repo copies and would run duplicate/outdated suites. A clean CI
+  // checkout has no such directory, so this only affects local full runs.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
   moduleNameMapper: {
     '\\.(wav|mp3|aac|m4a)$': '<rootDir>/src/__mocks__/audioFileMock.js',
     '^@/(.*)$': '<rootDir>/$1',
