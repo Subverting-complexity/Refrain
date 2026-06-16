@@ -2,17 +2,17 @@
  * Web Audio gain routing for true volume attenuation on iOS Safari.
  *
  * iOS WebKit (and every iOS browser) ignores programmatic
- * `HTMLMediaElement.volume`, so `expo-av`'s web volume path silently no-ops
+ * `HTMLMediaElement.volume`, so `expo-audio`'s web volume path silently no-ops
  * there. Routing the media element through a `MediaElementAudioSourceNode ->
  * GainNode -> destination` graph lets us attenuate output via the gain node
  * instead, which WebKit honours.
  *
  * Web-only and pure (no React). Heavily guarded: every Web Audio call is
- * wrapped so a missing API or an expo-av internal change degrades to the
+ * wrapped so a missing API or an expo-audio internal change degrades to the
  * caller's fallback instead of breaking playback. One shared `AudioContext`
  * is reused across tracks; each track gets its own source + gain graph
  * (a media element can only be sourced once, so a fresh element per track is
- * required — which is exactly what loading a new `expo-av` sound provides).
+ * required — which is exactly what loading a new `expo-audio` player provides).
  */
 
 type AudioContextCtor = new () => AudioContext;

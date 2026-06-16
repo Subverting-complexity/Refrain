@@ -105,11 +105,11 @@ through screen layouts, theming, and navigation without waiting for an EAS build
 
 Native-backed subsystems behave differently in a browser than on device:
 
-| Subsystem          | Web behaviour                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------ |
-| `expo-av` playback | Browser audio engine — timing and format support differ from native; treat as best-effort. |
-| `expo-sqlite`      | Browser-backed; persistence semantics differ from a native database.                       |
-| `expo-file-system` | Loop file import paths that depend on native FS are not exercised.                         |
+| Subsystem             | Web behaviour                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `expo-audio` playback | Browser audio engine — timing and format support differ from native; treat as best-effort. |
+| `expo-sqlite`         | Browser-backed; persistence semantics differ from a native database.                       |
+| `expo-file-system`    | Loop file import paths that depend on native FS are not exercised.                         |
 
 For anything audio-related — loop import, playback, A/B markers against a real
 clip — use `BuildAndDeployiOS.cmd -Profile development` or

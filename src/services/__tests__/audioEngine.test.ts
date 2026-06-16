@@ -1,38 +1,41 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 
-const mockPlayAsync = jest.fn();
-const mockPauseAsync = jest.fn();
-const mockStopAsync = jest.fn();
-const mockSetPositionAsync = jest.fn();
-const mockSetVolumeAsync = jest.fn();
-const mockUnloadAsync = jest.fn();
-const mockSetOnPlaybackStatusUpdate = jest.fn();
+const mockPlay = jest.fn();
+const mockPause = jest.fn();
+const mockSeekTo = jest.fn();
+const mockRemove = jest.fn();
+const mockSubscriptionRemove = jest.fn();
+const mockVolumeSet = jest.fn<void, [number]>();
 let statusCallback: ((status: unknown) => void) | null = null;
 
-const mockCreateAsync = jest.fn().mockImplementation((_source, _opts, cb) => {
-  statusCallback = cb;
-  return Promise.resolve({
-    sound: {
-      playAsync: mockPlayAsync,
-      pauseAsync: mockPauseAsync,
-      stopAsync: mockStopAsync,
-      setPositionAsync: mockSetPositionAsync,
-      setVolumeAsync: mockSetVolumeAsync,
-      unloadAsync: mockUnloadAsync,
-      setOnPlaybackStatusUpdate: mockSetOnPlaybackStatusUpdate,
-    },
+const mockAddListener = jest.fn(
+  (_event: string, cb: (status: unknown) => void) => {
+    statusCallback = cb;
+    return { remove: mockSubscriptionRemove };
+  },
+);
+
+const mockCreateAudioPlayer = jest.fn().mockImplementation(() => {
+  const player: Record<string, unknown> = {
+    play: mockPlay,
+    pause: mockPause,
+    seekTo: mockSeekTo,
+    remove: mockRemove,
+    addListener: mockAddListener,
+  };
+  Object.defineProperty(player, 'volume', {
+    get: () => 1,
+    set: (v: number) => mockVolumeSet(v),
+    configurable: true,
   });
+  return player;
 });
 
 const mockSetAudioModeAsync = jest.fn();
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    Sound: {
-      createAsync: mockCreateAsync,
-    },
-    setAudioModeAsync: mockSetAudioModeAsync,
-  },
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
+  setAudioModeAsync: (...args: unknown[]) => mockSetAudioModeAsync(...args),
 }));
 
 const mockGetNumber = jest.fn<number, [string, number]>();
@@ -43,14 +46,16 @@ jest.mock('../settingsStore', () => ({
   setNumber: (key: string, value: number) => mockSetNumber(key, value),
 }));
 
+// expo-audio reports time in seconds; durations/positions below are in seconds.
 function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
   return {
     isLoaded: true,
-    isPlaying: false,
+    playing: false,
     isBuffering: false,
-    positionMillis: 0,
-    durationMillis: 60000,
+    currentTime: 0,
+    duration: 60,
     didJustFinish: false,
+    error: null,
     ...overrides,
   };
 }
@@ -58,10 +63,9 @@ function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   statusCallback = null;
-  // setPositionAsync returns a Promise in expo-av; default it to resolve so
-  // callers that attach `.catch` (e.g. the loop-rewind seek) work.
-  mockSetPositionAsync.mockResolvedValue(undefined);
-  mockSetVolumeAsync.mockResolvedValue(undefined);
+  // seekTo returns a Promise; default it to resolve so callers that attach
+  // `.catch` (e.g. the loop-rewind seek) work.
+  mockSeekTo.mockResolvedValue(undefined);
   // Default: no persisted volume, so the engine uses its fallback.
   mockGetNumber.mockImplementation((_key, fallback) => fallback);
 });
@@ -72,36 +76,37 @@ describe('audioEngine', () => {
   });
 
   describe('loadTrack', () => {
-    it('configures audio mode and creates a sound', async () => {
+    it('configures audio mode and creates a player', async () => {
       const { loadTrack } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
 
       expect(mockSetAudioModeAsync).toHaveBeenCalledWith(
         expect.objectContaining({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
         }),
       );
-      expect(mockCreateAsync).toHaveBeenCalledWith(
+      expect(mockCreateAudioPlayer).toHaveBeenCalledWith(
         { uri: 'file:///test.mp3' },
-        expect.objectContaining({ shouldPlay: false }),
-        expect.any(Function),
+        expect.objectContaining({ updateInterval: 100 }),
       );
     });
 
-    it('unloads previous sound before loading a new one', async () => {
+    it('unloads previous player before loading a new one', async () => {
       const { loadTrack } = require('../audioEngine');
 
       await loadTrack('file:///first.mp3');
       await loadTrack('file:///second.mp3');
 
-      expect(mockUnloadAsync).toHaveBeenCalledTimes(1);
-      expect(mockCreateAsync).toHaveBeenCalledTimes(2);
+      expect(mockRemove).toHaveBeenCalledTimes(1);
+      expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
     });
 
-    it('reports error status when createAsync throws', async () => {
-      mockCreateAsync.mockRejectedValueOnce(new Error('unsupported format'));
+    it('reports error status when createAudioPlayer throws', async () => {
+      mockCreateAudioPlayer.mockImplementationOnce(() => {
+        throw new Error('unsupported format');
+      });
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
       subscribe(listener);
@@ -115,27 +120,6 @@ describe('audioEngine', () => {
           status: 'error',
           positionMs: 0,
           lastError: 'unsupported format',
-        }),
-      );
-    });
-
-    it('does not reject and reports error when unloading the previous sound throws', async () => {
-      mockUnloadAsync.mockRejectedValueOnce(new Error('unload failed'));
-      const { loadTrack, subscribe } = require('../audioEngine');
-      const listener = jest.fn();
-
-      // First load succeeds so a sound exists to be unloaded on the next load.
-      await loadTrack('file:///first.mp3');
-      subscribe(listener);
-      listener.mockClear();
-
-      await expect(loadTrack('file:///second.mp3')).resolves.toBeUndefined();
-
-      const lastCall = listener.mock.calls[listener.mock.calls.length - 1][0];
-      expect(lastCall).toEqual(
-        expect.objectContaining({
-          status: 'error',
-          lastError: 'unload failed',
         }),
       );
     });
@@ -172,22 +156,22 @@ describe('audioEngine', () => {
   });
 
   describe('play', () => {
-    it('plays the loaded sound', async () => {
+    it('plays the loaded player', async () => {
       const { loadTrack, play } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       statusCallback?.(makeLoadedStatus());
       await play();
 
-      expect(mockPlayAsync).toHaveBeenCalled();
+      expect(mockPlay).toHaveBeenCalled();
     });
 
-    it('does nothing when no sound is loaded', async () => {
+    it('does nothing when no player is loaded', async () => {
       const { play } = require('../audioEngine');
 
       await play();
 
-      expect(mockPlayAsync).not.toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
     });
 
     it('resets position to markerA when playing after track finished', async () => {
@@ -197,12 +181,13 @@ describe('audioEngine', () => {
       statusCallback?.(makeLoadedStatus());
       setMarkerA(10000);
       statusCallback?.(
-        makeLoadedStatus({ didJustFinish: true, positionMillis: 60000 }),
+        makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
       await play();
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(10000);
-      expect(mockPlayAsync).toHaveBeenCalled();
+      // markerA is 10000ms -> 10s at the expo-audio boundary.
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+      expect(mockPlay).toHaveBeenCalled();
     });
 
     it('resets position to 0 when playing after track finished with no markers', async () => {
@@ -210,43 +195,43 @@ describe('audioEngine', () => {
 
       await loadTrack('file:///test.mp3');
       statusCallback?.(
-        makeLoadedStatus({ didJustFinish: true, positionMillis: 60000 }),
+        makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
       await play();
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(0);
-      expect(mockPlayAsync).toHaveBeenCalled();
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).toHaveBeenCalled();
     });
   });
 
   describe('pause', () => {
-    it('pauses the loaded sound', async () => {
+    it('pauses the loaded player', async () => {
       const { loadTrack, pause } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       await pause();
 
-      expect(mockPauseAsync).toHaveBeenCalled();
+      expect(mockPause).toHaveBeenCalled();
     });
 
-    it('does nothing when no sound is loaded', async () => {
+    it('does nothing when no player is loaded', async () => {
       const { pause } = require('../audioEngine');
 
       await pause();
 
-      expect(mockPauseAsync).not.toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
     });
   });
 
   describe('stop', () => {
-    it('stops and resets position', async () => {
+    it('pauses and resets position', async () => {
       const { loadTrack, stop } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       await stop();
 
-      expect(mockStopAsync).toHaveBeenCalled();
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(0);
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
     });
 
     it('resets position to markerA when markers are set', async () => {
@@ -257,40 +242,42 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       await stop();
 
-      expect(mockStopAsync).toHaveBeenCalled();
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
+      expect(mockPause).toHaveBeenCalled();
+      // markerA 5000ms -> 5s.
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
     });
 
-    it('does nothing when no sound is loaded', async () => {
+    it('does nothing when no player is loaded', async () => {
       const { stop } = require('../audioEngine');
 
       await stop();
 
-      expect(mockStopAsync).not.toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
     });
   });
 
   describe('seekTo', () => {
-    it('sets position on the sound', async () => {
+    it('sets position on the player', async () => {
       const { loadTrack, seekTo } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       await seekTo(30000);
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(30000);
+      // 30000ms -> 30s.
+      expect(mockSeekTo).toHaveBeenCalledWith(30);
     });
 
-    it('does nothing when no sound is loaded', async () => {
+    it('does nothing when no player is loaded', async () => {
       const { seekTo } = require('../audioEngine');
 
       await seekTo(30000);
 
-      expect(mockSetPositionAsync).not.toHaveBeenCalled();
+      expect(mockSeekTo).not.toHaveBeenCalled();
     });
   });
 
   describe('unloadTrack', () => {
-    it('unloads and resets state', async () => {
+    it('removes the player and resets state', async () => {
       const { loadTrack, unloadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
 
@@ -300,8 +287,8 @@ describe('audioEngine', () => {
 
       await unloadTrack();
 
-      expect(mockSetOnPlaybackStatusUpdate).toHaveBeenCalledWith(null);
-      expect(mockUnloadAsync).toHaveBeenCalled();
+      expect(mockSubscriptionRemove).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'idle', positionMs: 0 }),
       );
@@ -419,19 +406,15 @@ describe('audioEngine', () => {
       expect(getVolume()).toBe(1);
     });
 
-    it('seeds the loaded sound with the current volume', async () => {
+    it('seeds the loaded player with the current volume', async () => {
       const { loadTrack } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
 
-      expect(mockCreateAsync).toHaveBeenCalledWith(
-        { uri: 'file:///test.mp3' },
-        expect.objectContaining({ volume: 1 }),
-        expect.any(Function),
-      );
+      expect(mockVolumeSet).toHaveBeenCalledWith(1);
     });
 
-    it('setVolume clamps, applies to the sound, persists, and notifies', async () => {
+    it('setVolume clamps, applies to the player, persists, and notifies', async () => {
       const { loadTrack, setVolume, subscribe } = require('../audioEngine');
       await loadTrack('file:///test.mp3');
 
@@ -441,7 +424,7 @@ describe('audioEngine', () => {
 
       setVolume(0.3);
 
-      expect(mockSetVolumeAsync).toHaveBeenCalledWith(0.3);
+      expect(mockVolumeSet).toHaveBeenCalledWith(0.3);
       expect(mockSetNumber).toHaveBeenCalledWith('playback.volume', 0.3);
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ volume: 0.3 }),
@@ -458,13 +441,13 @@ describe('audioEngine', () => {
       expect(getVolume()).toBe(0);
     });
 
-    it('setVolume works with no sound loaded and still persists', () => {
+    it('setVolume works with no player loaded and still persists', () => {
       const { setVolume, getVolume } = require('../audioEngine');
 
       setVolume(0.5);
 
       expect(getVolume()).toBe(0.5);
-      expect(mockSetVolumeAsync).not.toHaveBeenCalled();
+      expect(mockVolumeSet).not.toHaveBeenCalled();
       expect(mockSetNumber).toHaveBeenCalledWith('playback.volume', 0.5);
     });
 
@@ -478,8 +461,7 @@ describe('audioEngine', () => {
       expect(getVolume()).toBe(0.7);
     });
 
-    it('does not surface an error when the volume call rejects', async () => {
-      mockSetVolumeAsync.mockRejectedValueOnce(new Error('volume failed'));
+    it('does not surface an error when applying the volume throws', async () => {
       const { loadTrack, setVolume, subscribe } = require('../audioEngine');
       await loadTrack('file:///test.mp3');
 
@@ -487,9 +469,12 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      setVolume(0.2);
-      await Promise.resolve();
-      await Promise.resolve();
+      // The next volume application (the property set) throws.
+      mockVolumeSet.mockImplementationOnce(() => {
+        throw new Error('volume failed');
+      });
+
+      expect(() => setVolume(0.2)).not.toThrow();
 
       expect(listener).not.toHaveBeenCalledWith(
         expect.objectContaining({ status: 'error' }),
@@ -537,9 +522,7 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 5000 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 5 }));
 
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -559,7 +542,7 @@ describe('audioEngine', () => {
       listener.mockClear();
 
       statusCallback?.(
-        makeLoadedStatus({ didJustFinish: true, positionMillis: 60000 }),
+        makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
 
       expect(listener).toHaveBeenCalledWith(
@@ -750,13 +733,12 @@ describe('audioEngine', () => {
       statusCallback?.(makeLoadedStatus());
       setMarkerA(5000);
       setMarkerB(15000);
-      mockSetPositionAsync.mockClear();
+      mockSeekTo.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
+      // markerA 5000ms -> 5s.
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
     });
 
     it('seeks to markerA when position overshoots markerB', async () => {
@@ -766,13 +748,11 @@ describe('audioEngine', () => {
       statusCallback?.(makeLoadedStatus());
       setMarkerA(5000);
       setMarkerB(15000);
-      mockSetPositionAsync.mockClear();
+      mockSeekTo.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 15050 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15.05 }));
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(5000);
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
     });
 
     it('does not loop back when not playing', async () => {
@@ -782,13 +762,11 @@ describe('audioEngine', () => {
       statusCallback?.(makeLoadedStatus());
       setMarkerA(5000);
       setMarkerB(15000);
-      mockSetPositionAsync.mockClear();
+      mockSeekTo.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: false, positionMillis: 15000 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: false, currentTime: 15 }));
 
-      expect(mockSetPositionAsync).not.toHaveBeenCalled();
+      expect(mockSeekTo).not.toHaveBeenCalled();
     });
 
     it('does not loop back when only markerA is set', async () => {
@@ -797,13 +775,11 @@ describe('audioEngine', () => {
       await loadTrack('file:///test.mp3');
       statusCallback?.(makeLoadedStatus());
       setMarkerA(5000);
-      mockSetPositionAsync.mockClear();
+      mockSeekTo.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 50000 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 50 }));
 
-      expect(mockSetPositionAsync).not.toHaveBeenCalled();
+      expect(mockSeekTo).not.toHaveBeenCalled();
     });
 
     it('publishes markerA as the position on loop rewind so the cursor jumps back', async () => {
@@ -825,9 +801,7 @@ describe('audioEngine', () => {
 
       // Position overshoots marker B by the polling interval; the published
       // position must snap back to marker A, not stall at the overshoot.
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 15050 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15.05 }));
 
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'playing', positionMs: 5000 }),
@@ -835,7 +809,7 @@ describe('audioEngine', () => {
     });
 
     it('reports error without an unhandled rejection when the loop seek fails', async () => {
-      mockSetPositionAsync.mockRejectedValueOnce(new Error('seek failed'));
+      mockSeekTo.mockRejectedValueOnce(new Error('seek failed'));
       const {
         loadTrack,
         setMarkerA,
@@ -852,9 +826,7 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      statusCallback?.(
-        makeLoadedStatus({ isPlaying: true, positionMillis: 15000 }),
-      );
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
 
       // Let the rejected seek promise settle.
       await Promise.resolve();

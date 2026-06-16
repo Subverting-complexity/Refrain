@@ -1,18 +1,12 @@
 import { createElement } from 'react';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    Sound: {
-      createAsync: jest.fn().mockResolvedValue({
-        sound: {
-          playAsync: jest.fn().mockResolvedValue({}),
-          setPositionAsync: jest.fn().mockResolvedValue({}),
-          unloadAsync: jest.fn().mockResolvedValue({}),
-        },
-      }),
-    },
-  },
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: jest.fn().mockImplementation(() => ({
+    play: jest.fn(),
+    seekTo: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn(),
+  })),
 }));
 
 import { useCountdown } from '../useCountdown';

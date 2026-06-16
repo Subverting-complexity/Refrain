@@ -1,7 +1,7 @@
 /**
  * Web Audio gain path for the audio engine. Exercises the iOS-Safari true
  * attenuation route (`Platform.OS === 'web'` + a sourceable media element)
- * and its fallback to expo-av's native `setVolumeAsync`.
+ * and its fallback to the expo-audio player's `volume` property.
  */
 /* eslint-disable @typescript-eslint/no-require-imports */
 
@@ -9,33 +9,33 @@ class FakeMedia {
   volume = 1;
 }
 
-let mediaKey: FakeMedia | null;
+let media: FakeMedia | null;
 
-const mockPlayAsync = jest.fn();
-const mockSetVolumeAsync = jest.fn();
-const mockUnloadAsync = jest.fn();
-const mockSetOnPlaybackStatusUpdate = jest.fn();
+const mockPlay = jest.fn();
+const mockSeekTo = jest.fn().mockResolvedValue(undefined);
+const mockRemove = jest.fn();
+const mockVolumeSet = jest.fn<void, [number]>();
+const mockAddListener = jest.fn(() => ({ remove: jest.fn() }));
 
-const mockCreateAsync = jest.fn().mockImplementation(() =>
-  Promise.resolve({
-    sound: {
-      playAsync: mockPlayAsync,
-      pauseAsync: jest.fn(),
-      stopAsync: jest.fn(),
-      setPositionAsync: jest.fn().mockResolvedValue(undefined),
-      setVolumeAsync: mockSetVolumeAsync,
-      unloadAsync: mockUnloadAsync,
-      setOnPlaybackStatusUpdate: mockSetOnPlaybackStatusUpdate,
-      _key: mediaKey,
-    },
-  }),
-);
+const mockCreateAudioPlayer = jest.fn().mockImplementation(() => {
+  const player: Record<string, unknown> = {
+    play: mockPlay,
+    pause: jest.fn(),
+    seekTo: mockSeekTo,
+    remove: mockRemove,
+    addListener: mockAddListener,
+    media,
+  };
+  Object.defineProperty(player, 'volume', {
+    get: () => 1,
+    set: (v: number) => mockVolumeSet(v),
+  });
+  return player;
+});
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    Sound: { createAsync: mockCreateAsync },
-    setAudioModeAsync: jest.fn(),
-  },
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
+  setAudioModeAsync: jest.fn(),
 }));
 
 jest.mock('react-native', () => ({ Platform: { OS: 'web' } }));
@@ -53,7 +53,7 @@ const mockIsActive = jest.fn<boolean, []>();
 
 jest.mock('../webAudioGain', () => ({
   isWebAudioGainSupported: () => true,
-  attach: (media: HTMLMediaElement) => mockAttach(media),
+  attach: (m: HTMLMediaElement) => mockAttach(m),
   setGain: (v: number) => mockSetGain(v),
   resume: () => mockResume(),
   detach: () => mockDetach(),
@@ -63,10 +63,9 @@ jest.mock('../webAudioGain', () => ({
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
-  mockSetVolumeAsync.mockResolvedValue(undefined);
-  mockUnloadAsync.mockResolvedValue(undefined);
+  mockSeekTo.mockResolvedValue(undefined);
   mockAttach.mockReturnValue(true);
-  mediaKey = new FakeMedia();
+  media = new FakeMedia();
   (global as Record<string, unknown>).HTMLMediaElement = FakeMedia;
 });
 
@@ -80,9 +79,9 @@ describe('web gain routing', () => {
 
     await loadTrack('blob:track');
 
-    expect(mockAttach).toHaveBeenCalledWith(mediaKey);
+    expect(mockAttach).toHaveBeenCalledWith(media);
     // Media plays at full volume; the gain node does the attenuation.
-    expect(mediaKey?.volume).toBe(1);
+    expect(media?.volume).toBe(1);
     expect(mockSetGain).toHaveBeenCalledWith(1);
   });
 
@@ -90,12 +89,13 @@ describe('web gain routing', () => {
     const { loadTrack, setVolume } = require('../audioEngine');
     await loadTrack('blob:track');
     mockSetGain.mockClear();
+    mockVolumeSet.mockClear();
 
     setVolume(0.4);
 
     expect(mockSetGain).toHaveBeenCalledWith(0.4);
     expect(mockResume).toHaveBeenCalled();
-    expect(mockSetVolumeAsync).not.toHaveBeenCalled();
+    expect(mockVolumeSet).not.toHaveBeenCalledWith(0.4);
   });
 
   it('resumes the context on play', async () => {
@@ -106,7 +106,7 @@ describe('web gain routing', () => {
     await play();
 
     expect(mockResume).toHaveBeenCalled();
-    expect(mockPlayAsync).toHaveBeenCalled();
+    expect(mockPlay).toHaveBeenCalled();
   });
 
   it('detaches the graph on unload', async () => {
@@ -131,7 +131,7 @@ describe('web gain routing', () => {
 });
 
 describe('fallback to native volume', () => {
-  it('uses setVolumeAsync when the gain graph fails to attach', async () => {
+  it('uses the player volume when the gain graph fails to attach', async () => {
     mockAttach.mockReturnValue(false);
     const { loadTrack, setVolume } = require('../audioEngine');
     await loadTrack('blob:track');
@@ -139,18 +139,18 @@ describe('fallback to native volume', () => {
     setVolume(0.4);
 
     expect(mockSetGain).not.toHaveBeenCalled();
-    expect(mockSetVolumeAsync).toHaveBeenCalledWith(0.4);
+    expect(mockVolumeSet).toHaveBeenCalledWith(0.4);
   });
 
-  it('uses setVolumeAsync when the media element is not sourceable', async () => {
-    mediaKey = null; // expo-av internal shape changed — no element.
+  it('uses the player volume when the media element is not sourceable', async () => {
+    media = null; // expo-audio internal shape changed — no element.
     const { loadTrack, setVolume } = require('../audioEngine');
     await loadTrack('blob:track');
 
     setVolume(0.6);
 
     expect(mockAttach).not.toHaveBeenCalled();
-    expect(mockSetVolumeAsync).toHaveBeenCalledWith(0.6);
+    expect(mockVolumeSet).toHaveBeenCalledWith(0.6);
   });
 
   it('falls back when seeding the attached graph throws', async () => {
@@ -163,13 +163,13 @@ describe('fallback to native volume', () => {
         return 1;
       },
     });
-    mediaKey = throwingMedia as FakeMedia;
+    media = throwingMedia as FakeMedia;
     const { loadTrack, setVolume } = require('../audioEngine');
 
     await loadTrack('blob:track');
 
     expect(mockDetach).toHaveBeenCalled();
     setVolume(0.2);
-    expect(mockSetVolumeAsync).toHaveBeenCalledWith(0.2);
+    expect(mockVolumeSet).toHaveBeenCalledWith(0.2);
   });
 });

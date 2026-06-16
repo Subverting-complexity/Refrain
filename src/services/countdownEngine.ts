@@ -1,4 +1,4 @@
-import { Audio } from 'expo-av';
+import { AudioPlayer, createAudioPlayer } from 'expo-audio';
 
 import { CountdownConfig, CountdownDuration, CountdownState } from '../types';
 
@@ -18,7 +18,7 @@ const BEATS_PER_BAR = 4;
 let currentState: CountdownState = { ...IDLE_STATE };
 const listeners = new Set<CountdownListener>();
 let timerId: ReturnType<typeof setTimeout> | null = null;
-let clickSound: Audio.Sound | null = null;
+let clickPlayer: AudioPlayer | null = null;
 
 function notify(state: CountdownState): void {
   for (const cb of listeners) {
@@ -43,23 +43,19 @@ export function beatIntervalMs(bpm: number): number {
 }
 
 async function loadClick(): Promise<void> {
-  if (clickSound) return;
+  if (clickPlayer) return;
   try {
-    const { sound } = await Audio.Sound.createAsync(
-      require('../../assets/click.wav'),
-      { shouldPlay: false },
-    );
-    clickSound = sound;
+    clickPlayer = createAudioPlayer(require('../../assets/click.wav'));
   } catch {
-    clickSound = null;
+    clickPlayer = null;
   }
 }
 
 async function playClick(): Promise<void> {
-  if (!clickSound) return;
+  if (!clickPlayer) return;
   try {
-    await clickSound.setPositionAsync(0);
-    await clickSound.playAsync();
+    await clickPlayer.seekTo(0);
+    clickPlayer.play();
   } catch {
     // best-effort
   }
@@ -174,9 +170,9 @@ export function cancel(): void {
 
 export async function unload(): Promise<void> {
   cancel();
-  if (clickSound) {
-    await clickSound.unloadAsync();
-    clickSound = null;
+  if (clickPlayer) {
+    clickPlayer.remove();
+    clickPlayer = null;
   }
 }
 
