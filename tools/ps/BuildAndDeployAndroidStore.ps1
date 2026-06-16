@@ -46,7 +46,7 @@ function Read-BuildLog {
 function Write-BuildLog { param([array]$Log) $Log | ConvertTo-Json -Depth 5 | Set-Content $logPath -Encoding UTF8 }
 function Add-BuildEntry {
     param([string]$Status, [string]$Notes = "")
-    $log = Read-BuildLog
+    $log = @(Read-BuildLog)
     $log += [PSCustomObject]@{
         timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         platform  = "android"
