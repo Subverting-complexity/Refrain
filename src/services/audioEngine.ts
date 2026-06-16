@@ -130,7 +130,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
 
   if (
     status.isLoaded &&
-    status.playing &&
+    (status.playing || status.didJustFinish) &&
     loopEnabled &&
     markerA != null &&
     markerB != null &&
@@ -146,12 +146,18 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
         };
         notify(currentState);
       });
+      // When the track reached its natural end, the player auto-pauses.
+      // Restart it so the loop continues seamlessly.
+      if (status.didJustFinish) {
+        player.play();
+      }
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
     // (up to updateInterval past marker B) until the next status update
-    // arrives.
-    currentState = { ...newState, positionMs: loopStart };
+    // arrives. Force 'playing' because a didJustFinish override may have
+    // set the status to 'paused'.
+    currentState = { ...newState, positionMs: loopStart, status: 'playing' };
     notify(currentState);
     return;
   }

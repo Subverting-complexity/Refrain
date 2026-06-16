@@ -80,7 +80,8 @@ export function MarkerControls({
             {
               backgroundColor:
                 markerA != null ? theme.colors.accent : theme.colors.surface,
-              borderColor: theme.colors.border,
+              borderColor:
+                markerA != null ? theme.colors.accent : theme.colors.border,
               opacity: isDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
             },
           ]}
@@ -128,7 +129,8 @@ export function MarkerControls({
             {
               backgroundColor:
                 markerB != null ? theme.colors.accent : theme.colors.surface,
-              borderColor: theme.colors.border,
+              borderColor:
+                markerB != null ? theme.colors.accent : theme.colors.border,
               opacity: isDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
             },
           ]}
@@ -184,7 +186,11 @@ export function MarkerControls({
           <Ionicons
             name="repeat"
             size={20}
-            color={loopActive ? theme.colors.accentText : theme.colors.accent}
+            color={
+              loopActive
+                ? theme.colors.accentText
+                : theme.colors.textSecondary
+            }
           />
         </AccessiblePressable>
 

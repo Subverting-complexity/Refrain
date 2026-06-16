@@ -424,6 +424,30 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
+    it('picks the closer marker when both are within hit range', () => {
+      const onMarkerAChange = jest.fn();
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 4500,
+        markerB: 5500,
+        durationMs: 10000,
+        onMarkerAChange,
+        onMarkerBChange,
+        onSeek,
+      });
+      layout(tree);
+
+      // A pixel ≈ 12 + (4500/10000)*276 = 136.2
+      // B pixel ≈ 12 + (5500/10000)*276 = 163.8
+      // Touch at 155 is closer to B (8.8px) than A (18.8px).
+      begin(155);
+
+      expect(onMarkerBChange).toHaveBeenCalled();
+      expect(onMarkerAChange).not.toHaveBeenCalled();
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it('falls back to seek when touch is not near any marker', () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
