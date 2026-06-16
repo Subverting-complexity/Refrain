@@ -89,7 +89,7 @@ function Add-BuildEntry {
         [string]$Profile = "production",
         [string]$Notes = ""
     )
-    $log = Read-BuildLog
+    $log = @(Read-BuildLog)
     $entry = [PSCustomObject]@{
         timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         platform  = "ios"
@@ -258,7 +258,7 @@ if (-not $SkipClean) {
 
 # -- Show build history before starting ---------------------------------------
 Write-Step "Build history"
-$existingLog = Read-BuildLog
+$existingLog = @(Read-BuildLog)
 if ($existingLog.Count -gt 0) {
     Show-BuildSummary $existingLog
 } else {

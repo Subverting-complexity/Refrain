@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Refrain",
-    "slug": "refrain",
+    "slug": "refrain-app",
     "owner": "adrienne-bosch",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -37,7 +37,10 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "category": ["DEFAULT", "BROWSABLE"],
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
           "data": [
             {
               "mimeType": "audio/mpeg"
@@ -79,8 +82,9 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "b3f9dbaa-1728-42db-ac27-e8951eabb6b3"
+        "projectId": "127b747b-5c29-4f61-8c34-4f3fa58eaca2"
       }
     }
   }
