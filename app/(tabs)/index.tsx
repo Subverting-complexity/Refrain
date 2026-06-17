@@ -64,7 +64,11 @@ export default function LibraryScreen() {
         insertTrack(track);
         setTracks((prev) => [track, ...prev]);
         return true;
-      } catch {
+      } catch (error) {
+        // Surface the underlying error: the persist path (expo-sqlite) can
+        // fail for reasons the toast can't convey (schema mismatch, worker
+        // error). Logging it makes those failures diagnosable.
+        console.error('Failed to save track to library', error);
         AccessibilityInfo.announceForAccessibility(
           'Failed to save track to library',
         );
