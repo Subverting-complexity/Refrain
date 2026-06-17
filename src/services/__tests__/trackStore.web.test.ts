@@ -2,15 +2,28 @@
  * @jest-environment node
  */
 import { Track } from '../../types';
+import {
+  cleanupOrphanFiles,
+  deleteTrack,
+  insertTrack,
+  loadTracks,
+  updateTrackDuration,
+} from '../trackStore.web';
 
-const mockRunSync = jest.fn();
-const mockGetAllSync = jest.fn();
+const mockGetAllStoredTracks = jest.fn();
+const mockGetStoredTrack = jest.fn();
+const mockPutStoredTrack = jest.fn<Promise<void>, unknown[]>();
+const mockDeleteStoredTrack = jest.fn<Promise<void>, [string]>();
+const mockGetStoredTrackIds = jest.fn<Promise<string[]>, []>();
 
-jest.mock('../database', () => ({
-  getDatabase: jest.fn(() => ({
-    runSync: mockRunSync,
-    getAllSync: mockGetAllSync,
-  })),
+// Factories reference the mocks lazily, so the jest.mock calls can sit below
+// the import (they are hoisted above it by jest regardless).
+jest.mock('../database.web', () => ({
+  getAllStoredTracks: () => mockGetAllStoredTracks(),
+  getStoredTrack: (id: string) => mockGetStoredTrack(id),
+  putStoredTrack: (track: unknown) => mockPutStoredTrack(track),
+  deleteStoredTrack: (id: string) => mockDeleteStoredTrack(id),
+  getStoredTrackIds: () => mockGetStoredTrackIds(),
 }));
 
 const mockGetObjectUrl = jest.fn<Promise<string | null>, [string]>();
@@ -25,14 +38,6 @@ jest.mock('../webBlobStore.web', () => ({
   listBlobIds: () => mockListBlobIds(),
 }));
 
-import {
-  cleanupOrphanFiles,
-  deleteTrack,
-  insertTrack,
-  loadTracks,
-  updateTrackDuration,
-} from '../trackStore.web';
-
 const sampleTrack: Track = {
   id: 'track-1',
   filename: 'song.mp3',
@@ -44,14 +49,13 @@ const sampleTrack: Track = {
   importedAt: 1_700_000_000_000,
 };
 
-function dbRow(overrides: Partial<Record<string, unknown>> = {}) {
+function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'track-1',
     filename: 'song.mp3',
-    uri: 'idb://track-1',
     format: 'mp3',
     durationMs: 42_000,
-    durationEstimated: 1,
+    durationEstimated: true,
     fileSizeBytes: 1_000_000,
     importedAt: 1_700_000_000_000,
     ...overrides,
@@ -60,6 +64,11 @@ function dbRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetAllStoredTracks.mockResolvedValue([]);
+  mockGetStoredTrack.mockResolvedValue(null);
+  mockPutStoredTrack.mockResolvedValue(undefined);
+  mockDeleteStoredTrack.mockResolvedValue(undefined);
+  mockGetStoredTrackIds.mockResolvedValue([]);
   mockGetObjectUrl.mockResolvedValue('blob:obj/track-1');
   mockDeleteBlob.mockResolvedValue(undefined);
   mockListBlobIds.mockResolvedValue([]);
@@ -67,7 +76,7 @@ beforeEach(() => {
 
 describe('loadTracks', () => {
   it('resolves each row to a track with a playable object URL', async () => {
-    mockGetAllSync.mockReturnValue([dbRow()]);
+    mockGetAllStoredTracks.mockResolvedValue([storedRow()]);
     const tracks = await loadTracks();
     expect(tracks).toEqual([sampleTrack]);
     expect(tracks[0].uri).toBe('blob:obj/track-1');
@@ -75,69 +84,76 @@ describe('loadTracks', () => {
   });
 
   it('falls back to the sentinel uri when the blob is missing', async () => {
-    mockGetAllSync.mockReturnValue([dbRow()]);
+    mockGetAllStoredTracks.mockResolvedValue([storedRow()]);
     mockGetObjectUrl.mockResolvedValue(null);
     const tracks = await loadTracks();
     expect(tracks[0].uri).toBe('idb://track-1');
   });
 
-  it('converts durationEstimated 0 to false', async () => {
-    mockGetAllSync.mockReturnValue([dbRow({ durationEstimated: 0 })]);
+  it('returns tracks newest first', async () => {
+    mockGetAllStoredTracks.mockResolvedValue([
+      storedRow({ id: 'old', importedAt: 1 }),
+      storedRow({ id: 'new', importedAt: 2 }),
+    ]);
     const tracks = await loadTracks();
-    expect(tracks[0].durationEstimated).toBe(false);
+    expect(tracks.map((t) => t.id)).toEqual(['new', 'old']);
   });
 });
 
 describe('insertTrack', () => {
-  it('persists the idb sentinel uri, not the volatile object URL', () => {
-    insertTrack(sampleTrack);
-    expect(mockRunSync).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO tracks'),
-      'track-1',
-      'song.mp3',
-      'idb://track-1',
-      'mp3',
-      42_000,
-      1,
-      1_000_000,
-      1_700_000_000_000,
-    );
+  it('persists the track metadata without the volatile uri', async () => {
+    await insertTrack(sampleTrack);
+    expect(mockPutStoredTrack).toHaveBeenCalledWith({
+      id: 'track-1',
+      filename: 'song.mp3',
+      format: 'mp3',
+      durationMs: 42_000,
+      durationEstimated: true,
+      fileSizeBytes: 1_000_000,
+      importedAt: 1_700_000_000_000,
+    });
   });
 });
 
 describe('updateTrackDuration', () => {
-  it('updates duration and marks as not estimated', () => {
-    updateTrackDuration('track-1', 45_000);
-    expect(mockRunSync).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE tracks SET durationMs'),
-      45_000,
-      'track-1',
+  it('updates duration and marks as not estimated on the stored row', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+    await updateTrackDuration('track-1', 45_000);
+    expect(mockPutStoredTrack).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'track-1',
+        durationMs: 45_000,
+        durationEstimated: false,
+      }),
     );
+  });
+
+  it('does nothing when the track is absent', async () => {
+    mockGetStoredTrack.mockResolvedValue(null);
+    await updateTrackDuration('missing', 45_000);
+    expect(mockPutStoredTrack).not.toHaveBeenCalled();
   });
 });
 
 describe('deleteTrack', () => {
   it('deletes the row, revokes the URL, and removes the blob', async () => {
-    deleteTrack('track-1');
-    expect(mockRunSync).toHaveBeenCalledWith(
-      expect.stringContaining('DELETE FROM tracks'),
-      'track-1',
-    );
+    await deleteTrack('track-1');
+    expect(mockDeleteStoredTrack).toHaveBeenCalledWith('track-1');
     expect(mockRevokeObjectUrl).toHaveBeenCalledWith('track-1');
     expect(mockDeleteBlob).toHaveBeenCalledWith('track-1');
   });
 
-  it('does not throw when the blob delete rejects', async () => {
+  it('does not reject when the blob delete rejects', async () => {
     mockDeleteBlob.mockRejectedValue(new Error('idb gone'));
-    expect(() => deleteTrack('track-1')).not.toThrow();
+    await expect(deleteTrack('track-1')).resolves.toBeUndefined();
     // Let the fire-and-forget rejection settle without surfacing.
     await Promise.resolve();
   });
 });
 
 describe('cleanupOrphanFiles', () => {
-  it('deletes blobs whose id is not in the database', async () => {
-    mockGetAllSync.mockReturnValue([{ id: 'track-1' }]);
+  it('deletes blobs whose id is not in the metadata store', async () => {
+    mockGetStoredTrackIds.mockResolvedValue(['track-1']);
     mockListBlobIds.mockResolvedValue(['track-1', 'orphan']);
 
     const removed = await cleanupOrphanFiles();
@@ -147,14 +163,14 @@ describe('cleanupOrphanFiles', () => {
   });
 
   it('returns 0 when there are no orphans', async () => {
-    mockGetAllSync.mockReturnValue([{ id: 'track-1' }]);
+    mockGetStoredTrackIds.mockResolvedValue(['track-1']);
     mockListBlobIds.mockResolvedValue(['track-1']);
     expect(await cleanupOrphanFiles()).toBe(0);
     expect(mockDeleteBlob).not.toHaveBeenCalled();
   });
 
   it('returns 0 and swallows errors when listing fails', async () => {
-    mockGetAllSync.mockReturnValue([]);
+    mockGetStoredTrackIds.mockResolvedValue([]);
     mockListBlobIds.mockRejectedValue(new Error('idb unavailable'));
     expect(await cleanupOrphanFiles()).toBe(0);
   });
