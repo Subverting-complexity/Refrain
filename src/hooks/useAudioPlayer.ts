@@ -55,8 +55,14 @@ export function useAudioPlayer(trackUri: string | null) {
     [],
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
+  const clearMarkerB = useCallback(() => audioEngine.clearMarkerB(), []);
   const setLoopEnabled = useCallback(
     (enabled: boolean) => audioEngine.setLoopEnabled(enabled),
+    [],
+  );
+  const setLoopRestartHandler = useCallback(
+    (handler: (() => void) | null) =>
+      audioEngine.setLoopRestartHandler(handler),
     [],
   );
   const setVolume = useCallback((v: number) => audioEngine.setVolume(v), []);
@@ -71,7 +77,9 @@ export function useAudioPlayer(trackUri: string | null) {
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    clearMarkerB,
     setLoopEnabled,
+    setLoopRestartHandler,
     setVolume,
   };
 }

@@ -4,8 +4,14 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
-import { CountdownConfig, CountdownDuration, CountdownMode } from '../types';
+import {
+  CountdownConfig,
+  CountdownDuration,
+  CountdownMode,
+  CountdownRepeat,
+} from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
+import { ChipGroup, ChipOption } from './ChipGroup';
 
 interface CountdownSettingsProps {
   config: CountdownConfig;
@@ -15,12 +21,22 @@ interface CountdownSettingsProps {
 
 // Lead-in length presets, in seconds. Seconds read more clearly than musical
 // bars for a practice lead-in, and avoid coupling the duration to the BPM.
-const DURATION_PRESETS: { label: string; value: CountdownDuration }[] = [
+const DURATION_OPTIONS: ChipOption<CountdownDuration>[] = [
   { label: '1s', value: { type: 'seconds', seconds: 1 } },
   { label: '3s', value: { type: 'seconds', seconds: 3 } },
   { label: '5s', value: { type: 'seconds', seconds: 5 } },
   { label: '10s', value: { type: 'seconds', seconds: 10 } },
   { label: '30s', value: { type: 'seconds', seconds: 30 } },
+];
+
+const MODE_OPTIONS: ChipOption<CountdownMode>[] = [
+  { label: 'Silent', value: 'silent' },
+  { label: 'Metronome', value: 'metronome' },
+];
+
+const REPEAT_OPTIONS: ChipOption<CountdownRepeat>[] = [
+  { label: 'Once', value: 'once' },
+  { label: 'Every loop', value: 'everyLoop' },
 ];
 
 function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
@@ -49,14 +65,6 @@ export function CountdownSettings({
 
   const toggleEnabled = () => {
     onConfigChange({ ...config, enabled: !config.enabled });
-  };
-
-  const setMode = (mode: CountdownMode) => {
-    onConfigChange({ ...config, mode });
-  };
-
-  const setDuration = (duration: CountdownDuration) => {
-    onConfigChange({ ...config, duration });
   };
 
   const handleBpmChange = (text: string) => {
@@ -91,7 +99,7 @@ export function CountdownSettings({
   const showBpm = config.mode === 'metronome';
   const summary = `${durationLabel(config.duration)} · ${
     config.mode === 'metronome' ? 'Metronome' : 'Silent'
-  }`;
+  } · ${config.repeat === 'everyLoop' ? 'Every loop' : 'Once'}`;
 
   return (
     <View
@@ -108,9 +116,7 @@ export function CountdownSettings({
         <AccessiblePressable
           accessibilityRole="button"
           accessibilityLabel={
-            expanded
-              ? 'Collapse countdown settings'
-              : 'Expand countdown settings'
+            expanded ? 'Collapse count-in settings' : 'Expand count-in settings'
           }
           accessibilityState={{ expanded }}
           onPress={() => setExpanded((v) => !v)}
@@ -124,14 +130,16 @@ export function CountdownSettings({
           <Text
             style={[theme.typography.body, { color: theme.colors.textPrimary }]}
           >
-            Countdown
+            Count-in
           </Text>
           {config.enabled && (
             <Text
               style={[
                 theme.typography.bodySmall,
+                styles.summary,
                 { color: theme.colors.textSecondary },
               ]}
+              numberOfLines={1}
             >
               {summary}
             </Text>
@@ -141,7 +149,7 @@ export function CountdownSettings({
         <View style={styles.headerActions}>
           <AccessiblePressable
             accessibilityRole="switch"
-            accessibilityLabel={`Countdown ${config.enabled ? 'on' : 'off'}`}
+            accessibilityLabel={`Count-in ${config.enabled ? 'on' : 'off'}`}
             accessibilityState={{ checked: config.enabled }}
             onPress={toggleEnabled}
             style={[
@@ -170,8 +178,8 @@ export function CountdownSettings({
             accessibilityRole="button"
             accessibilityLabel={
               expanded
-                ? 'Collapse countdown settings'
-                : 'Expand countdown settings'
+                ? 'Collapse count-in settings'
+                : 'Expand count-in settings'
             }
             onPress={() => setExpanded((v) => !v)}
             style={styles.chevron}
@@ -187,95 +195,47 @@ export function CountdownSettings({
 
       {expanded && (
         <View style={styles.body}>
-          <View style={styles.row}>
+          <View style={styles.field}>
             <Text style={[theme.typography.bodySmall, styles.label]}>Mode</Text>
-            <View style={styles.chipRow}>
-              {(['silent', 'metronome'] as CountdownMode[]).map((mode) => (
-                <AccessiblePressable
-                  key={mode}
-                  accessibilityRole="radio"
-                  accessibilityLabel={mode}
-                  accessibilityState={{ selected: config.mode === mode }}
-                  onPress={() => setMode(mode)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        config.mode === mode
-                          ? theme.colors.accent
-                          : theme.colors.background,
-                      borderColor: theme.colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      theme.typography.bodySmall,
-                      {
-                        color:
-                          config.mode === mode
-                            ? theme.colors.accentText
-                            : theme.colors.textPrimary,
-                      },
-                    ]}
-                  >
-                    {mode === 'silent' ? 'Silent' : 'Metronome'}
-                  </Text>
-                </AccessiblePressable>
-              ))}
-            </View>
+            <ChipGroup
+              options={MODE_OPTIONS}
+              value={config.mode}
+              onChange={(mode) => onConfigChange({ ...config, mode })}
+              accessibilityLabelPrefix="Mode"
+            />
           </View>
 
-          <View style={styles.row}>
+          <View style={styles.field}>
             <Text style={[theme.typography.bodySmall, styles.label]}>
               Length
             </Text>
-            <View style={styles.chipRow}>
-              {DURATION_PRESETS.map((preset) => (
-                <AccessiblePressable
-                  key={preset.label}
-                  accessibilityRole="radio"
-                  accessibilityLabel={preset.label}
-                  accessibilityState={{
-                    selected: durationEqual(config.duration, preset.value),
-                  }}
-                  onPress={() => setDuration(preset.value)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: durationEqual(
-                        config.duration,
-                        preset.value,
-                      )
-                        ? theme.colors.accent
-                        : theme.colors.background,
-                      borderColor: theme.colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      theme.typography.bodySmall,
-                      {
-                        color: durationEqual(config.duration, preset.value)
-                          ? theme.colors.accentText
-                          : theme.colors.textPrimary,
-                      },
-                    ]}
-                  >
-                    {preset.label}
-                  </Text>
-                </AccessiblePressable>
-              ))}
-            </View>
+            <ChipGroup
+              options={DURATION_OPTIONS}
+              value={config.duration}
+              onChange={(duration) => onConfigChange({ ...config, duration })}
+              accessibilityLabelPrefix="Length"
+              isEqual={durationEqual}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={[theme.typography.bodySmall, styles.label]}>
+              Repeat
+            </Text>
+            <ChipGroup
+              options={REPEAT_OPTIONS}
+              value={config.repeat}
+              onChange={(repeat) => onConfigChange({ ...config, repeat })}
+              accessibilityLabelPrefix="Count in"
+            />
           </View>
 
           {showBpm && (
-            <View style={styles.bpmSection}>
-              <View style={styles.row}>
-                <Text style={[theme.typography.bodySmall, styles.label]}>
-                  BPM
-                </Text>
+            <View style={styles.field}>
+              <Text style={[theme.typography.bodySmall, styles.label]}>
+                BPM
+              </Text>
+              <View style={styles.bpmRow}>
                 <TextInput
                   accessibilityLabel="BPM"
                   keyboardType="number-pad"
@@ -294,20 +254,19 @@ export function CountdownSettings({
                     },
                   ]}
                 />
+                <Text
+                  style={[
+                    theme.typography.caption,
+                    {
+                      color: bpmValid
+                        ? theme.colors.textSecondary
+                        : theme.colors.error,
+                    },
+                  ]}
+                >
+                  1–300
+                </Text>
               </View>
-              <Text
-                style={[
-                  theme.typography.caption,
-                  styles.bpmHint,
-                  {
-                    color: bpmValid
-                      ? theme.colors.textSecondary
-                      : theme.colors.error,
-                  },
-                ]}
-              >
-                1–300
-              </Text>
             </View>
           )}
         </View>
@@ -334,6 +293,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     flex: 1,
   },
+  summary: {
+    flexShrink: 1,
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -346,59 +308,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   body: {
-    gap: spacing.md,
+    gap: spacing.sm,
     paddingBottom: spacing.md,
     paddingTop: spacing.xs,
   },
-  row: {
+  field: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: spacing.md,
   },
   label: {
-    flex: 0,
-    marginRight: spacing.md,
+    width: 56,
   },
-  chipRow: {
+  bpmRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
-    flexWrap: 'wrap',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: spacing.lg,
-    borderWidth: 1,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  toggle: {
-    width: 48,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 3,
-    justifyContent: 'center',
-  },
-  toggleThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
   },
   bpmInput: {
     width: 64,
-    height: 44,
-    borderRadius: 8,
+    height: 36,
     borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: 14,
   },
-  bpmSection: {
-    gap: spacing.xs,
+  toggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
   },
-  bpmHint: {
-    textAlign: 'right',
+  toggleThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
   },
 });

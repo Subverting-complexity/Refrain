@@ -32,9 +32,13 @@ const listeners = new Set<PlaybackListener>();
 let markerA: number | null = null;
 let markerB: number | null = null;
 // Whether the A/B loop is armed. Defaults to on so setting both markers
-// loops immediately; the user can toggle it off to keep markers but play
-// straight through. Reset to the default on every new track.
+// loops immediately; the user can toggle it off to play the region once and
+// stop at B instead of rewinding. Reset to the default on every new track.
 let loopEnabled = true;
+// Optional handler invoked when the loop rewinds to A. When set (a per-loop
+// count-in is configured), the engine pauses at A and hands off so the
+// caller can run a lead-in before resuming. Null = loop continues seamlessly.
+let onLoopRestart: (() => void) | null = null;
 // App-level playback volume (0..1). Applied to every loaded track and
 // persisted so it survives reload and track changes.
 let volume = DEFAULT_VOLUME;
@@ -128,36 +132,54 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     newState.positionMs = newState.durationMs;
   }
 
+  const region = regionBounds();
   if (
     status.isLoaded &&
     (status.playing || status.didJustFinish) &&
-    loopEnabled &&
-    markerA != null &&
-    markerB != null &&
-    newState.positionMs >= markerB
+    region &&
+    newState.positionMs >= region.b &&
+    player
   ) {
-    const loopStart = markerA;
-    if (player) {
-      player.seekTo(msToSec(loopStart)).catch((err) => {
-        currentState = {
-          ...currentState,
-          status: 'error',
-          lastError: errorMessage(err),
-        };
-        notify(currentState);
-      });
-      // When the track reached its natural end, the player auto-pauses.
-      // Restart it so the loop continues seamlessly.
-      if (status.didJustFinish) {
-        player.play();
-      }
+    if (!loopEnabled) {
+      // Loop disarmed: play the A..B region once, then stop at B. The next
+      // play() restarts from A (see play()).
+      player.pause();
+      currentState = { ...newState, positionMs: region.b, status: 'paused' };
+      notify(currentState);
+      return;
+    }
+
+    // Loop armed: rewind to A.
+    player.seekTo(msToSec(region.a)).catch((err) => {
+      currentState = {
+        ...currentState,
+        status: 'error',
+        lastError: errorMessage(err),
+      };
+      notify(currentState);
+    });
+
+    if (onLoopRestart) {
+      // A per-loop count-in is registered: pause at A and hand off so the
+      // caller can run the lead-in before resuming.
+      player.pause();
+      currentState = { ...newState, positionMs: region.a, status: 'paused' };
+      notify(currentState);
+      onLoopRestart();
+      return;
+    }
+
+    // When the track reached its natural end, the player auto-pauses.
+    // Restart it so the loop continues seamlessly.
+    if (status.didJustFinish) {
+      player.play();
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
     // (up to updateInterval past marker B) until the next status update
     // arrives. Force 'playing' because a didJustFinish override may have
     // set the status to 'paused'.
-    currentState = { ...newState, positionMs: loopStart, status: 'playing' };
+    currentState = { ...newState, positionMs: region.a, status: 'playing' };
     notify(currentState);
     return;
   }
@@ -232,7 +254,20 @@ export async function play(): Promise<void> {
   // Resume the audio graph on this user gesture so iOS's autoplay policy
   // can't leave the rerouted output silently suspended.
   if (webGainActive) webAudioGain.resume();
-  if (
+
+  const region = regionBounds();
+  if (region) {
+    // With an A/B region set, playback is confined to it: (re)start from A
+    // whenever the playhead sits outside [A, B) — so a one-shot that stopped
+    // at B, or a fresh play before A, begins at the loop start. A pause in
+    // the middle of the region still resumes in place.
+    if (
+      currentState.positionMs < region.a ||
+      currentState.positionMs >= region.b
+    ) {
+      await player.seekTo(msToSec(region.a));
+    }
+  } else if (
     currentState.status === 'paused' &&
     currentState.positionMs >= currentState.durationMs &&
     currentState.durationMs > 0
@@ -255,19 +290,20 @@ export async function stop(): Promise<void> {
 }
 
 /**
- * The active loop window, or null when the loop is not armed. When set, seeks
- * and skips are confined to [a, b] so the playhead stays locked inside the
- * configured A/B region.
+ * The active A/B region, or null when both markers aren't set (or A is not
+ * before B). When set, seeks and skips are confined to [a, b] so the playhead
+ * stays inside the region — independent of whether the loop is armed (the loop
+ * toggle only decides whether reaching B rewinds or stops).
  */
-function loopBounds(): { a: number; b: number } | null {
-  if (!loopEnabled || markerA == null || markerB == null) return null;
+function regionBounds(): { a: number; b: number } | null {
+  if (markerA == null || markerB == null) return null;
   if (markerA >= markerB) return null;
   return { a: markerA, b: markerB };
 }
 
 export async function seekTo(positionMs: number): Promise<void> {
   if (!player) return;
-  const bounds = loopBounds();
+  const bounds = regionBounds();
   const target = bounds
     ? Math.max(bounds.a, Math.min(positionMs, bounds.b))
     : positionMs;
@@ -276,16 +312,26 @@ export async function seekTo(positionMs: number): Promise<void> {
 
 /**
  * Skip the playhead by a signed millisecond delta. Movement is clamped to the
- * active loop window when one is armed, otherwise to the full track, so skip
- * works "within A and B" while looping and across the whole track otherwise.
+ * active A/B region when one is set, otherwise to the full track, so skip works
+ * "within A and B" with markers set and across the whole track otherwise.
  */
 export async function skipBy(deltaMs: number): Promise<void> {
   if (!player) return;
-  const bounds = loopBounds();
+  const bounds = regionBounds();
   const lo = bounds ? bounds.a : 0;
   const hi = bounds ? bounds.b : currentState.durationMs;
   const next = Math.max(lo, Math.min(currentState.positionMs + deltaMs, hi));
   await player.seekTo(msToSec(next));
+}
+
+/**
+ * Register (or clear, with null) a handler invoked when the armed loop rewinds
+ * to A. When set, the engine pauses at A and calls the handler instead of
+ * playing straight through, letting the caller run a per-loop count-in and
+ * resume via play(). Safe to call repeatedly; only the latest handler is kept.
+ */
+export function setLoopRestartHandler(handler: (() => void) | null): void {
+  onLoopRestart = handler;
 }
 
 export async function unloadTrack(): Promise<void> {
@@ -392,6 +438,14 @@ export function clearMarkers(): void {
   markerA = null;
   markerB = null;
   currentState = { ...currentState, markerA: null, markerB: null };
+  notify(currentState);
+}
+
+/** Clear only the B (loop end) marker, leaving A in place so it can be
+ * re-placed without redoing A. */
+export function clearMarkerB(): void {
+  markerB = null;
+  currentState = { ...currentState, markerB: null };
   notify(currentState);
 }
 

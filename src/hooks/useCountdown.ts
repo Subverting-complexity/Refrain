@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: CountdownConfig = {
   enabled: false,
   mode: 'silent',
   duration: { type: 'seconds', seconds: 3 },
+  repeat: 'once',
   bpm: 120,
 };
 

@@ -202,6 +202,71 @@ describe('audioEngine', () => {
       expect(mockSeekTo).toHaveBeenCalledWith(0);
       expect(mockPlay).toHaveBeenCalled();
     });
+
+    it('starts from A when a region is set and the playhead is before A', async () => {
+      const {
+        loadTrack,
+        play,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 2, duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockSeekTo.mockClear();
+
+      await play();
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('restarts from A when a region one-shot has stopped at B', async () => {
+      const {
+        loadTrack,
+        play,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(15000);
+      setLoopEnabled(false);
+      // One-shot reaches B and pauses there.
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+      mockSeekTo.mockClear();
+
+      await play();
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('resumes in place when paused inside the region', async () => {
+      const {
+        loadTrack,
+        play,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 8, duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockSeekTo.mockClear();
+
+      await play();
+
+      // Playhead at 8s sits inside [5s, 15s], so no rewind — just resume.
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPlay).toHaveBeenCalled();
+    });
   });
 
   describe('pause', () => {
@@ -295,7 +360,7 @@ describe('audioEngine', () => {
       expect(mockSeekTo).toHaveBeenLastCalledWith(5);
     });
 
-    it('does not clamp seeks when the loop is disabled', async () => {
+    it('clamps seeks to the A/B region even when the loop is disabled', async () => {
       const {
         loadTrack,
         seekTo,
@@ -309,6 +374,18 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       setMarkerB(10000);
       setLoopEnabled(false);
+
+      // The region confines the playhead regardless of the loop toggle; the
+      // toggle only decides whether reaching B rewinds or stops.
+      await seekTo(30000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(10);
+    });
+
+    it('does not clamp seeks when no region is set', async () => {
+      const { loadTrack, seekTo } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
 
       await seekTo(30000);
       expect(mockSeekTo).toHaveBeenLastCalledWith(30);
@@ -916,12 +993,13 @@ describe('audioEngine', () => {
       expect(mockSeekTo).not.toHaveBeenCalled();
     });
 
-    it('does not loop back when looping is disabled', async () => {
+    it('stops at B (without rewinding) when looping is disabled', async () => {
       const {
         loadTrack,
         setMarkerA,
         setMarkerB,
         setLoopEnabled,
+        subscribe,
       } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
@@ -929,11 +1007,21 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       setMarkerB(15000);
       setLoopEnabled(false);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
       mockSeekTo.mockClear();
+      mockPause.mockClear();
 
       statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
 
+      // One-shot: pause at B, no rewind to A.
       expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPause).toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 15000 }),
+      );
     });
 
     it('resumes looping when re-enabled', async () => {
@@ -1065,6 +1153,69 @@ describe('audioEngine', () => {
           lastError: 'seek failed',
         }),
       );
+    });
+  });
+
+  describe('setLoopRestartHandler', () => {
+    it('pauses at A and invokes the handler instead of playing through', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopRestartHandler,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+      mockPause.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+
+      // Rewinds to A, pauses there, and hands off — does not auto-resume.
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 5000 }),
+      );
+    });
+
+    it('loops seamlessly again once the handler is cleared', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopRestartHandler,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+      setLoopRestartHandler(null);
+      mockPause.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPause).not.toHaveBeenCalled();
     });
   });
 });

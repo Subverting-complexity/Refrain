@@ -29,6 +29,19 @@ interface WaveformViewProps {
    * highlight only grows from A up to the playhead.
    */
   loopEnabled?: boolean;
+  /**
+   * The arm state for tap-to-place. When `'none'` (default), a tap on the wave
+   * only seeks. When `'A'` or `'B'`, the next tap drops that marker where you
+   * touch. Existing handles stay draggable regardless of this. The arming flow
+   * is driven from the A/B buttons in MarkerControls.
+   */
+  placeMode?: 'none' | 'A' | 'B';
+  /**
+   * Fired once a tap-to-place placement completes, with which marker was
+   * placed, so the parent can advance the arm state (A → B, then B → none).
+   * Not called for fine-tune drags of an already-placed handle.
+   */
+  onPlaceComplete?: (marker: 'A' | 'B') => void;
   onMarkerAChange?: (positionMs: number) => void;
   onMarkerBChange?: (positionMs: number) => void;
   style?: ViewStyle;
@@ -41,6 +54,9 @@ const WAVEFORM_HEIGHT = 132;
 const MARKER_HIT_ZONE_PX = 24;
 const HANDLE_WIDTH = 24;
 const HANDLE_HEIGHT = 20;
+// Vertical band reserved at the top (for A's flag) and bottom (for B's flag),
+// keeping the bars/cursor between them.
+const HANDLE_ZONE = HANDLE_HEIGHT + 6;
 const SEEK_STEP_MS = 5000;
 const HORIZONTAL_PADDING = spacing.md;
 
@@ -75,6 +91,8 @@ export function WaveformView({
   markerA,
   markerB,
   loopEnabled = true,
+  placeMode = 'none',
+  onPlaceComplete,
   onMarkerAChange,
   onMarkerBChange,
   style,
@@ -82,6 +100,10 @@ export function WaveformView({
   const { theme } = useTheme();
   const containerWidth = useRef(0);
   const dragTarget = useRef<DragTarget>('seek');
+  // Whether the in-flight gesture is an arm-driven placement (vs. a fine-tune
+  // drag of an existing handle or a plain seek), so endDrag knows to advance
+  // the parent's arm state on completion.
+  const isPlacement = useRef(false);
   const dragThrottle = useDragThrottle();
 
   // While dragging, this local value drives the visual of whichever element
@@ -130,52 +152,60 @@ export function WaveformView({
 
   // Which existing marker handle (if any) sits under this touch. Only markers
   // with a change handler are grabbable, so a read-only waveform never claims
-  // the touch for a drag.
+  // the touch for a drag. When both handles fall within the horizontal hit
+  // zone (markers near the same x), the touch's vertical half disambiguates:
+  // A lives at the top, B at the bottom, so near-overlapping markers stay
+  // individually selectable on a small screen.
   const detectGrabbedHandle = useCallback(
-    (x: number): DragTarget => {
+    (x: number, y: number): DragTarget => {
       if (trackWidth() <= 0 || durationMs <= 0) return 'seek';
 
-      let closestTarget: DragTarget = 'seek';
-      let closestDist = MARKER_HIT_ZONE_PX + 1;
+      const aHit =
+        markerA != null &&
+        onMarkerAChange != null &&
+        Math.abs(
+          x - (HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth()),
+        ) <= MARKER_HIT_ZONE_PX;
+      const bHit =
+        markerB != null &&
+        onMarkerBChange != null &&
+        Math.abs(
+          x - (HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth()),
+        ) <= MARKER_HIT_ZONE_PX;
 
-      if (markerA != null && onMarkerAChange) {
-        const markerAX =
-          HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth();
-        const distA = Math.abs(x - markerAX);
-        if (distA <= MARKER_HIT_ZONE_PX && distA < closestDist) {
-          closestTarget = 'markerA';
-          closestDist = distA;
-        }
+      if (aHit && bHit) {
+        return y < WAVEFORM_HEIGHT / 2 ? 'markerA' : 'markerB';
       }
-      if (markerB != null && onMarkerBChange) {
-        const markerBX =
-          HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth();
-        const distB = Math.abs(x - markerBX);
-        if (distB <= MARKER_HIT_ZONE_PX && distB < closestDist) {
-          closestTarget = 'markerB';
-          closestDist = distB;
-        }
-      }
-      return closestTarget;
+      if (aHit) return 'markerA';
+      if (bHit) return 'markerB';
+      return 'seek';
     },
     [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
   );
 
-  // Decide what a touch does: grab an existing handle, place the next missing
-  // marker (A first, then B), or seek. This is the tap-to-place flow — the
-  // first tap drops A where you touch, the next drops B, and afterwards taps
-  // seek while handles stay draggable.
+  // Decide what a touch does: grab an existing handle (fine-tune), drop an
+  // armed marker, or seek. Placement only happens when the parent has armed
+  // it (placeMode) — an unarmed tap on the wave always just seeks. Grabbing an
+  // existing handle takes priority so a placed marker stays adjustable.
   const detectDragTarget = useCallback(
-    (x: number): DragTarget => {
-      const grabbed = detectGrabbedHandle(x);
-      if (grabbed !== 'seek') return grabbed;
-      if (markerA == null && onMarkerAChange) return 'markerA';
-      if (markerA != null && markerB == null && onMarkerBChange) {
+    (x: number, y: number): DragTarget => {
+      const grabbed = detectGrabbedHandle(x, y);
+      if (grabbed !== 'seek') {
+        isPlacement.current = false;
+        return grabbed;
+      }
+      if (placeMode === 'A' && onMarkerAChange) {
+        isPlacement.current = true;
+        return 'markerA';
+      }
+      if (placeMode === 'B' && onMarkerBChange) {
+        isPlacement.current = true;
         return 'markerB';
       }
+      isPlacement.current = false;
       return 'seek';
     },
-    [detectGrabbedHandle, markerA, markerB, onMarkerAChange, onMarkerBChange],
+    [detectGrabbedHandle, placeMode, onMarkerAChange, onMarkerBChange],
   );
 
   // Keep a dragged/placed marker valid relative to its sibling. The B handle
@@ -210,10 +240,13 @@ export function WaveformView({
   // Drag start: pick the target, update the visual, and fire immediately
   // (instant tap response — no throttling on grant).
   const beginDrag = useCallback(
-    (x: number) => {
-      dragTarget.current = detectDragTarget(x);
+    (x: number, y: number) => {
+      dragTarget.current = detectDragTarget(x, y);
       const raw = positionFromX(x);
-      if (raw == null) return;
+      if (raw == null) {
+        isPlacement.current = false;
+        return;
+      }
       const ms = clampForTarget(dragTarget.current, raw);
       setDragMs(ms);
       dragThrottle.begin(ms, callbackForTarget(dragTarget.current));
@@ -239,12 +272,17 @@ export function WaveformView({
     [positionFromX, clampForTarget, dragThrottle],
   );
 
-  // Drag end (or interruption): commit the final value, then drop back to
-  // the prop-driven visual.
+  // Drag end (or interruption): commit the final value, advance the arm state
+  // if this was an arm-driven placement, then drop back to the prop-driven
+  // visual.
   const endDrag = useCallback(() => {
     dragThrottle.end();
+    if (isPlacement.current) {
+      isPlacement.current = false;
+      onPlaceComplete?.(dragTarget.current === 'markerA' ? 'A' : 'B');
+    }
     setDragMs(null);
-  }, [dragThrottle]);
+  }, [dragThrottle, onPlaceComplete]);
 
   // Route the gesture through refs to the latest callbacks so the Pan object
   // itself is created once. A marker drag updates markerA/markerB mid-gesture
@@ -267,7 +305,7 @@ export function WaveformView({
       Gesture.Pan()
         .runOnJS(true)
         .minDistance(0)
-        .onBegin((e) => beginRef.current(e.x))
+        .onBegin((e) => beginRef.current(e.x, e.y))
         .onUpdate((e) => moveRef.current(e.x))
         .onFinalize(() => endRef.current()),
     [],
@@ -355,26 +393,27 @@ export function WaveformView({
       textColor: string,
     ) => {
       const leftPct = (ms / durationMs) * 100;
+      const isStart = label === 'start';
       elements.push(
         <View
           key={`${key}-line`}
           pointerEvents="none"
           style={[
-            styles.markerLine,
+            isStart ? styles.markerLineStart : styles.markerLineEnd,
             { left: `${leftPct}%`, backgroundColor: color },
           ]}
           accessibilityLabel={`Loop ${label} marker at ${formatDuration(ms)}`}
         />,
       );
-      // A dot where the line meets the bars, plus a labelled flag at the top.
-      // Together they make the otherwise-invisible drag affordance obvious and
-      // give the finger a clear target to grab.
+      // A dot where the line meets the bars, plus a labelled flag. A's flag
+      // sits at the top and B's at the bottom, so the two grab targets never
+      // stack on top of each other even when the markers are close together.
       elements.push(
         <View
           key={`${key}-dot`}
           pointerEvents="none"
           style={[
-            styles.markerDot,
+            isStart ? styles.markerDotStart : styles.markerDotEnd,
             { left: `${leftPct}%`, backgroundColor: color },
           ]}
         />,
@@ -385,11 +424,12 @@ export function WaveformView({
           pointerEvents="none"
           style={[
             styles.markerHandle,
+            isStart ? styles.markerHandleStart : styles.markerHandleEnd,
             { left: `${leftPct}%`, backgroundColor: color },
           ]}
         >
           <Text style={[styles.markerHandleText, { color: textColor }]}>
-            {label === 'start' ? 'A' : 'B'}
+            {isStart ? 'A' : 'B'}
           </Text>
         </View>,
       );
@@ -500,10 +540,12 @@ const styles = StyleSheet.create({
     marginHorizontal: HORIZONTAL_PADDING,
     position: 'relative',
   },
+  // The bars are inset top and bottom by HANDLE_ZONE so the A flag (top) and
+  // B flag (bottom) each have their own band clear of the waveform.
   barsContainer: {
     position: 'absolute',
-    top: HANDLE_HEIGHT + 6,
-    bottom: spacing.sm,
+    top: HANDLE_ZONE,
+    bottom: HANDLE_ZONE,
     left: 0,
     right: 0,
     flexDirection: 'row',
@@ -517,21 +559,31 @@ const styles = StyleSheet.create({
   },
   cursor: {
     position: 'absolute',
-    top: HANDLE_HEIGHT + 4,
-    bottom: spacing.xs,
+    top: HANDLE_ZONE,
+    bottom: HANDLE_ZONE,
     width: 2,
     marginLeft: -1,
     borderRadius: 1,
   },
-  markerLine: {
+  // A's line runs from just under its top flag down through the bars; B's runs
+  // from the bars down to just above its bottom flag.
+  markerLineStart: {
     position: 'absolute',
-    top: HANDLE_HEIGHT + 2,
-    bottom: spacing.xs,
+    top: HANDLE_HEIGHT,
+    bottom: HANDLE_ZONE,
     width: 2,
     marginLeft: -1,
     borderRadius: 1,
   },
-  markerDot: {
+  markerLineEnd: {
+    position: 'absolute',
+    top: HANDLE_ZONE,
+    bottom: HANDLE_HEIGHT,
+    width: 2,
+    marginLeft: -1,
+    borderRadius: 1,
+  },
+  markerDotStart: {
     position: 'absolute',
     top: HANDLE_HEIGHT,
     width: 8,
@@ -539,9 +591,16 @@ const styles = StyleSheet.create({
     marginLeft: -4,
     borderRadius: 4,
   },
+  markerDotEnd: {
+    position: 'absolute',
+    bottom: HANDLE_HEIGHT,
+    width: 8,
+    height: 8,
+    marginLeft: -4,
+    borderRadius: 4,
+  },
   markerHandle: {
     position: 'absolute',
-    top: 0,
     width: HANDLE_WIDTH,
     height: HANDLE_HEIGHT,
     marginLeft: -HANDLE_WIDTH / 2,
@@ -549,13 +608,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  markerHandleStart: {
+    top: 0,
+  },
+  markerHandleEnd: {
+    bottom: 0,
+  },
   markerHandleText: {
     fontSize: 12,
     fontWeight: '700',
   },
   markerRegion: {
     position: 'absolute',
-    top: HANDLE_HEIGHT + 2,
-    bottom: spacing.xs,
+    top: HANDLE_ZONE,
+    bottom: HANDLE_ZONE,
   },
 });

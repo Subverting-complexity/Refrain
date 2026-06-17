@@ -19,10 +19,13 @@ const mockAudioPlayerState = {
   pause: jest.fn(),
   stop: jest.fn(),
   seekTo: jest.fn(),
+  skipBy: jest.fn(),
   setMarkerA: jest.fn(),
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
+  clearMarkerB: jest.fn(),
   setLoopEnabled: jest.fn(),
+  setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),
 };
 
@@ -57,6 +60,15 @@ jest.mock('@/src/hooks/useAudioPlayer', () => ({
 
 jest.mock('@/src/hooks/useWaveformData', () => ({
   useWaveformData: () => ({ peaks: [0.4, 0.6, 0.8, 0.5, 0.3] }),
+}));
+
+jest.mock('@/src/hooks/useSkipInterval', () => ({
+  useSkipInterval: () => ({
+    skipSeconds: 5,
+    skipMs: 5000,
+    setSkipSeconds: jest.fn(),
+  }),
+  SKIP_PRESETS: [1, 2, 5, 10],
 }));
 
 jest.mock('@/src/hooks/useCountdown', () => ({

@@ -116,8 +116,10 @@ function layout(tree: ReactTestRenderer, width = 300) {
   });
 }
 
-function begin(x: number) {
-  act(() => handlers().begin({ x }));
+// Default y of 0 puts the touch in the top half (where A's flag lives); tests
+// that exercise the A/B vertical split pass an explicit y.
+function begin(x: number, y = 0) {
+  act(() => handlers().begin({ x, y }));
 }
 function move(x: number) {
   act(() => handlers().update({ x }));
@@ -437,7 +439,7 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('picks the closer marker when both are within hit range', () => {
+    it('disambiguates overlapping markers by vertical half (top → A)', () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
@@ -451,10 +453,32 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      // A pixel ≈ 12 + (4500/10000)*276 = 136.2
-      // B pixel ≈ 12 + (5500/10000)*276 = 163.8
-      // Touch at 155 is closer to B (8.8px) than A (18.8px).
-      begin(155);
+      // Both handles are within the horizontal hit zone of x=150; a touch in
+      // the top half (y=10) grabs A (its flag sits at the top).
+      begin(150, 10);
+
+      expect(onMarkerAChange).toHaveBeenCalled();
+      expect(onMarkerBChange).not.toHaveBeenCalled();
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('disambiguates overlapping markers by vertical half (bottom → B)', () => {
+      const onMarkerAChange = jest.fn();
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 4500,
+        markerB: 5500,
+        durationMs: 10000,
+        onMarkerAChange,
+        onMarkerBChange,
+        onSeek,
+      });
+      layout(tree);
+
+      // A touch in the bottom half (y=120) grabs B (its flag sits at the
+      // bottom), even though both handles overlap horizontally.
+      begin(150, 120);
 
       expect(onMarkerBChange).toHaveBeenCalled();
       expect(onMarkerAChange).not.toHaveBeenCalled();
@@ -492,11 +516,12 @@ describe('WaveformView', () => {
       expect(onSeek).toHaveBeenCalled();
     });
 
-    it('places A at the tapped position when no markers exist', () => {
+    it('only seeks on an unarmed tap, even with no markers', () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
         durationMs: 10000,
+        placeMode: 'none',
         onMarkerAChange,
         onSeek,
       });
@@ -504,26 +529,75 @@ describe('WaveformView', () => {
 
       begin(150);
 
-      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
-      expect(onSeek).not.toHaveBeenCalled();
+      expect(onSeek).toHaveBeenCalledWith(5000);
+      expect(onMarkerAChange).not.toHaveBeenCalled();
     });
 
-    it('places B at the tapped position once A exists', () => {
+    it('places A at the tapped position when armed for A', () => {
+      const onMarkerAChange = jest.fn();
+      const onPlaceComplete = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        durationMs: 10000,
+        placeMode: 'A',
+        onMarkerAChange,
+        onPlaceComplete,
+        onSeek,
+      });
+      layout(tree);
+
+      begin(150);
+      finalize();
+
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+      expect(onSeek).not.toHaveBeenCalled();
+      // Completing the placement advances the arm state (A → B).
+      expect(onPlaceComplete).toHaveBeenCalledWith('A');
+    });
+
+    it('places B at the tapped position when armed for B', () => {
       const onMarkerBChange = jest.fn();
+      const onPlaceComplete = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
         markerA: 2000,
         durationMs: 10000,
+        placeMode: 'B',
         onMarkerBChange,
+        onPlaceComplete,
         onSeek,
       });
       layout(tree);
 
       // 200px → (200 - 12) / 276 * 10000 ≈ 6812ms, well clear of A.
       begin(200);
+      finalize();
 
       expect(onMarkerBChange).toHaveBeenCalledWith(6812);
       expect(onSeek).not.toHaveBeenCalled();
+      expect(onPlaceComplete).toHaveBeenCalledWith('B');
+    });
+
+    it('does not fire onPlaceComplete when fine-tuning an existing handle', () => {
+      const onMarkerAChange = jest.fn();
+      const onPlaceComplete = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        placeMode: 'none',
+        onMarkerAChange,
+        onPlaceComplete,
+        onSeek,
+      });
+      layout(tree);
+
+      // Grab the existing A handle (x ≈ 150) and release.
+      begin(150);
+      finalize();
+
+      expect(onMarkerAChange).toHaveBeenCalled();
+      expect(onPlaceComplete).not.toHaveBeenCalled();
     });
 
     it('seeks on a bare tap once both markers exist', () => {
@@ -534,6 +608,7 @@ describe('WaveformView', () => {
         markerA: 2000,
         markerB: 8000,
         durationMs: 10000,
+        placeMode: 'none',
         onMarkerAChange,
         onMarkerBChange,
         onSeek,

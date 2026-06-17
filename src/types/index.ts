@@ -64,10 +64,18 @@ export type CountdownDuration =
   | { type: 'bars'; bars: 1 | 2 | 4 }
   | { type: 'seconds'; seconds: number };
 
+/**
+ * When the count-in fires. `once` plays it before the first play only
+ * (the original behaviour); `everyLoop` also replays it each time the A/B
+ * loop rewinds to A, so every pass through the loop gets a lead-in.
+ */
+export type CountdownRepeat = 'once' | 'everyLoop';
+
 export interface CountdownConfig {
   enabled: boolean;
   mode: CountdownMode;
   duration: CountdownDuration;
+  repeat: CountdownRepeat;
   bpm: number;
 }
 

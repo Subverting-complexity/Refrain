@@ -23,6 +23,15 @@ interface SeekBarProps {
   positionMs: number;
   durationMs: number;
   onSeek: (positionMs: number) => void;
+  /**
+   * When both are provided and `rangeStartMs < rangeEndMs`, the bar represents
+   * only the A/B region: the fill shows how far through [start, end] the
+   * playhead is, the time labels read elapsed-in-region / region-length, and
+   * seeking maps within the region. Omit (or pass an invalid range) to span
+   * the whole track.
+   */
+  rangeStartMs?: number;
+  rangeEndMs?: number;
   style?: ViewStyle;
 }
 
@@ -30,10 +39,26 @@ export function SeekBar({
   positionMs,
   durationMs,
   onSeek,
+  rangeStartMs,
+  rangeEndMs,
   style,
 }: SeekBarProps) {
   const { theme } = useTheme();
-  const progress = durationMs > 0 ? positionMs / durationMs : 0;
+
+  // Resolve the active domain: the A/B region when a valid range is supplied,
+  // otherwise the whole track. `baseMs` is the domain's start, `spanMs` its
+  // length — both bar geometry and seeking are expressed against these so the
+  // track-wide and region-scoped cases share one code path.
+  const hasRange =
+    rangeStartMs != null &&
+    rangeEndMs != null &&
+    rangeEndMs > rangeStartMs &&
+    durationMs > 0;
+  const baseMs = hasRange ? (rangeStartMs as number) : 0;
+  const spanMs = hasRange ? (rangeEndMs as number) - baseMs : durationMs;
+
+  const elapsedMs = clamp(positionMs, baseMs, baseMs + spanMs) - baseMs;
+  const progress = spanMs > 0 ? elapsedMs / spanMs : 0;
   const trackWidth = useRef(0);
 
   // While dragging, this local ratio drives the visual so the bar stays
@@ -48,10 +73,16 @@ export function SeekBar({
 
   const ratioFromX = useCallback(
     (x: number): number | null => {
-      if (durationMs <= 0 || trackWidth.current <= 0) return null;
+      if (spanMs <= 0 || trackWidth.current <= 0) return null;
       return clamp(x / trackWidth.current, 0, 1);
     },
-    [durationMs],
+    [spanMs],
+  );
+
+  // Map a 0..1 ratio to an absolute seek position inside the active domain.
+  const positionFromRatio = useCallback(
+    (ratio: number): number => Math.round(baseMs + ratio * spanMs),
+    [baseMs, spanMs],
   );
 
   // Tap or drag start: update the visual and seek immediately (instant
@@ -61,9 +92,9 @@ export function SeekBar({
       const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
-      seekThrottle.begin(Math.round(ratio * durationMs), onSeek);
+      seekThrottle.begin(positionFromRatio(ratio), onSeek);
     },
-    [ratioFromX, durationMs, onSeek, seekThrottle],
+    [ratioFromX, positionFromRatio, onSeek, seekThrottle],
   );
 
   // Drag move: update the visual every frame, but throttle native seeks.
@@ -72,9 +103,9 @@ export function SeekBar({
       const ratio = ratioFromX(x);
       if (ratio === null) return;
       setDragRatio(ratio);
-      seekThrottle.move(Math.round(ratio * durationMs));
+      seekThrottle.move(positionFromRatio(ratio));
     },
-    [ratioFromX, durationMs, seekThrottle],
+    [ratioFromX, positionFromRatio, seekThrottle],
   );
 
   // Drag end (or interruption): commit the final seek, then drop back to
@@ -108,22 +139,26 @@ export function SeekBar({
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
-      if (durationMs <= 0) return;
+      if (spanMs <= 0) return;
       const { actionName } = e.nativeEvent;
       if (actionName === 'increment') {
-        onSeek(Math.min(durationMs, positionMs + SEEK_STEP_MS));
+        onSeek(Math.min(baseMs + spanMs, positionMs + SEEK_STEP_MS));
       } else if (actionName === 'decrement') {
-        onSeek(Math.max(0, positionMs - SEEK_STEP_MS));
+        onSeek(Math.max(baseMs, positionMs - SEEK_STEP_MS));
       }
     },
-    [durationMs, positionMs, onSeek],
+    [spanMs, baseMs, positionMs, onSeek],
   );
+
+  const a11yLabel = hasRange
+    ? `Loop position: ${formatDuration(elapsedMs)} of ${formatDuration(spanMs)}`
+    : `Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
 
   return (
     <View
       style={[styles.container, style]}
       accessibilityRole="adjustable"
-      accessibilityLabel={`Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`}
+      accessibilityLabel={a11yLabel}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={handleAccessibilityAction}
       accessibilityValue={{
@@ -160,10 +195,10 @@ export function SeekBar({
       </GestureDetector>
       <View style={styles.timeRow}>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
-          {formatDuration(positionMs)}
+          {formatDuration(hasRange ? elapsedMs : positionMs)}
         </Text>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
-          {formatDuration(durationMs)}
+          {formatDuration(hasRange ? spanMs : durationMs)}
         </Text>
       </View>
     </View>

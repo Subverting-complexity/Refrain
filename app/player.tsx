@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
@@ -7,14 +7,16 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { CountdownSettings } from '@/src/components/CountdownSettings';
-import { MarkerControls } from '@/src/components/MarkerControls';
+import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
+import { SkipControls } from '@/src/components/SkipControls';
 import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
 import { VolumeControl } from '@/src/components/VolumeControl';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useSkipInterval } from '@/src/hooks/useSkipInterval';
 import { useToast } from '@/src/hooks/useToast';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -22,7 +24,6 @@ import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
-const SKIP_STEP_MS = 5000;
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
@@ -43,15 +44,22 @@ export default function PlayerScreen() {
     volume,
     play,
     pause,
-    stop,
     seekTo,
     skipBy,
     setMarkerA,
     setMarkerB,
     clearMarkers,
+    clearMarkerB,
     setLoopEnabled,
+    setLoopRestartHandler,
     setVolume,
   } = useAudioPlayer(uri ?? null);
+
+  const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
+
+  // Tap-to-place arm state. Driven by the A/B buttons; the waveform reads it to
+  // decide whether a tap drops a marker or just seeks.
+  const [placeMode, setPlaceMode] = useState<PlaceMode>('none');
 
   const durationPersisted = useRef(false);
   useEffect(() => {
@@ -86,6 +94,35 @@ export default function PlayerScreen() {
     [setMarkerB, showToast],
   );
 
+  // Pressing A: with A set, clear both markers; otherwise arm placing A. The
+  // first wave tap then drops A and advances the arm to B (see
+  // handlePlaceComplete), so one button press sets up the whole A→B sequence.
+  const handlePressA = useCallback(() => {
+    if (markerA != null) {
+      clearMarkers();
+      setPlaceMode('none');
+    } else {
+      setPlaceMode((m) => (m === 'A' ? 'none' : 'A'));
+    }
+  }, [markerA, clearMarkers]);
+
+  // Pressing B: with B set, clear it and re-arm placing B; otherwise (A exists)
+  // arm placing B. A no-op before A is set — the button is disabled then.
+  const handlePressB = useCallback(() => {
+    if (markerB != null) {
+      clearMarkerB();
+      setPlaceMode('B');
+    } else if (markerA != null) {
+      setPlaceMode((m) => (m === 'B' ? 'none' : 'B'));
+    }
+  }, [markerB, markerA, clearMarkerB]);
+
+  // After the wave drops a marker, advance the arm: A → B (place the end next),
+  // B → none (sequence complete).
+  const handlePlaceComplete = useCallback((marker: 'A' | 'B') => {
+    setPlaceMode(marker === 'A' ? 'B' : 'none');
+  }, []);
+
   const { peaks } = useWaveformData(uri ?? null);
   const {
     countdownState,
@@ -94,6 +131,25 @@ export default function PlayerScreen() {
     playWithCountdown,
     cancelCountdown,
   } = useCountdown({ onPlay: play });
+
+  // When the count-in is set to fire on every loop, register a handler the
+  // engine calls each time the loop rewinds to A: it pauses at A, runs the
+  // count-in, then resumes. Otherwise leave the loop seamless.
+  useEffect(() => {
+    if (countdownConfig.enabled && countdownConfig.repeat === 'everyLoop') {
+      setLoopRestartHandler(() => {
+        void playWithCountdown();
+      });
+    } else {
+      setLoopRestartHandler(null);
+    }
+    return () => setLoopRestartHandler(null);
+  }, [
+    countdownConfig.enabled,
+    countdownConfig.repeat,
+    setLoopRestartHandler,
+    playWithCountdown,
+  ]);
 
   const isCounting = countdownState.phase === 'counting';
 
@@ -129,6 +185,8 @@ export default function PlayerScreen() {
               markerA={markerA ?? undefined}
               markerB={markerB ?? undefined}
               loopEnabled={loopEnabled}
+              placeMode={placeMode}
+              onPlaceComplete={handlePlaceComplete}
               onMarkerAChange={setMarkerA}
               onMarkerBChange={handleSetMarkerB}
             />
@@ -199,8 +257,10 @@ export default function PlayerScreen() {
             markerA={markerA}
             markerB={markerB}
             loopEnabled={loopEnabled}
+            placeMode={placeMode}
+            onPressA={handlePressA}
+            onPressB={handlePressB}
             onToggleLoop={setLoopEnabled}
-            onClearMarkers={clearMarkers}
             style={styles.markers}
           />
 
@@ -208,6 +268,8 @@ export default function PlayerScreen() {
             positionMs={positionMs}
             durationMs={durationMs}
             onSeek={seekTo}
+            rangeStartMs={markerA ?? undefined}
+            rangeEndMs={markerB ?? undefined}
             style={styles.seekBar}
           />
 
@@ -217,13 +279,18 @@ export default function PlayerScreen() {
             style={styles.volume}
           />
 
+          <SkipControls
+            skipSeconds={skipSeconds}
+            onSkipSecondsChange={setSkipSeconds}
+            style={styles.skip}
+          />
+
           <TransportControls
             status={isCounting ? 'playing' : status}
             onPlay={handlePlay}
             onPause={isCounting ? cancelCountdown : pause}
-            onStop={stop}
-            onSkipBack={() => skipBy(-SKIP_STEP_MS)}
-            onSkipForward={() => skipBy(SKIP_STEP_MS)}
+            onSkipBack={() => skipBy(-skipMs)}
+            onSkipForward={() => skipBy(skipMs)}
             style={styles.transport}
           />
         </View>
@@ -294,6 +361,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   volume: {
+    marginBottom: spacing.lg,
+  },
+  skip: {
     marginBottom: spacing.xl,
   },
   transport: {
