@@ -1,0 +1,6 @@
+assets/
+*.md
+*.txt
+*.html
+*.yml
+*.yaml
