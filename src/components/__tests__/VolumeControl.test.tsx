@@ -73,8 +73,23 @@ jest.mock('react-native-gesture-handler', () => {
 const RNGH = require('react-native-gesture-handler');
 const handlers = () => RNGH.__getHandlers();
 
+function getToggle(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityRole === 'button' &&
+      typeof node.props.onPress === 'function',
+  )[0];
+}
+
+function expand(tree: ReactTestRenderer) {
+  act(() => {
+    getToggle(tree).props.onPress();
+  });
+}
+
 function renderControl(
   props: Partial<React.ComponentProps<typeof VolumeControl>> = {},
+  { expanded = true }: { expanded?: boolean } = {},
 ) {
   let tree!: ReactTestRenderer;
   act(() => {
@@ -82,6 +97,9 @@ function renderControl(
       <VolumeControl volume={0.5} onVolumeChange={jest.fn()} {...props} />,
     );
   });
+  // The slider is collapsed behind the icon by default; most tests drive the
+  // slider directly, so expand it unless the test opts out.
+  if (expanded) expand(tree);
   return tree;
 }
 
@@ -123,6 +141,35 @@ beforeEach(() => {
 });
 
 describe('VolumeControl', () => {
+  it('hides the slider until the volume icon is tapped', () => {
+    const tree = renderControl({ volume: 0.5 }, { expanded: false });
+
+    // Collapsed: only the icon toggle, no adjustable slider.
+    expect(getAdjustable(tree)).toBeUndefined();
+    const toggle = getToggle(tree);
+    expect(toggle.props.accessibilityLabel).toBe('Volume, 50%');
+    expect(toggle.props.accessibilityState).toEqual({ expanded: false });
+
+    expand(tree);
+
+    // Expanded: slider is now present and the toggle reflects the state.
+    expect(getAdjustable(tree)).toBeDefined();
+    expect(getToggle(tree).props.accessibilityState).toEqual({
+      expanded: true,
+    });
+  });
+
+  it('collapses the slider when the icon is tapped again', () => {
+    const tree = renderControl({ volume: 0.5 }, { expanded: true });
+    expect(getAdjustable(tree)).toBeDefined();
+
+    act(() => {
+      getToggle(tree).props.onPress();
+    });
+
+    expect(getAdjustable(tree)).toBeUndefined();
+  });
+
   it('sets adjustable role with a percentage label and value', () => {
     const tree = renderControl({ volume: 0.5 });
     const container = getAdjustable(tree);
