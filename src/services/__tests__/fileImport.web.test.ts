@@ -104,9 +104,7 @@ describe('importBlob', () => {
     expect(mockGetRandomValues).toHaveBeenCalled();
     if (result.success) {
       // Bytes filled with 0xab -> v4/variant bits forced into a valid UUID.
-      expect(result.track.id).toBe(
-        'abababab-abab-4bab-abab-abababababab',
-      );
+      expect(result.track.id).toBe('abababab-abab-4bab-abab-abababababab');
     }
     expect(mockPutBlob).toHaveBeenCalledTimes(1);
   });

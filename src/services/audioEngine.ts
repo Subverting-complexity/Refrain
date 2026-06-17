@@ -254,9 +254,38 @@ export async function stop(): Promise<void> {
   await player.seekTo(msToSec(markerA ?? 0));
 }
 
+/**
+ * The active loop window, or null when the loop is not armed. When set, seeks
+ * and skips are confined to [a, b] so the playhead stays locked inside the
+ * configured A/B region.
+ */
+function loopBounds(): { a: number; b: number } | null {
+  if (!loopEnabled || markerA == null || markerB == null) return null;
+  if (markerA >= markerB) return null;
+  return { a: markerA, b: markerB };
+}
+
 export async function seekTo(positionMs: number): Promise<void> {
   if (!player) return;
-  await player.seekTo(msToSec(positionMs));
+  const bounds = loopBounds();
+  const target = bounds
+    ? Math.max(bounds.a, Math.min(positionMs, bounds.b))
+    : positionMs;
+  await player.seekTo(msToSec(target));
+}
+
+/**
+ * Skip the playhead by a signed millisecond delta. Movement is clamped to the
+ * active loop window when one is armed, otherwise to the full track, so skip
+ * works "within A and B" while looping and across the whole track otherwise.
+ */
+export async function skipBy(deltaMs: number): Promise<void> {
+  if (!player) return;
+  const bounds = loopBounds();
+  const lo = bounds ? bounds.a : 0;
+  const hi = bounds ? bounds.b : currentState.durationMs;
+  const next = Math.max(lo, Math.min(currentState.positionMs + deltaMs, hi));
+  await player.seekTo(msToSec(next));
 }
 
 export async function unloadTrack(): Promise<void> {

@@ -10,32 +10,29 @@ import { AccessiblePressable } from './AccessiblePressable';
 
 interface MarkerControlsProps {
   status: PlaybackStatus;
-  positionMs: number;
   markerA: number | null;
   markerB: number | null;
   loopEnabled: boolean;
-  onSetMarkerA: (positionMs: number) => void;
-  onSetMarkerB: (positionMs: number) => void;
   onToggleLoop: (enabled: boolean) => void;
   onClearMarkers: () => void;
   style?: ViewStyle;
 }
 
-// One-line guidance under the controls so the A/B/loop flow is discoverable
-// instead of something you have to guess at.
+// One-line guidance under the controls so the tap-to-place flow is
+// discoverable instead of something you have to guess at.
 function statusCaption(
   markerA: number | null,
   markerB: number | null,
   loopEnabled: boolean,
 ): string {
   if (markerA == null && markerB == null) {
-    return 'Tap A, then B, to mark a loop';
+    return 'Tap the wave to set A, then B';
   }
   if (markerA != null && markerB == null) {
-    return 'Now tap B after the start point';
+    return 'Tap the wave to set B after A';
   }
   if (markerA == null && markerB != null) {
-    return 'Tap A before the end point';
+    return 'Tap the wave to set A before B';
   }
   const range = `${formatDuration(markerA as number)}–${formatDuration(markerB as number)}`;
   return loopEnabled
@@ -45,12 +42,9 @@ function statusCaption(
 
 export function MarkerControls({
   status,
-  positionMs,
   markerA,
   markerB,
   loopEnabled,
-  onSetMarkerA,
-  onSetMarkerB,
   onToggleLoop,
   onClearMarkers,
   style,
@@ -62,106 +56,38 @@ export function MarkerControls({
   const loopActive = canLoop && loopEnabled;
   const loopDisabled = isDisabled || !canLoop;
 
+  const renderReadout = (
+    label: 'A' | 'B',
+    value: number | null,
+    color: string,
+  ) => (
+    <View
+      style={[
+        styles.readout,
+        {
+          borderColor: value != null ? color : theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+      ]}
+      accessibilityRole="text"
+      accessibilityLabel={
+        value != null
+          ? `Loop ${label === 'A' ? 'start' : 'end'} ${formatDuration(value)}`
+          : `Loop ${label === 'A' ? 'start' : 'end'} not set`
+      }
+    >
+      <Text style={[styles.readoutLabel, { color }]}>{label}</Text>
+      <Text style={[styles.readoutValue, { color: theme.colors.textPrimary }]}>
+        {value != null ? formatDuration(value) : '—'}
+      </Text>
+    </View>
+  );
+
   return (
     <View style={[styles.container, style]}>
       <View style={styles.row}>
-        <AccessiblePressable
-          accessibilityRole="button"
-          accessibilityLabel="Set loop start"
-          accessibilityState={{
-            disabled: isDisabled,
-            selected: markerA != null,
-          }}
-          accessibilityHint="Marks the A point at the current playback position"
-          onPress={() => onSetMarkerA(positionMs)}
-          disabled={isDisabled}
-          style={(pressState) => [
-            styles.markerButton,
-            {
-              backgroundColor:
-                markerA != null ? theme.colors.accent : theme.colors.surface,
-              borderColor:
-                markerA != null ? theme.colors.accent : theme.colors.border,
-              opacity: isDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.markerLabel,
-              {
-                color:
-                  markerA != null
-                    ? theme.colors.accentText
-                    : theme.colors.textPrimary,
-              },
-            ]}
-          >
-            A
-          </Text>
-          <Text
-            style={[
-              styles.markerTime,
-              {
-                color:
-                  markerA != null
-                    ? theme.colors.accentText
-                    : theme.colors.textSecondary,
-              },
-            ]}
-          >
-            {markerA != null ? formatDuration(markerA) : 'Set'}
-          </Text>
-        </AccessiblePressable>
-
-        <AccessiblePressable
-          accessibilityRole="button"
-          accessibilityLabel="Set loop end"
-          accessibilityState={{
-            disabled: isDisabled,
-            selected: markerB != null,
-          }}
-          accessibilityHint="Marks the B point at the current playback position"
-          onPress={() => onSetMarkerB(positionMs)}
-          disabled={isDisabled}
-          style={(pressState) => [
-            styles.markerButton,
-            {
-              backgroundColor:
-                markerB != null ? theme.colors.accent : theme.colors.surface,
-              borderColor:
-                markerB != null ? theme.colors.accent : theme.colors.border,
-              opacity: isDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.markerLabel,
-              {
-                color:
-                  markerB != null
-                    ? theme.colors.accentText
-                    : theme.colors.textPrimary,
-              },
-            ]}
-          >
-            B
-          </Text>
-          <Text
-            style={[
-              styles.markerTime,
-              {
-                color:
-                  markerB != null
-                    ? theme.colors.accentText
-                    : theme.colors.textSecondary,
-              },
-            ]}
-          >
-            {markerB != null ? formatDuration(markerB) : 'Set'}
-          </Text>
-        </AccessiblePressable>
+        {renderReadout('A', markerA, theme.colors.markerA)}
+        {renderReadout('B', markerB, theme.colors.markerB)}
 
         <AccessiblePressable
           accessibilityRole="switch"
@@ -187,9 +113,7 @@ export function MarkerControls({
             name="repeat"
             size={20}
             color={
-              loopActive
-                ? theme.colors.accentText
-                : theme.colors.textSecondary
+              loopActive ? theme.colors.accentText : theme.colors.textSecondary
             }
           />
         </AccessiblePressable>
@@ -235,21 +159,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.md,
   },
-  markerButton: {
-    minWidth: 60,
+  readout: {
+    minWidth: 72,
     height: 52,
-    borderRadius: 26,
+    borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  markerLabel: {
-    fontSize: 16,
+  readoutLabel: {
+    fontSize: 13,
     fontWeight: '700',
   },
-  markerTime: {
-    fontSize: 11,
+  readoutValue: {
+    fontSize: 12,
     marginTop: 2,
   },
   loopButton: {

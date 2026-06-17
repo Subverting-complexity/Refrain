@@ -22,6 +22,7 @@ import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
+const SKIP_STEP_MS = 5000;
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
@@ -44,6 +45,7 @@ export default function PlayerScreen() {
     pause,
     stop,
     seekTo,
+    skipBy,
     setMarkerA,
     setMarkerB,
     clearMarkers,
@@ -126,8 +128,9 @@ export default function PlayerScreen() {
               onSeek={seekTo}
               markerA={markerA ?? undefined}
               markerB={markerB ?? undefined}
+              loopEnabled={loopEnabled}
               onMarkerAChange={setMarkerA}
-              onMarkerBChange={setMarkerB}
+              onMarkerBChange={handleSetMarkerB}
             />
           ) : (
             <View
@@ -193,12 +196,9 @@ export default function PlayerScreen() {
 
           <MarkerControls
             status={status}
-            positionMs={positionMs}
             markerA={markerA}
             markerB={markerB}
             loopEnabled={loopEnabled}
-            onSetMarkerA={setMarkerA}
-            onSetMarkerB={handleSetMarkerB}
             onToggleLoop={setLoopEnabled}
             onClearMarkers={clearMarkers}
             style={styles.markers}
@@ -222,6 +222,8 @@ export default function PlayerScreen() {
             onPlay={handlePlay}
             onPause={isCounting ? cancelCountdown : pause}
             onStop={stop}
+            onSkipBack={() => skipBy(-SKIP_STEP_MS)}
+            onSkipForward={() => skipBy(SKIP_STEP_MS)}
             style={styles.transport}
           />
         </View>

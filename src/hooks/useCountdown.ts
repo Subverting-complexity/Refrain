@@ -6,7 +6,7 @@ import { CountdownConfig, CountdownState } from '../types';
 const DEFAULT_CONFIG: CountdownConfig = {
   enabled: false,
   mode: 'silent',
-  duration: { type: 'bars', bars: 1 },
+  duration: { type: 'seconds', seconds: 3 },
   bpm: 120,
 };
 

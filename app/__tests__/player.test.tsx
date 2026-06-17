@@ -56,7 +56,7 @@ jest.mock('@/src/hooks/useAudioPlayer', () => ({
 }));
 
 jest.mock('@/src/hooks/useWaveformData', () => ({
-  useWaveformData: () => ({ peaks: [] }),
+  useWaveformData: () => ({ peaks: [0.4, 0.6, 0.8, 0.5, 0.3] }),
 }));
 
 jest.mock('@/src/hooks/useCountdown', () => ({
@@ -81,6 +81,10 @@ jest.mock('@/src/hooks/useTheme', () => ({
         textSecondary: '#aaa',
         border: '#333',
         error: '#f00',
+        markerA: '#ffb02e',
+        markerAText: '#3a2600',
+        markerB: '#ff5d77',
+        markerBText: '#fff',
       },
       typography: { heading: {}, body: {}, bodySmall: {}, caption: {} },
     },
@@ -126,12 +130,15 @@ jest.mock('@/src/components/TransportControls', () => ({
   TransportControls: () => null,
 }));
 
-function pressSetMarkerB(tree: ReactTestRenderer) {
-  const button = tree.root.find(
-    (node) => node.props.accessibilityLabel === 'Set loop end',
-  );
+// B placement now happens on the waveform (the dedicated "Set B" button is
+// gone), so drive the screen's handler through the WaveformView's
+// onMarkerBChange prop — the same path a tap-to-place gesture would take.
+function placeMarkerB(tree: ReactTestRenderer, ms: number) {
+  const waveform = tree.root.findAll(
+    (node) => typeof node.props.onMarkerBChange === 'function',
+  )[0];
   act(() => {
-    button.props.onPress();
+    waveform.props.onMarkerBChange(ms);
   });
 }
 
@@ -168,7 +175,7 @@ describe('PlayerScreen marker B feedback', () => {
       tree = create(<PlayerScreen />);
     });
 
-    pressSetMarkerB(tree);
+    placeMarkerB(tree, 1000);
 
     expect(mockSetMarkerB).toHaveBeenCalledWith(1000);
     expect(announceSpy).toHaveBeenCalledWith(
@@ -189,7 +196,7 @@ describe('PlayerScreen marker B feedback', () => {
       tree = create(<PlayerScreen />);
     });
 
-    pressSetMarkerB(tree);
+    placeMarkerB(tree, 1000);
 
     expect(mockSetMarkerB).toHaveBeenCalledWith(1000);
     expect(announceSpy).not.toHaveBeenCalled();
