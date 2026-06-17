@@ -59,15 +59,17 @@ export default function LibraryScreen() {
   }, [showToast]);
 
   const addTrack = useCallback(
-    (track: Track) => {
+    (track: Track): boolean => {
       try {
         insertTrack(track);
         setTracks((prev) => [track, ...prev]);
+        return true;
       } catch {
         AccessibilityInfo.announceForAccessibility(
           'Failed to save track to library',
         );
         showToast('Failed to save track to library', 'error');
+        return false;
       }
     },
     [showToast],
@@ -90,7 +92,7 @@ export default function LibraryScreen() {
 
   const handleShareImport = useCallback(
     (track: Track) => {
-      addTrack(track);
+      if (!addTrack(track)) return;
       AccessibilityInfo.announceForAccessibility(
         `Received ${track.filename} from share`,
       );
@@ -129,7 +131,7 @@ export default function LibraryScreen() {
     try {
       const result = await pickAndImportFile();
       if (result.success) {
-        addTrack(result.track);
+        if (!addTrack(result.track)) return;
         AccessibilityInfo.announceForAccessibility(
           `Imported ${result.track.filename} successfully`,
         );
