@@ -9,8 +9,14 @@ jest.mock('../webBlobStore.web', () => ({
   getObjectUrl: (...args: [string]) => mockGetObjectUrl(...args),
 }));
 
+const mockRandomUUID = jest.fn<string, []>(() => 'uuid-1');
+const mockGetRandomValues = jest.fn(
+  (arr: Uint8Array) => arr.fill(0xab) as Uint8Array,
+);
+
 jest.mock('expo-crypto', () => ({
-  randomUUID: jest.fn(() => 'uuid-1'),
+  randomUUID: (...args: []) => mockRandomUUID(...args),
+  getRandomValues: (arr: Uint8Array) => mockGetRandomValues(arr),
 }));
 
 import {
@@ -82,6 +88,27 @@ describe('importBlob', () => {
     if (result.success) {
       expect(result.track.uri).toBe('idb://uuid-1');
     }
+  });
+
+  it('falls back to a getRandomValues UUID when randomUUID is unavailable', async () => {
+    // Simulates an insecure origin (plain-http LAN address) where
+    // `crypto.randomUUID` is undefined and throws when invoked.
+    mockRandomUUID.mockImplementationOnce(() => {
+      throw new TypeError('randomUUID is not a function');
+    });
+    mockGetObjectUrl.mockResolvedValue('blob:obj/fallback');
+
+    const result = await importBlob(makeBlob(), 'song.mp3', 100);
+
+    expect(result.success).toBe(true);
+    expect(mockGetRandomValues).toHaveBeenCalled();
+    if (result.success) {
+      // Bytes filled with 0xab -> v4/variant bits forced into a valid UUID.
+      expect(result.track.id).toBe(
+        'abababab-abab-4bab-abab-abababababab',
+      );
+    }
+    expect(mockPutBlob).toHaveBeenCalledTimes(1);
   });
 
   it('returns copy_failed when the blob cannot be stored', async () => {

@@ -140,6 +140,13 @@ export default function LibraryScreen() {
         );
         showToast(`Import failed: ${result.message}`, 'error');
       }
+    } catch (error) {
+      // Defensive: pickAndImportFile resolves to an outcome on expected
+      // failures, but an unexpected throw must still surface to the user
+      // rather than silently doing nothing.
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      AccessibilityInfo.announceForAccessibility(`Import failed: ${message}`);
+      showToast(`Import failed: ${message}`, 'error');
     } finally {
       setImporting(false);
     }
