@@ -10,6 +10,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 
+import { AccessiblePressable } from './AccessiblePressable';
 import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -45,6 +46,10 @@ export function VolumeControl({
 }: VolumeControlProps) {
   const { theme } = useTheme();
   const trackWidth = useRef(0);
+
+  // The slider is hidden behind the volume icon until tapped, so it no longer
+  // reads as a second seek bar stacked under the real one.
+  const [expanded, setExpanded] = useState(false);
 
   // While dragging, this local ratio drives the visual so the bar stays
   // smooth even though native volume calls are throttled. null = not dragging.
@@ -129,49 +134,76 @@ export function VolumeControl({
 
   return (
     <View style={[styles.container, style]}>
-      <View
-        style={styles.row}
-        accessibilityRole="adjustable"
-        accessibilityLabel={`Volume: ${percent}%`}
-        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-        onAccessibilityAction={handleAccessibilityAction}
-        accessibilityValue={{ min: 0, max: 100, now: percent }}
-      >
-        <Ionicons
-          name={iconForVolume(displayVolume)}
-          size={20}
-          color={theme.colors.textSecondary}
-          style={styles.icon}
-        />
-        <GestureDetector gesture={pan}>
-          <View style={styles.barTouchArea} onLayout={handleLayout}>
-            <View
+      <View style={styles.row}>
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel={`Volume, ${percent}%`}
+          accessibilityState={{ expanded }}
+          accessibilityHint={
+            expanded ? 'Hides the volume slider' : 'Shows the volume slider'
+          }
+          onPress={() => setExpanded((prev) => !prev)}
+          style={styles.iconButton}
+        >
+          <Ionicons
+            name={iconForVolume(displayVolume)}
+            size={20}
+            color={theme.colors.textSecondary}
+          />
+        </AccessiblePressable>
+
+        {expanded ? (
+          <View
+            style={styles.slider}
+            accessibilityRole="adjustable"
+            accessibilityLabel={`Volume: ${percent}%`}
+            accessibilityActions={[
+              { name: 'increment' },
+              { name: 'decrement' },
+            ]}
+            onAccessibilityAction={handleAccessibilityAction}
+            accessibilityValue={{ min: 0, max: 100, now: percent }}
+          >
+            <GestureDetector gesture={pan}>
+              <View style={styles.barTouchArea} onLayout={handleLayout}>
+                <View
+                  style={[
+                    styles.barTrack,
+                    { backgroundColor: theme.colors.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.barFill,
+                      {
+                        backgroundColor: theme.colors.accent,
+                        width: `${displayVolume * 100}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <View
+                  style={[
+                    styles.thumb,
+                    {
+                      backgroundColor: theme.colors.accent,
+                      left: `${displayVolume * 100}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </GestureDetector>
+            <Text
               style={[
-                styles.barTrack,
-                { backgroundColor: theme.colors.border },
+                theme.typography.caption,
+                styles.percent,
+                { color: theme.colors.textSecondary },
               ]}
             >
-              <View
-                style={[
-                  styles.barFill,
-                  {
-                    backgroundColor: theme.colors.accent,
-                    width: `${displayVolume * 100}%`,
-                  },
-                ]}
-              />
-            </View>
-            <View
-              style={[
-                styles.thumb,
-                {
-                  backgroundColor: theme.colors.accent,
-                  left: `${displayVolume * 100}%`,
-                },
-              ]}
-            />
+              {percent}%
+            </Text>
           </View>
-        </GestureDetector>
+        ) : null}
       </View>
       {showIOSHint ? (
         <Text
@@ -195,13 +227,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  icon: {
-    marginRight: spacing.md,
+  iconButton: {
+    // Pull the touch target's left padding in so the icon lines up with the
+    // seek bar / content edge rather than sitting inset.
+    marginLeft: -spacing.md,
+  },
+  slider: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   barTouchArea: {
     flex: 1,
     paddingVertical: spacing.lg,
     position: 'relative',
+  },
+  percent: {
+    marginLeft: spacing.md,
+    minWidth: 40,
+    textAlign: 'right',
   },
   barTrack: {
     height: 4,
