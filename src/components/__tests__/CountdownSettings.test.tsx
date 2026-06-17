@@ -41,6 +41,7 @@ function defaultConfig(
     enabled: false,
     mode: 'silent',
     duration: { type: 'seconds', seconds: 3 },
+    repeat: 'once',
     bpm: 120,
     ...overrides,
   };
@@ -81,7 +82,7 @@ function findAllByLabel(root: ReactTestRenderer['root'], label: string) {
 function expand(tree: ReactTestRenderer) {
   const btn = tree.root.findAll(
     (node) =>
-      node.props.accessibilityLabel === 'Expand countdown settings' &&
+      node.props.accessibilityLabel === 'Expand count-in settings' &&
       typeof node.props.onPress === 'function',
   )[0];
   act(() => {
@@ -101,16 +102,16 @@ describe('CountdownSettings', () => {
   it('renders the header label and enable toggle', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig(), onChange);
-    expect(findByText(tree.root, 'Countdown')).toHaveLength(1);
+    expect(findByText(tree.root, 'Count-in')).toHaveLength(1);
     expect(
-      findByLabel(tree.root, 'Countdown off').length,
+      findByLabel(tree.root, 'Count-in off').length,
     ).toBeGreaterThanOrEqual(1);
   });
 
   it('toggles enabled state', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig(), onChange);
-    const toggle = findByLabel(tree.root, 'Countdown off')[0]!;
+    const toggle = findByLabel(tree.root, 'Count-in off')[0]!;
     act(() => {
       toggle.props.onPress();
     });
@@ -132,7 +133,16 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome' }),
       onChange,
     );
-    expect(findByText(tree.root, '3s · Metronome')).toHaveLength(1);
+    expect(findByText(tree.root, '3s · Metronome · Once')).toHaveLength(1);
+  });
+
+  it('reflects an every-loop count-in in the summary', () => {
+    const onChange = jest.fn();
+    const tree = renderSettings(
+      defaultConfig({ enabled: true, repeat: 'everyLoop' }),
+      onChange,
+    );
+    expect(findByText(tree.root, '3s · Silent · Every loop')).toHaveLength(1);
   });
 
   it('shows mode and seconds-based length when expanded', () => {
@@ -150,7 +160,7 @@ describe('CountdownSettings', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
     expand(tree);
-    const metronomeChip = findByLabel(tree.root, 'metronome')[0];
+    const metronomeChip = findByLabel(tree.root, 'Mode Metronome')[0];
     act(() => {
       metronomeChip.props.onPress();
     });
@@ -163,7 +173,7 @@ describe('CountdownSettings', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
     expand(tree);
-    const tenSecondsChip = findByLabel(tree.root, '10s')[0];
+    const tenSecondsChip = findByLabel(tree.root, 'Length 10s')[0];
     act(() => {
       tenSecondsChip.props.onPress();
     });
@@ -171,6 +181,19 @@ describe('CountdownSettings', () => {
       expect.objectContaining({
         duration: { type: 'seconds', seconds: 10 },
       }),
+    );
+  });
+
+  it('switches the count-in repeat scope', () => {
+    const onChange = jest.fn();
+    const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
+    expand(tree);
+    const everyLoopChip = findByLabel(tree.root, 'Count in Every loop')[0];
+    act(() => {
+      everyLoopChip.props.onPress();
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ repeat: 'everyLoop' }),
     );
   });
 

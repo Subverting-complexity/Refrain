@@ -11,7 +11,6 @@ interface TransportControlsProps {
   status: PlaybackStatus;
   onPlay: () => void;
   onPause: () => void;
-  onStop: () => void;
   onSkipBack: () => void;
   onSkipForward: () => void;
   style?: ViewStyle;
@@ -21,7 +20,6 @@ export function TransportControls({
   status,
   onPlay,
   onPause,
-  onStop,
   onSkipBack,
   onSkipForward,
   style,
@@ -42,17 +40,6 @@ export function TransportControls({
 
   return (
     <View style={[styles.container, style]}>
-      <AccessiblePressable
-        accessibilityRole="button"
-        accessibilityLabel="Stop"
-        accessibilityState={{ disabled: isDisabled }}
-        onPress={onStop}
-        disabled={isDisabled}
-        style={(p) => secondaryStyle(p.pressed)}
-      >
-        <Ionicons name="stop" size={22} color={theme.colors.textPrimary} />
-      </AccessiblePressable>
-
       <AccessiblePressable
         accessibilityRole="button"
         accessibilityLabel="Skip back"

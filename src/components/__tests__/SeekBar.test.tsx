@@ -288,6 +288,61 @@ describe('SeekBar', () => {
     });
   });
 
+  describe('A/B region scoping', () => {
+    it('reports position relative to the region in the label', () => {
+      const tree = renderSeekBar({
+        positionMs: 8000,
+        durationMs: 60000,
+        rangeStartMs: 5000,
+        rangeEndMs: 15000,
+      });
+      const container = getAdjustable(tree);
+      // 8s is 3s into a 10s region.
+      expect(container.props.accessibilityLabel).toContain('Loop position');
+      expect(container.props.accessibilityLabel).toContain('0:03');
+      expect(container.props.accessibilityLabel).toContain('0:10');
+    });
+
+    it('shows the playhead as progress through the region', () => {
+      const tree = renderSeekBar({
+        positionMs: 10000,
+        durationMs: 60000,
+        rangeStartMs: 5000,
+        rangeEndMs: 15000,
+      });
+      // 10s sits halfway through [5s, 15s].
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
+    });
+
+    it('maps a tap to an absolute position inside the region', () => {
+      const onSeek = jest.fn();
+      const tree = renderSeekBar({
+        durationMs: 60000,
+        rangeStartMs: 5000,
+        rangeEndMs: 15000,
+        onSeek,
+      });
+      layout(tree);
+
+      // Tap at the bar midpoint → 5000 + 0.5 * 10000 = 10000ms.
+      begin(150);
+      expect(onSeek).toHaveBeenCalledWith(10000);
+    });
+
+    it('ignores an inverted range and spans the whole track', () => {
+      const tree = renderSeekBar({
+        positionMs: 30000,
+        durationMs: 60000,
+        rangeStartMs: 15000,
+        rangeEndMs: 5000,
+      });
+      // Invalid range falls back to track-wide: 30s of 60s = 50%.
+      const container = getAdjustable(tree);
+      expect(container.props.accessibilityLabel).toContain('Playback position');
+      expect(container.props.accessibilityValue.now).toBe(50);
+    });
+  });
+
   describe('accessibility actions', () => {
     it('exposes increment and decrement actions', () => {
       const tree = renderSeekBar();

@@ -37,7 +37,6 @@ function renderControls(
         status="paused"
         onPlay={jest.fn()}
         onPause={jest.fn()}
-        onStop={jest.fn()}
         onSkipBack={jest.fn()}
         onSkipForward={jest.fn()}
         {...props}
@@ -59,13 +58,20 @@ function pressByLabel(tree: ReactTestRenderer, label: string) {
 }
 
 describe('TransportControls', () => {
-  it('renders stop, skip, and play/pause controls', () => {
+  it('renders skip and play/pause controls', () => {
     const tree = renderControls();
-    for (const label of ['Stop', 'Skip back', 'Skip forward', 'Play']) {
+    for (const label of ['Skip back', 'Skip forward', 'Play']) {
       expect(
         tree.root.findAll((n) => n.props.accessibilityLabel === label).length,
       ).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it('no longer renders a Stop control', () => {
+    const tree = renderControls();
+    expect(
+      tree.root.findAll((n) => n.props.accessibilityLabel === 'Stop').length,
+    ).toBe(0);
   });
 
   it('calls onSkipBack and onSkipForward', () => {
@@ -92,13 +98,6 @@ describe('TransportControls', () => {
     const tree = renderControls({ status: 'playing', onPause });
     pressByLabel(tree, 'Pause');
     expect(onPause).toHaveBeenCalledTimes(1);
-  });
-
-  it('calls onStop', () => {
-    const onStop = jest.fn();
-    const tree = renderControls({ onStop });
-    pressByLabel(tree, 'Stop');
-    expect(onStop).toHaveBeenCalledTimes(1);
   });
 
   it('disables controls when idle', () => {
