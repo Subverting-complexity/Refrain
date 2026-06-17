@@ -59,9 +59,9 @@ export default function LibraryScreen() {
   }, [showToast]);
 
   const addTrack = useCallback(
-    (track: Track): boolean => {
+    async (track: Track): Promise<boolean> => {
       try {
-        insertTrack(track);
+        await insertTrack(track);
         setTracks((prev) => [track, ...prev]);
         return true;
       } catch (error) {
@@ -80,9 +80,9 @@ export default function LibraryScreen() {
   );
 
   const handleDelete = useCallback(
-    (id: string) => {
+    async (id: string) => {
       try {
-        deleteTrack(id);
+        await deleteTrack(id);
         setTracks((prev) => prev.filter((t) => t.id !== id));
         AccessibilityInfo.announceForAccessibility('Track deleted');
         showToast('Track deleted', 'success');
@@ -95,8 +95,8 @@ export default function LibraryScreen() {
   );
 
   const handleShareImport = useCallback(
-    (track: Track) => {
-      if (!addTrack(track)) return;
+    async (track: Track) => {
+      if (!(await addTrack(track))) return;
       AccessibilityInfo.announceForAccessibility(
         `Received ${track.filename} from share`,
       );
@@ -135,7 +135,7 @@ export default function LibraryScreen() {
     try {
       const result = await pickAndImportFile();
       if (result.success) {
-        if (!addTrack(result.track)) return;
+        if (!(await addTrack(result.track))) return;
         AccessibilityInfo.announceForAccessibility(
           `Imported ${result.track.filename} successfully`,
         );

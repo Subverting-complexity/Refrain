@@ -1,5 +1,12 @@
 import { Track } from '../types';
-import { getDatabase } from './database';
+import {
+  deleteStoredTrack,
+  getAllStoredTracks,
+  getStoredTrack,
+  getStoredTrackIds,
+  putStoredTrack,
+  StoredTrack,
+} from './database.web';
 import {
   deleteBlob,
   getObjectUrl,
@@ -8,86 +15,64 @@ import {
 } from './webBlobStore.web';
 
 /**
- * Web implementation of the track metadata store. Metadata rows go through
- * the same SQLite database as native (expo-sqlite has a wasm web backend),
- * but binary audio lives in IndexedDB (see `webBlobStore.web`) instead of
- * the native filesystem.
- *
- * The DB `uri` column stores a stable `idb://<id>` sentinel; the in-memory
- * `Track.uri` handed to the UI is a `blob:` object URL resolved at load
- * time so the player can play it. There is no legacy `tracks.json`
- * migration on web.
+ * Web implementation of the track metadata store. Metadata records live in
+ * IndexedDB (see `database.web`) and binary audio lives in IndexedDB too (see
+ * `webBlobStore.web`), instead of expo-sqlite + the native filesystem. The
+ * playable `Track.uri` handed to the UI is a `blob:` object URL resolved from
+ * the stored audio at load time so the player can play it.
  */
 
-function uriForId(id: string): string {
-  return `idb://${id}`;
-}
-
-interface TrackRow {
-  id: string;
-  filename: string;
-  uri: string;
-  format: string;
-  durationMs: number;
-  durationEstimated: number;
-  fileSizeBytes: number;
-  importedAt: number;
-}
-
-async function rowToTrack(row: TrackRow): Promise<Track> {
-  // Resolve the playable object URL; fall back to the sentinel if the blob
-  // is missing (orphaned row) so the shape stays valid.
-  const uri = (await getObjectUrl(row.id)) ?? uriForId(row.id);
+async function rowToTrack(row: StoredTrack): Promise<Track> {
+  // Resolve the playable object URL; fall back to a sentinel if the blob is
+  // missing (orphaned record) so the shape stays valid.
+  const uri = (await getObjectUrl(row.id)) ?? `idb://${row.id}`;
   return {
     id: row.id,
     filename: row.filename,
     uri,
     format: row.format as Track['format'],
     durationMs: row.durationMs,
-    durationEstimated: row.durationEstimated === 1,
+    durationEstimated: row.durationEstimated,
     fileSizeBytes: row.fileSizeBytes,
     importedAt: row.importedAt,
   };
 }
 
+function toStored(track: Track): StoredTrack {
+  return {
+    id: track.id,
+    filename: track.filename,
+    format: track.format,
+    durationMs: track.durationMs,
+    durationEstimated: track.durationEstimated,
+    fileSizeBytes: track.fileSizeBytes,
+    importedAt: track.importedAt,
+  };
+}
+
 export async function loadTracks(): Promise<Track[]> {
   void cleanupOrphanFiles();
-  const db = getDatabase();
-  const rows = db.getAllSync<TrackRow>(
-    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks ORDER BY importedAt DESC',
-  );
+  const rows = await getAllStoredTracks();
+  // Newest first — IndexedDB getAll returns keys in ascending order.
+  rows.sort((a, b) => b.importedAt - a.importedAt);
   return Promise.all(rows.map(rowToTrack));
 }
 
-export function insertTrack(track: Track): void {
-  const db = getDatabase();
-  // Persist the canonical sentinel, never the volatile object URL.
-  db.runSync(
-    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    track.id,
-    track.filename,
-    uriForId(track.id),
-    track.format,
-    track.durationMs,
-    track.durationEstimated ? 1 : 0,
-    track.fileSizeBytes,
-    track.importedAt,
-  );
+export async function insertTrack(track: Track): Promise<void> {
+  await putStoredTrack(toStored(track));
 }
 
-export function updateTrackDuration(id: string, durationMs: number): void {
-  const db = getDatabase();
-  db.runSync(
-    'UPDATE tracks SET durationMs = ?, durationEstimated = 0 WHERE id = ?',
-    durationMs,
-    id,
-  );
+export async function updateTrackDuration(
+  id: string,
+  durationMs: number,
+): Promise<void> {
+  const row = await getStoredTrack(id);
+  if (!row) return;
+  await putStoredTrack({ ...row, durationMs, durationEstimated: false });
 }
 
-export function deleteTrack(id: string): void {
-  const db = getDatabase();
-  db.runSync('DELETE FROM tracks WHERE id = ?', id);
+export async function deleteTrack(id: string): Promise<void> {
+  await deleteStoredTrack(id);
   // Revoke the cached object URL and drop the blob. Fire-and-forget: a
   // failed blob delete must not interrupt removal from the library.
   revokeObjectUrl(id);
@@ -96,15 +81,12 @@ export function deleteTrack(id: string): void {
 
 /**
  * Crash-recovery sweep: deletes IndexedDB blobs whose id is not present in
- * the database. Best-effort and asynchronous — never throws. Resolves to
- * the number of orphan blobs removed.
+ * the metadata store. Best-effort and asynchronous — never throws. Resolves
+ * to the number of orphan blobs removed.
  */
 export async function cleanupOrphanFiles(): Promise<number> {
   try {
-    const db = getDatabase();
-    const rows = db.getAllSync<{ id: string }>('SELECT id FROM tracks');
-    const knownIds = new Set(rows.map((r) => r.id));
-
+    const knownIds = new Set(await getStoredTrackIds());
     const storedIds = await listBlobIds();
     let removed = 0;
     for (const id of storedIds) {

@@ -260,8 +260,8 @@ describe('LibraryScreen visible toast feedback', () => {
     });
     const trackItem = renderer.root.findByProps({ testID: 'track-item' });
 
-    act(() => {
-      trackItem.props.onDelete();
+    await act(async () => {
+      await trackItem.props.onDelete();
     });
 
     expect(toastLabels(renderer)).toContain('Failed to delete track');
@@ -274,8 +274,8 @@ describe('LibraryScreen visible toast feedback', () => {
 
     const trackItem = renderer.root.findByProps({ testID: 'track-item' });
 
-    act(() => {
-      trackItem.props.onDelete();
+    await act(async () => {
+      await trackItem.props.onDelete();
     });
 
     expect(toastLabels(renderer)).toContain('Track deleted');

@@ -54,11 +54,18 @@ export default function PlayerScreen() {
   const durationPersisted = useRef(false);
   useEffect(() => {
     if (trackId && durationMs > 0 && !durationPersisted.current) {
+      // Optimistically guard against re-entry; clear the flag on failure so
+      // the next durationMs update retries. Handles both a native synchronous
+      // throw and a web asynchronous rejection (the web store is async).
+      durationPersisted.current = true;
       try {
-        updateTrackDuration(trackId, durationMs);
-        durationPersisted.current = true;
+        void Promise.resolve(updateTrackDuration(trackId, durationMs)).catch(
+          () => {
+            durationPersisted.current = false;
+          },
+        );
       } catch {
-        // DB write failed — will retry on next durationMs update
+        durationPersisted.current = false;
       }
     }
   }, [trackId, durationMs]);
