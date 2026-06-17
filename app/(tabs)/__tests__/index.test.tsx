@@ -4,7 +4,11 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import LibraryScreen from '../index';
 import { pickAndImportFile } from '@/src/services/fileImport';
-import { deleteTrack, loadTracks } from '@/src/services/trackStore';
+import {
+  deleteTrack,
+  insertTrack,
+  loadTracks,
+} from '@/src/services/trackStore';
 import { Track } from '@/src/types';
 
 jest.mock('@/src/services/trackStore', () => ({
@@ -83,6 +87,7 @@ jest.mock('@/src/components/TrackListItem', () => {
 
 const mockLoadTracks = loadTracks as jest.MockedFunction<typeof loadTracks>;
 const mockDeleteTrack = deleteTrack as jest.MockedFunction<typeof deleteTrack>;
+const mockInsertTrack = insertTrack as jest.MockedFunction<typeof insertTrack>;
 const mockPickAndImportFile = pickAndImportFile as jest.MockedFunction<
   typeof pickAndImportFile
 >;
@@ -220,6 +225,29 @@ describe('LibraryScreen visible toast feedback', () => {
     expect(toastLabels(renderer)).toContain(
       'Import failed: Unsupported file format',
     );
+    act(() => renderer.unmount());
+  });
+
+  it('reports a save failure (not success) when the import persist throws', async () => {
+    mockLoadTracks.mockResolvedValueOnce([]);
+    const renderer = await renderScreen();
+
+    mockPickAndImportFile.mockResolvedValueOnce({
+      success: true,
+      track: sampleTrack,
+    });
+    mockInsertTrack.mockImplementationOnce(() => {
+      throw new Error('db write failed');
+    });
+    const importButton = renderer.root.findByProps({ testID: 'import-button' });
+
+    await act(async () => {
+      await importButton.props.onPress();
+    });
+
+    const labels = toastLabels(renderer);
+    expect(labels).toContain('Failed to save track to library');
+    expect(labels).not.toContain('Imported song.mp3 successfully');
     act(() => renderer.unmount());
   });
 
