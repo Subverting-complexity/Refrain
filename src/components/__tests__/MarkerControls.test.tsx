@@ -14,6 +14,10 @@ jest.mock('../../hooks/useTheme', () => ({
         surface: '#1a2e30',
         textPrimary: '#e0f0eb',
         textSecondary: '#8ba89e',
+        markerA: '#ffb02e',
+        markerAText: '#3a2600',
+        markerB: '#ff5d77',
+        markerBText: '#ffffff',
       },
       spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
       typography: {},
@@ -36,12 +40,9 @@ function renderControls(
     tree = create(
       <MarkerControls
         status="paused"
-        positionMs={5000}
         markerA={null}
         markerB={null}
         loopEnabled={true}
-        onSetMarkerA={jest.fn()}
-        onSetMarkerB={jest.fn()}
         onToggleLoop={jest.fn()}
         onClearMarkers={jest.fn()}
         {...props}
@@ -59,17 +60,19 @@ function findPressableByLabel(tree: ReactTestRenderer, label: string) {
   );
 }
 
-// The AccessiblePressable wrapper (a function component) carries the button's
-// own style function, returning [styles.<button>, dynamic]. We resolve that to
-// assert centering lives on the button style itself, not just the wrapper base.
-function resolveButtonStyle(tree: ReactTestRenderer, label: string) {
-  const wrapper = tree.root.findAll(
+function findReadoutByLabelFragment(tree: ReactTestRenderer, fragment: string) {
+  return tree.root.findAll(
     (node) =>
-      node.props.accessibilityLabel === label &&
-      typeof node.props.style === 'function' &&
-      typeof node.type === 'function',
-  )[0];
-  return StyleSheet.flatten(wrapper.props.style({ pressed: false }));
+      node.type === 'View' &&
+      typeof node.props.accessibilityLabel === 'string' &&
+      node.props.accessibilityLabel.includes(fragment),
+  );
+}
+
+function findText(tree: ReactTestRenderer, text: string) {
+  return tree.root.findAll(
+    (node) => node.type === 'Text' && node.props.children === text,
+  );
 }
 
 function findCaption(tree: ReactTestRenderer, fragment: string) {
@@ -82,13 +85,25 @@ function findCaption(tree: ReactTestRenderer, fragment: string) {
 }
 
 describe('MarkerControls', () => {
-  it('renders Set A and Set B buttons', () => {
+  it('renders A and B read-outs', () => {
     const tree = renderControls();
+    expect(findText(tree, 'A').length).toBeGreaterThanOrEqual(1);
+    expect(findText(tree, 'B').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows a dash for an unset marker and a time for a set one', () => {
+    const tree = renderControls({ markerA: 65000, markerB: null });
+    expect(findText(tree, '1:05').length).toBe(1);
+    expect(findText(tree, '—').length).toBe(1);
+  });
+
+  it('labels the read-outs for accessibility', () => {
+    const tree = renderControls({ markerA: 5000, markerB: null });
     expect(
-      findPressableByLabel(tree, 'Set loop start').length,
+      findReadoutByLabelFragment(tree, 'Loop start 0:05').length,
     ).toBeGreaterThanOrEqual(1);
     expect(
-      findPressableByLabel(tree, 'Set loop end').length,
+      findReadoutByLabelFragment(tree, 'Loop end not set').length,
     ).toBeGreaterThanOrEqual(1);
   });
 
@@ -97,30 +112,6 @@ describe('MarkerControls', () => {
     expect(
       findPressableByLabel(tree, 'Clear loop markers').length,
     ).toBeGreaterThanOrEqual(1);
-  });
-
-  it('calls onSetMarkerA with current position when A button pressed', () => {
-    const onSetMarkerA = jest.fn();
-    const tree = renderControls({ positionMs: 3000, onSetMarkerA });
-
-    const button = findPressableByLabel(tree, 'Set loop start')[0];
-    act(() => {
-      button.props.onPress();
-    });
-
-    expect(onSetMarkerA).toHaveBeenCalledWith(3000);
-  });
-
-  it('calls onSetMarkerB with current position when B button pressed', () => {
-    const onSetMarkerB = jest.fn();
-    const tree = renderControls({ positionMs: 8000, onSetMarkerB });
-
-    const button = findPressableByLabel(tree, 'Set loop end')[0];
-    act(() => {
-      button.props.onPress();
-    });
-
-    expect(onSetMarkerB).toHaveBeenCalledWith(8000);
   });
 
   it('calls onClearMarkers when clear button pressed', () => {
@@ -137,29 +128,6 @@ describe('MarkerControls', () => {
     });
 
     expect(onClearMarkers).toHaveBeenCalled();
-  });
-
-  it('disables A and B buttons when status is idle', () => {
-    const tree = renderControls({ status: 'idle' });
-
-    const setA = findPressableByLabel(tree, 'Set loop start')[0];
-    const setB = findPressableByLabel(tree, 'Set loop end')[0];
-
-    expect(setA.props.accessibilityState).toEqual(
-      expect.objectContaining({ disabled: true }),
-    );
-    expect(setB.props.accessibilityState).toEqual(
-      expect.objectContaining({ disabled: true }),
-    );
-  });
-
-  it('disables A and B buttons when status is error', () => {
-    const tree = renderControls({ status: 'error' });
-
-    const setA = findPressableByLabel(tree, 'Set loop start')[0];
-    expect(setA.props.accessibilityState).toEqual(
-      expect.objectContaining({ disabled: true }),
-    );
   });
 
   it('disables clear button when no markers are set', () => {
@@ -244,10 +212,10 @@ describe('MarkerControls', () => {
 
   it('shows a guidance caption for the current marker state', () => {
     expect(
-      findCaption(renderControls(), 'Tap A').length,
+      findCaption(renderControls(), 'Tap the wave to set A').length,
     ).toBeGreaterThanOrEqual(1);
     expect(
-      findCaption(renderControls({ markerA: 1000 }), 'Now tap B').length,
+      findCaption(renderControls({ markerA: 1000 }), 'set B').length,
     ).toBeGreaterThanOrEqual(1);
     expect(
       findCaption(
@@ -259,40 +227,15 @@ describe('MarkerControls', () => {
 
   it('hides the caption when playback is idle', () => {
     const tree = renderControls({ status: 'idle' });
-    expect(findCaption(tree, 'Tap A')).toHaveLength(0);
+    expect(findCaption(tree, 'Tap the wave')).toHaveLength(0);
   });
 
-  it('highlights A button with accent color when markerA is set', () => {
+  it('tints the A read-out border with the marker A color when set', () => {
     const tree = renderControls({ markerA: 1000 });
 
-    const button = findPressableByLabel(tree, 'Set loop start')[0];
-    const textNodes = button.findAll(
-      (node) => node.type === 'Text' && node.props.children === 'A',
-    );
-    expect(textNodes).toHaveLength(1);
-    const textStyle = textNodes[0].props.style;
-    const hasAccentText = textStyle.some(
-      (s: Record<string, unknown>) => s && s.color === '#111d1f',
-    );
-    expect(hasAccentText).toBe(true);
-  });
-
-  it('centers the A and B marker button labels', () => {
-    const tree = renderControls();
-
-    for (const label of ['Set loop start', 'Set loop end']) {
-      const style = resolveButtonStyle(tree, label);
-      expect(style.justifyContent).toBe('center');
-      expect(style.alignItems).toBe('center');
-    }
-  });
-
-  it('centers the clear button icon', () => {
-    const tree = renderControls({ markerA: 1000, markerB: 5000 });
-
-    const style = resolveButtonStyle(tree, 'Clear loop markers');
-    expect(style.justifyContent).toBe('center');
-    expect(style.alignItems).toBe('center');
+    const readout = findReadoutByLabelFragment(tree, 'Loop start 0:01')[0];
+    const flat = StyleSheet.flatten(readout.props.style);
+    expect(flat.borderColor).toBe('#ffb02e');
   });
 
   it('accepts style prop override', () => {

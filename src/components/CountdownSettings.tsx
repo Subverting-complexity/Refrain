@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -12,12 +13,14 @@ interface CountdownSettingsProps {
   style?: ViewStyle;
 }
 
+// Lead-in length presets, in seconds. Seconds read more clearly than musical
+// bars for a practice lead-in, and avoid coupling the duration to the BPM.
 const DURATION_PRESETS: { label: string; value: CountdownDuration }[] = [
-  { label: '1 bar', value: { type: 'bars', bars: 1 } },
-  { label: '2 bars', value: { type: 'bars', bars: 2 } },
-  { label: '4 bars', value: { type: 'bars', bars: 4 } },
+  { label: '1s', value: { type: 'seconds', seconds: 1 } },
   { label: '3s', value: { type: 'seconds', seconds: 3 } },
   { label: '5s', value: { type: 'seconds', seconds: 5 } },
+  { label: '10s', value: { type: 'seconds', seconds: 10 } },
+  { label: '30s', value: { type: 'seconds', seconds: 30 } },
 ];
 
 function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
@@ -28,12 +31,19 @@ function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
   return false;
 }
 
+function durationLabel(duration: CountdownDuration): string {
+  return duration.type === 'seconds'
+    ? `${duration.seconds}s`
+    : `${duration.bars} bar${duration.bars === 1 ? '' : 's'}`;
+}
+
 export function CountdownSettings({
   config,
   onConfigChange,
   style,
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
+  const [expanded, setExpanded] = useState(false);
   const [bpmText, setBpmText] = useState(String(config.bpm));
   const [bpmValid, setBpmValid] = useState(true);
 
@@ -78,44 +88,105 @@ export function CountdownSettings({
     setBpmValid(true);
   };
 
-  const showBpm =
-    config.mode === 'metronome' || config.duration.type === 'bars';
+  const showBpm = config.mode === 'metronome';
+  const summary = `${durationLabel(config.duration)} · ${
+    config.mode === 'metronome' ? 'Metronome' : 'Silent'
+  }`;
 
   return (
-    <View style={[styles.container, style]}>
-      <View style={styles.row}>
-        <Text style={[theme.typography.body, styles.label]}>Countdown</Text>
+    <View
+      style={[
+        styles.container,
+        {
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        style,
+      ]}
+    >
+      <View style={styles.headerRow}>
         <AccessiblePressable
-          accessibilityRole="switch"
-          accessibilityLabel={`Countdown ${config.enabled ? 'on' : 'off'}`}
-          accessibilityState={{ checked: config.enabled }}
-          onPress={toggleEnabled}
-          style={[
-            styles.toggle,
-            {
-              backgroundColor: config.enabled
-                ? theme.colors.accent
-                : theme.colors.surface,
-              borderColor: theme.colors.border,
-            },
-          ]}
+          accessibilityRole="button"
+          accessibilityLabel={
+            expanded
+              ? 'Collapse countdown settings'
+              : 'Expand countdown settings'
+          }
+          accessibilityState={{ expanded }}
+          onPress={() => setExpanded((v) => !v)}
+          style={styles.headerLabel}
         >
-          <View
+          <Ionicons
+            name="timer-outline"
+            size={18}
+            color={theme.colors.accent}
+          />
+          <Text
+            style={[theme.typography.body, { color: theme.colors.textPrimary }]}
+          >
+            Countdown
+          </Text>
+          {config.enabled && (
+            <Text
+              style={[
+                theme.typography.bodySmall,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {summary}
+            </Text>
+          )}
+        </AccessiblePressable>
+
+        <View style={styles.headerActions}>
+          <AccessiblePressable
+            accessibilityRole="switch"
+            accessibilityLabel={`Countdown ${config.enabled ? 'on' : 'off'}`}
+            accessibilityState={{ checked: config.enabled }}
+            onPress={toggleEnabled}
             style={[
-              styles.toggleThumb,
+              styles.toggle,
               {
                 backgroundColor: config.enabled
-                  ? theme.colors.accentText
-                  : theme.colors.textSecondary,
-                transform: [{ translateX: config.enabled ? 20 : 0 }],
+                  ? theme.colors.accent
+                  : theme.colors.background,
+                borderColor: theme.colors.border,
               },
             ]}
-          />
-        </AccessiblePressable>
+          >
+            <View
+              style={[
+                styles.toggleThumb,
+                {
+                  backgroundColor: config.enabled
+                    ? theme.colors.accentText
+                    : theme.colors.textSecondary,
+                  transform: [{ translateX: config.enabled ? 20 : 0 }],
+                },
+              ]}
+            />
+          </AccessiblePressable>
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              expanded
+                ? 'Collapse countdown settings'
+                : 'Expand countdown settings'
+            }
+            onPress={() => setExpanded((v) => !v)}
+            style={styles.chevron}
+          >
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={theme.colors.textSecondary}
+            />
+          </AccessiblePressable>
+        </View>
       </View>
 
-      {config.enabled && (
-        <>
+      {expanded && (
+        <View style={styles.body}>
           <View style={styles.row}>
             <Text style={[theme.typography.bodySmall, styles.label]}>Mode</Text>
             <View style={styles.chipRow}>
@@ -132,7 +203,7 @@ export function CountdownSettings({
                       backgroundColor:
                         config.mode === mode
                           ? theme.colors.accent
-                          : theme.colors.surface,
+                          : theme.colors.background,
                       borderColor: theme.colors.border,
                     },
                   ]}
@@ -157,7 +228,7 @@ export function CountdownSettings({
 
           <View style={styles.row}>
             <Text style={[theme.typography.bodySmall, styles.label]}>
-              Duration
+              Length
             </Text>
             <View style={styles.chipRow}>
               {DURATION_PRESETS.map((preset) => (
@@ -177,7 +248,7 @@ export function CountdownSettings({
                         preset.value,
                       )
                         ? theme.colors.accent
-                        : theme.colors.surface,
+                        : theme.colors.background,
                       borderColor: theme.colors.border,
                     },
                   ]}
@@ -216,7 +287,7 @@ export function CountdownSettings({
                     styles.bpmInput,
                     {
                       color: theme.colors.textPrimary,
-                      backgroundColor: theme.colors.surface,
+                      backgroundColor: theme.colors.background,
                       borderColor: bpmValid
                         ? theme.colors.border
                         : theme.colors.error,
@@ -239,7 +310,7 @@ export function CountdownSettings({
               </Text>
             </View>
           )}
-        </>
+        </View>
       )}
     </View>
   );
@@ -247,7 +318,37 @@ export function CountdownSettings({
 
 const styles = StyleSheet.create({
   container: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 52,
+  },
+  headerLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  chevron: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  body: {
     gap: spacing.md,
+    paddingBottom: spacing.md,
+    paddingTop: spacing.xs,
   },
   row: {
     flexDirection: 'row',

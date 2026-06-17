@@ -274,6 +274,90 @@ describe('audioEngine', () => {
 
       expect(mockSeekTo).not.toHaveBeenCalled();
     });
+
+    it('locks seeks inside the A/B window while looping', async () => {
+      const {
+        loadTrack,
+        seekTo,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      // Past B clamps to B; before A clamps to A.
+      await seekTo(30000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(10);
+      await seekTo(1000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(5);
+    });
+
+    it('does not clamp seeks when the loop is disabled', async () => {
+      const {
+        loadTrack,
+        seekTo,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(10000);
+      setLoopEnabled(false);
+
+      await seekTo(30000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(30);
+    });
+  });
+
+  describe('skipBy', () => {
+    it('skips within the full track when no loop is armed', async () => {
+      const { loadTrack, skipBy } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 60 }));
+
+      await skipBy(5000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(35);
+
+      // Forward past the end clamps to the duration; back past 0 clamps to 0.
+      await skipBy(40000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(60);
+      await skipBy(-40000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(0);
+    });
+
+    it('skips within the A/B window while looping', async () => {
+      const {
+        loadTrack,
+        skipBy,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 8, duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      await skipBy(5000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(10);
+      await skipBy(-10000);
+      expect(mockSeekTo).toHaveBeenLastCalledWith(5);
+    });
+
+    it('does nothing when no player is loaded', async () => {
+      const { skipBy } = require('../audioEngine');
+
+      await skipBy(5000);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
   });
 
   describe('unloadTrack', () => {

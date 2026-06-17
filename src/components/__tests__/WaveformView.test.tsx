@@ -11,7 +11,12 @@ jest.mock('../../hooks/useTheme', () => ({
         accentText: '#111d1f',
         border: '#2a4a4e',
         surface: '#1a2e30',
+        textPrimary: '#e8f5f0',
         textSecondary: '#8ba89e',
+        markerA: '#ffb02e',
+        markerAText: '#3a2600',
+        markerB: '#ff5d77',
+        markerBText: '#ffffff',
       },
       spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
       typography: {},
@@ -128,23 +133,29 @@ describe('WaveformView', () => {
     expect(bars).toHaveLength(DEFAULT_PEAKS.length);
   });
 
+  // Bars are tinted by appending an alpha byte to the accent hex. Played bars
+  // sit at a high alpha (>= 0.5 base); unplayed/dull bars at a low one.
+  function barAlpha(bar: ReturnType<typeof findBars>[number]): number {
+    const styled = bar.props.style.find(
+      (s: Record<string, unknown>) =>
+        typeof s?.backgroundColor === 'string' &&
+        (s.backgroundColor as string).startsWith('#7edbb8'),
+    ) as { backgroundColor: string } | undefined;
+    if (!styled) return 0;
+    return parseInt(styled.backgroundColor.slice(7, 9), 16);
+  }
+
   it('colors bars based on playback progress', () => {
     const tree = renderWaveform({ positionMs: 5000 });
     const bars = findBars(tree);
 
-    const accentBars = bars.filter((b) =>
-      b.props.style.some(
-        (s: Record<string, unknown>) => s.backgroundColor === '#7edbb8',
-      ),
-    );
-    const borderBars = bars.filter((b) =>
-      b.props.style.some(
-        (s: Record<string, unknown>) => s.backgroundColor === '#2a4a4e',
-      ),
-    );
+    // progress = 0.5; bar centres are (i+0.5)/5 → 0.1, 0.3, 0.5 played and
+    // 0.7, 0.9 unplayed.
+    const played = bars.filter((b) => barAlpha(b) >= 128);
+    const dull = bars.filter((b) => barAlpha(b) < 128);
 
-    expect(accentBars.length).toBeGreaterThan(0);
-    expect(borderBars.length).toBeGreaterThan(0);
+    expect(played).toHaveLength(3);
+    expect(dull).toHaveLength(2);
   });
 
   it('renders a cursor element', () => {
@@ -157,7 +168,7 @@ describe('WaveformView', () => {
         Array.isArray(node.props.style) &&
         node.props.style.some(
           (s: Record<string, unknown>) =>
-            s && s.left === '25%' && s.backgroundColor === '#7edbb8',
+            s && s.left === '25%' && s.backgroundColor === '#e8f5f0',
         ),
     );
 
@@ -234,23 +245,25 @@ describe('WaveformView', () => {
     expect(onSeek).toHaveBeenCalledWith(10000);
   });
 
-  it('renders A/B marker lines when provided', () => {
+  it('renders A/B marker lines in their marker colors', () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
-    const markerLines = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        node.props.style &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) => s && s.backgroundColor === '#8ba89e',
-        ) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) => s && s.width === 2 && s.top === 0,
-        ),
-    );
+    const markerLine = (color: string) =>
+      tree.root.findAll(
+        (node) =>
+          node.type === 'View' &&
+          node.props.style &&
+          Array.isArray(node.props.style) &&
+          node.props.style.some(
+            (s: Record<string, unknown>) => s && s.width === 2,
+          ) &&
+          node.props.style.some(
+            (s: Record<string, unknown>) => s && s.backgroundColor === color,
+          ),
+      );
 
-    expect(markerLines).toHaveLength(2);
+    expect(markerLine('#ffb02e')).toHaveLength(1);
+    expect(markerLine('#ff5d77')).toHaveLength(1);
   });
 
   it('renders labelled grab handles for the markers', () => {
@@ -477,6 +490,62 @@ describe('WaveformView', () => {
       begin(150);
 
       expect(onSeek).toHaveBeenCalled();
+    });
+
+    it('places A at the tapped position when no markers exist', () => {
+      const onMarkerAChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        durationMs: 10000,
+        onMarkerAChange,
+        onSeek,
+      });
+      layout(tree);
+
+      begin(150);
+
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('places B at the tapped position once A exists', () => {
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 2000,
+        durationMs: 10000,
+        onMarkerBChange,
+        onSeek,
+      });
+      layout(tree);
+
+      // 200px → (200 - 12) / 276 * 10000 ≈ 6812ms, well clear of A.
+      begin(200);
+
+      expect(onMarkerBChange).toHaveBeenCalledWith(6812);
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('seeks on a bare tap once both markers exist', () => {
+      const onMarkerAChange = jest.fn();
+      const onMarkerBChange = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 2000,
+        markerB: 8000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onMarkerBChange,
+        onSeek,
+      });
+      layout(tree);
+
+      // 150px is the track midpoint (5000ms) and far from either handle.
+      begin(150);
+
+      expect(onSeek).toHaveBeenCalledWith(5000);
+      expect(onMarkerAChange).not.toHaveBeenCalled();
+      expect(onMarkerBChange).not.toHaveBeenCalled();
     });
   });
 

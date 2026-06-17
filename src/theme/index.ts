@@ -30,6 +30,15 @@ export interface ThemeColors {
   border: string;
   error: string;
   errorText: string;
+  /**
+   * Loop marker colors. Warm hues chosen to stand out against the mint
+   * waveform (which is `accent`). `markerAText`/`markerBText` are the
+   * legible foreground for a filled flag in that color.
+   */
+  markerA: string;
+  markerAText: string;
+  markerB: string;
+  markerBText: string;
 }
 
 export interface ThemeTypography {
@@ -72,6 +81,10 @@ const darkColors: ThemeColors = {
   border: '#2a4a4e',
   error: '#f87171',
   errorText: '#1a1a1a',
+  markerA: '#ffb02e',
+  markerAText: '#3a2600',
+  markerB: '#ff5d77',
+  markerBText: '#ffffff',
 };
 
 const lightColors: ThemeColors = {
@@ -84,6 +97,10 @@ const lightColors: ThemeColors = {
   border: '#cce8df',
   error: '#dc2626',
   errorText: '#ffffff',
+  markerA: '#d4943a',
+  markerAText: '#ffffff',
+  markerB: '#c4485f',
+  markerBText: '#ffffff',
 };
 
 export const darkTheme: Theme = {

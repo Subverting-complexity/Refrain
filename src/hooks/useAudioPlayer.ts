@@ -42,6 +42,10 @@ export function useAudioPlayer(trackUri: string | null) {
   const pause = useCallback(() => audioEngine.pause(), []);
   const stop = useCallback(() => audioEngine.stop(), []);
   const seekTo = useCallback((ms: number) => audioEngine.seekTo(ms), []);
+  const skipBy = useCallback(
+    (deltaMs: number) => audioEngine.skipBy(deltaMs),
+    [],
+  );
   const setMarkerA = useCallback(
     (ms: number) => audioEngine.setMarkerA(ms),
     [],
@@ -63,6 +67,7 @@ export function useAudioPlayer(trackUri: string | null) {
     pause,
     stop,
     seekTo,
+    skipBy,
     setMarkerA,
     setMarkerB,
     clearMarkers,
