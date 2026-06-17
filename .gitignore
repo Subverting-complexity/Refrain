@@ -15,6 +15,17 @@ tools/ps/android-build-log.json
 .claude/plan.md
 .claude/claim-issue-*.sha
 
+# graphify — generated artifacts (rebuild via `graphify . --update`, ~10s, 0 tokens)
+graphify-out/graph.json
+graphify-out/graph.html
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_analysis.json
+
+# fallow — local analysis cache
+.fallow/
+
 # Visual Studio
 .vs/
 
