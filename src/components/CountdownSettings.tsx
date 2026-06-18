@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -26,6 +25,7 @@ const DURATION_OPTIONS: ChipOption<CountdownDuration>[] = [
   { label: '3s', value: { type: 'seconds', seconds: 3 } },
   { label: '5s', value: { type: 'seconds', seconds: 5 } },
   { label: '10s', value: { type: 'seconds', seconds: 10 } },
+  { label: '15s', value: { type: 'seconds', seconds: 15 } },
   { label: '30s', value: { type: 'seconds', seconds: 30 } },
 ];
 
@@ -47,19 +47,15 @@ function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
   return false;
 }
 
-function durationLabel(duration: CountdownDuration): string {
-  return duration.type === 'seconds'
-    ? `${duration.seconds}s`
-    : `${duration.bars} bar${duration.bars === 1 ? '' : 's'}`;
-}
-
+// Header-less count-in panel body. The controls drawer chip is the trigger, so
+// this no longer manages its own collapse — it renders the enable toggle plus
+// the Mode / Length / Repeat / BPM fields inline.
 export function CountdownSettings({
   config,
   onConfigChange,
   style,
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
-  const [expanded, setExpanded] = useState(false);
   const [bpmText, setBpmText] = useState(String(config.bpm));
   const [bpmValid, setBpmValid] = useState(true);
 
@@ -97,220 +93,130 @@ export function CountdownSettings({
   };
 
   const showBpm = config.mode === 'metronome';
-  const summary = `${durationLabel(config.duration)} · ${
-    config.mode === 'metronome' ? 'Metronome' : 'Silent'
-  } · ${config.repeat === 'everyLoop' ? 'Every loop' : 'Once'}`;
 
   return (
-    <View
-      style={[
-        styles.container,
-        {
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
-        },
-        style,
-      ]}
-    >
-      <View style={styles.headerRow}>
-        <AccessiblePressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            expanded ? 'Collapse count-in settings' : 'Expand count-in settings'
-          }
-          accessibilityState={{ expanded }}
-          onPress={() => setExpanded((v) => !v)}
-          style={styles.headerLabel}
+    <View style={[styles.container, style]}>
+      <View style={styles.enableRow}>
+        <Text
+          style={[theme.typography.body, { color: theme.colors.textPrimary }]}
         >
-          <Ionicons
-            name="timer-outline"
-            size={18}
-            color={theme.colors.accent}
-          />
-          <Text
-            style={[theme.typography.body, { color: theme.colors.textPrimary }]}
-          >
-            Count-in
-          </Text>
-          {config.enabled && (
-            <Text
-              style={[
-                theme.typography.bodySmall,
-                styles.summary,
-                { color: theme.colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              {summary}
-            </Text>
-          )}
-        </AccessiblePressable>
-
-        <View style={styles.headerActions}>
-          <AccessiblePressable
-            accessibilityRole="switch"
-            accessibilityLabel={`Count-in ${config.enabled ? 'on' : 'off'}`}
-            accessibilityState={{ checked: config.enabled }}
-            onPress={toggleEnabled}
+          Count-in
+        </Text>
+        <AccessiblePressable
+          accessibilityRole="switch"
+          accessibilityLabel={`Count-in ${config.enabled ? 'on' : 'off'}`}
+          accessibilityState={{ checked: config.enabled }}
+          onPress={toggleEnabled}
+          style={[
+            styles.toggle,
+            {
+              backgroundColor: config.enabled
+                ? theme.colors.accent
+                : theme.colors.background,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <View
             style={[
-              styles.toggle,
+              styles.toggleThumb,
               {
                 backgroundColor: config.enabled
-                  ? theme.colors.accent
-                  : theme.colors.background,
-                borderColor: theme.colors.border,
+                  ? theme.colors.accentText
+                  : theme.colors.textSecondary,
+                transform: [{ translateX: config.enabled ? 20 : 0 }],
               },
             ]}
-          >
-            <View
-              style={[
-                styles.toggleThumb,
-                {
-                  backgroundColor: config.enabled
-                    ? theme.colors.accentText
-                    : theme.colors.textSecondary,
-                  transform: [{ translateX: config.enabled ? 20 : 0 }],
-                },
-              ]}
-            />
-          </AccessiblePressable>
-          <AccessiblePressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              expanded
-                ? 'Collapse count-in settings'
-                : 'Expand count-in settings'
-            }
-            onPress={() => setExpanded((v) => !v)}
-            style={styles.chevron}
-          >
-            <Ionicons
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color={theme.colors.textSecondary}
-            />
-          </AccessiblePressable>
-        </View>
+          />
+        </AccessiblePressable>
       </View>
 
-      {expanded && (
-        <View style={styles.body}>
-          <View style={styles.field}>
-            <Text style={[theme.typography.bodySmall, styles.label]}>Mode</Text>
-            <ChipGroup
-              options={MODE_OPTIONS}
-              value={config.mode}
-              onChange={(mode) => onConfigChange({ ...config, mode })}
-              accessibilityLabelPrefix="Mode"
-            />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={[theme.typography.bodySmall, styles.label]}>
-              Length
-            </Text>
-            <ChipGroup
-              options={DURATION_OPTIONS}
-              value={config.duration}
-              onChange={(duration) => onConfigChange({ ...config, duration })}
-              accessibilityLabelPrefix="Length"
-              isEqual={durationEqual}
-            />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={[theme.typography.bodySmall, styles.label]}>
-              Repeat
-            </Text>
-            <ChipGroup
-              options={REPEAT_OPTIONS}
-              value={config.repeat}
-              onChange={(repeat) => onConfigChange({ ...config, repeat })}
-              accessibilityLabelPrefix="Count in"
-            />
-          </View>
-
-          {showBpm && (
-            <View style={styles.field}>
-              <Text style={[theme.typography.bodySmall, styles.label]}>
-                BPM
-              </Text>
-              <View style={styles.bpmRow}>
-                <TextInput
-                  accessibilityLabel="BPM"
-                  keyboardType="number-pad"
-                  value={bpmText}
-                  onChangeText={handleBpmChange}
-                  onBlur={handleBpmBlur}
-                  maxLength={3}
-                  style={[
-                    styles.bpmInput,
-                    {
-                      color: theme.colors.textPrimary,
-                      backgroundColor: theme.colors.background,
-                      borderColor: bpmValid
-                        ? theme.colors.border
-                        : theme.colors.error,
-                    },
-                  ]}
-                />
-                <Text
-                  style={[
-                    theme.typography.caption,
-                    {
-                      color: bpmValid
-                        ? theme.colors.textSecondary
-                        : theme.colors.error,
-                    },
-                  ]}
-                >
-                  1–300
-                </Text>
-              </View>
-            </View>
-          )}
+      <View style={styles.body}>
+        <View style={styles.field}>
+          <Text style={[theme.typography.bodySmall, styles.label]}>Mode</Text>
+          <ChipGroup
+            options={MODE_OPTIONS}
+            value={config.mode}
+            onChange={(mode) => onConfigChange({ ...config, mode })}
+            accessibilityLabelPrefix="Mode"
+          />
         </View>
-      )}
+
+        <View style={styles.field}>
+          <Text style={[theme.typography.bodySmall, styles.label]}>Length</Text>
+          <ChipGroup
+            options={DURATION_OPTIONS}
+            value={config.duration}
+            onChange={(duration) => onConfigChange({ ...config, duration })}
+            accessibilityLabelPrefix="Length"
+            isEqual={durationEqual}
+          />
+        </View>
+
+        <View style={styles.field}>
+          <Text style={[theme.typography.bodySmall, styles.label]}>Repeat</Text>
+          <ChipGroup
+            options={REPEAT_OPTIONS}
+            value={config.repeat}
+            onChange={(repeat) => onConfigChange({ ...config, repeat })}
+            accessibilityLabelPrefix="Count in"
+          />
+        </View>
+
+        {showBpm && (
+          <View style={styles.field}>
+            <Text style={[theme.typography.bodySmall, styles.label]}>BPM</Text>
+            <View style={styles.bpmRow}>
+              <TextInput
+                accessibilityLabel="BPM"
+                keyboardType="number-pad"
+                value={bpmText}
+                onChangeText={handleBpmChange}
+                onBlur={handleBpmBlur}
+                maxLength={3}
+                style={[
+                  styles.bpmInput,
+                  {
+                    color: theme.colors.textPrimary,
+                    backgroundColor: theme.colors.background,
+                    borderColor: bpmValid
+                      ? theme.colors.border
+                      : theme.colors.error,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  theme.typography.caption,
+                  {
+                    color: bpmValid
+                      ? theme.colors.textSecondary
+                      : theme.colors.error,
+                  },
+                ]}
+              >
+                1–300
+              </Text>
+            </View>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
   },
-  headerRow: {
+  enableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
-  },
-  headerLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    flex: 1,
-  },
-  summary: {
-    flexShrink: 1,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  chevron: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
+    minHeight: 44,
   },
   body: {
     gap: spacing.sm,
-    paddingBottom: spacing.md,
-    paddingTop: spacing.xs,
   },
   field: {
     flexDirection: 'row',

@@ -6,7 +6,7 @@ const SKIP_SETTING_KEY = 'playback.skipSeconds';
 const DEFAULT_SKIP_SECONDS = 5;
 
 /** Selectable skip amounts (seconds) for the transport skip buttons. */
-export const SKIP_PRESETS = [1, 2, 5, 10] as const;
+export const SKIP_PRESETS = [1, 3, 5, 10, 15, 30] as const;
 
 function sanitize(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return DEFAULT_SKIP_SECONDS;
