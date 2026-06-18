@@ -1217,5 +1217,36 @@ describe('audioEngine', () => {
       expect(mockSeekTo).toHaveBeenCalledWith(5);
       expect(mockPause).not.toHaveBeenCalled();
     });
+
+    it('clears the handler on unload so it cannot leak into the next track', async () => {
+      const {
+        loadTrack,
+        unloadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopRestartHandler,
+      } = require('../audioEngine');
+
+      // First track arms a per-loop count-in handler.
+      await loadTrack('file:///first.mp3');
+      statusCallback?.(makeLoadedStatus());
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+
+      // Unload, then load a fresh track that never registers a handler.
+      await unloadTrack();
+      await loadTrack('file:///second.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      mockPause.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+
+      // The stale handler must not fire; the loop rewinds seamlessly instead.
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPause).not.toHaveBeenCalled();
+    });
   });
 });

@@ -350,6 +350,10 @@ export async function unloadTrack(): Promise<void> {
   markerA = null;
   markerB = null;
   loopEnabled = true;
+  // Per-loop count-in is a per-session concern: drop any handler so it can't
+  // leak into the next track and pause the loop for a track that never armed
+  // one. The player re-registers it from the count-in config when needed.
+  onLoopRestart = null;
   currentState = idleState();
   notify(currentState);
 }
