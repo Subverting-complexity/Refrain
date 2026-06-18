@@ -53,7 +53,7 @@ export default function PlayerScreen() {
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,
-  } = useAudioPlayer(uri ?? null);
+  } = useAudioPlayer(uri ?? null, trackId ?? null);
 
   const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
 

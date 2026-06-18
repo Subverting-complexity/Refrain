@@ -46,6 +46,21 @@ jest.mock('../settingsStore', () => ({
   setNumber: (key: string, value: number) => mockSetNumber(key, value),
 }));
 
+interface ActiveMarkersShape {
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: boolean;
+}
+
+const mockGetActiveMarkers = jest.fn<ActiveMarkersShape | null, [string]>();
+const mockSetActiveMarkers = jest.fn<void, [string, ActiveMarkersShape]>();
+
+jest.mock('../markerStore', () => ({
+  getActiveMarkers: (trackId: string) => mockGetActiveMarkers(trackId),
+  setActiveMarkers: (trackId: string, markers: ActiveMarkersShape) =>
+    mockSetActiveMarkers(trackId, markers),
+}));
+
 // expo-audio reports time in seconds; durations/positions below are in seconds.
 function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
   return {
@@ -68,6 +83,8 @@ beforeEach(() => {
   mockSeekTo.mockResolvedValue(undefined);
   // Default: no persisted volume, so the engine uses its fallback.
   mockGetNumber.mockImplementation((_key, fallback) => fallback);
+  // Default: no saved markers, so loads start with empty markers.
+  mockGetActiveMarkers.mockReturnValue(null);
 });
 
 describe('audioEngine', () => {
@@ -1544,6 +1561,205 @@ describe('audioEngine', () => {
       updateMonitor(50000);
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('marker persistence', () => {
+    // Must match MARKER_SAVE_DEBOUNCE_MS in audioEngine.ts.
+    const SAVE_DEBOUNCE_MS = 300;
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    });
+
+    it('persists the marker set once the debounce window elapses', async () => {
+      const { loadTrack, setMarkerA, setMarkerB } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+
+      // Nothing written until the debounce window passes.
+      expect(mockSetActiveMarkers).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+
+      expect(mockSetActiveMarkers).toHaveBeenCalledTimes(1);
+      expect(mockSetActiveMarkers).toHaveBeenLastCalledWith('track-1', {
+        markerA: 5000,
+        markerB: 15000,
+        loopEnabled: true,
+      });
+    });
+
+    it('persists a loop-enabled toggle for the track', async () => {
+      const { loadTrack, setLoopEnabled } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus());
+      setLoopEnabled(false);
+
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+
+      expect(mockSetActiveMarkers).toHaveBeenLastCalledWith(
+        'track-1',
+        expect.objectContaining({ loopEnabled: false }),
+      );
+    });
+
+    it('coalesces a burst of changes into one write with the final value', async () => {
+      const { loadTrack, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus());
+
+      // Three changes inside the window; each resets the debounce timer.
+      setMarkerA(1000);
+      jest.advanceTimersByTime(100);
+      setMarkerA(2000);
+      jest.advanceTimersByTime(100);
+      setMarkerA(3000);
+
+      expect(mockSetActiveMarkers).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+
+      // The final value wins; the debounce never drops it.
+      expect(mockSetActiveMarkers).toHaveBeenCalledTimes(1);
+      expect(mockSetActiveMarkers).toHaveBeenLastCalledWith(
+        'track-1',
+        expect.objectContaining({ markerA: 3000 }),
+      );
+    });
+
+    it('does not persist when the track is loaded without an id', async () => {
+      const { loadTrack, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+
+      expect(mockSetActiveMarkers).not.toHaveBeenCalled();
+    });
+
+    it('flushes a pending marker save when the track unloads', async () => {
+      const { loadTrack, setMarkerA, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(8000);
+      // Navigate away before the debounce fires.
+      await unloadTrack();
+
+      expect(mockSetActiveMarkers).toHaveBeenCalledTimes(1);
+      expect(mockSetActiveMarkers).toHaveBeenLastCalledWith('track-1', {
+        markerA: 8000,
+        markerB: null,
+        loopEnabled: true,
+      });
+    });
+
+    it('does not persist the empty-marker reset performed on unload', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        unloadTrack,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      setMarkerB(15000);
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS); // committed
+      mockSetActiveMarkers.mockClear();
+
+      await unloadTrack();
+
+      // No change was pending, so the reset to empty markers is not written —
+      // the saved set survives.
+      expect(mockSetActiveMarkers).not.toHaveBeenCalled();
+    });
+
+    it('restores saved markers on load, overriding the empty defaults', async () => {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: true,
+      });
+      const { loadTrack, getState } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+
+      expect(mockGetActiveMarkers).toHaveBeenCalledWith('track-1');
+      const state = getState();
+      expect(state.markerA).toBe(2000);
+      expect(state.markerB).toBe(8000);
+    });
+
+    it('leaves markers empty when the track has no saved set', async () => {
+      mockGetActiveMarkers.mockReturnValue(null);
+      const { loadTrack, getState } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+
+      const state = getState();
+      expect(state.markerA).toBeNull();
+      expect(state.markerB).toBeNull();
+    });
+
+    it('applies a restored loopEnabled that differs from the default', async () => {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: false,
+      });
+      const { loadTrack, getState } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+
+      // The post-load default is true; the saved false must win.
+      expect(getState().loopEnabled).toBe(false);
+    });
+
+    it('notifies subscribers with the restored markers', async () => {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: true,
+      });
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+
+      await loadTrack('file:///test.mp3', 'track-1');
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ markerA: 2000, markerB: 8000 }),
+      );
+    });
+
+    it('does not re-persist markers that were just restored', async () => {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: false,
+      });
+      const { loadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      jest.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+
+      expect(mockSetActiveMarkers).not.toHaveBeenCalled();
     });
   });
 });

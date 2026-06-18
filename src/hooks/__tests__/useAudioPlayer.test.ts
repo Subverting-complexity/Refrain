@@ -15,7 +15,7 @@ const IDLE_STATE: PlaybackState = {
 };
 
 let subscriber: ((state: PlaybackState) => void) | null = null;
-const mockLoadTrack = jest.fn<Promise<void>, [string]>();
+const mockLoadTrack = jest.fn<Promise<void>, [string, string | undefined]>();
 const mockUnloadTrack = jest.fn<Promise<void>, []>();
 const mockSetVolume = jest.fn<void, [number]>();
 const mockSetMarkerB = jest.fn<boolean, [number]>();
@@ -30,7 +30,7 @@ jest.mock('../../services/audioEngine', () => ({
       subscriber = null;
     };
   },
-  loadTrack: (uri: string) => mockLoadTrack(uri),
+  loadTrack: (uri: string, trackId?: string) => mockLoadTrack(uri, trackId),
   unloadTrack: () => mockUnloadTrack(),
   play: jest.fn(),
   pause: jest.fn(),
@@ -46,15 +46,24 @@ jest.mock('../../services/audioEngine', () => ({
 
 let lastResult: ReturnType<typeof useAudioPlayer>;
 
-function TestComponent({ uri }: { uri: string | null }) {
-  lastResult = useAudioPlayer(uri);
+function TestComponent({
+  uri,
+  trackId,
+}: {
+  uri: string | null;
+  trackId?: string | null;
+}) {
+  lastResult = useAudioPlayer(uri, trackId);
   return null;
 }
 
-function renderHook(uri: string | null): ReactTestRenderer {
+function renderHook(
+  uri: string | null,
+  trackId?: string | null,
+): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(createElement(TestComponent, { uri }));
+    tree = create(createElement(TestComponent, { uri, trackId }));
   });
   return tree;
 }
@@ -77,7 +86,13 @@ describe('useAudioPlayer', () => {
   it('loads the track when given a uri', () => {
     renderHook('file:///test.mp3');
 
-    expect(mockLoadTrack).toHaveBeenCalledWith('file:///test.mp3');
+    expect(mockLoadTrack).toHaveBeenCalledWith('file:///test.mp3', undefined);
+  });
+
+  it('forwards the track id to the engine so markers can be restored', () => {
+    renderHook('file:///test.mp3', 'track-42');
+
+    expect(mockLoadTrack).toHaveBeenCalledWith('file:///test.mp3', 'track-42');
   });
 
   it('propagates the error status and lastError from the engine', () => {
@@ -104,7 +119,7 @@ describe('useAudioPlayer', () => {
       await Promise.resolve();
     });
 
-    expect(mockLoadTrack).toHaveBeenCalledWith('file:///bad.mp3');
+    expect(mockLoadTrack).toHaveBeenCalledWith('file:///bad.mp3', undefined);
   });
 
   it('unloads the track on unmount', () => {

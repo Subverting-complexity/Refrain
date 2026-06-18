@@ -7,14 +7,21 @@ import {
 import type { EventSubscription } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
+import * as markerStore from './markerStore';
 import * as settingsStore from './settingsStore';
 import * as webAudioGain from './webAudioGain';
-import { PlaybackState, PlaybackStatus } from '../types';
+import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
 
 export type PlaybackListener = (state: PlaybackState) => void;
 
 const VOLUME_SETTING_KEY = 'playback.volume';
 const DEFAULT_VOLUME = 1;
+
+// Trailing-edge debounce for per-track marker writes. A marker drag fires
+// changes at the ~20/sec drag-throttle cadence; coalescing them into one write
+// this far after the last change avoids a write storm while still capturing the
+// final value (the timer always writes the latest markers, never a stale one).
+const MARKER_SAVE_DEBOUNCE_MS = 300;
 
 // expo-audio reports time in seconds; the engine's public contract is in
 // milliseconds (markers, positionMs/durationMs), so convert at the boundary.
@@ -46,6 +53,12 @@ let volume = DEFAULT_VOLUME;
 // (iOS-Safari true attenuation). When false, volume goes through the
 // AudioPlayer's `volume` property. Always false on native platforms.
 let webGainActive = false;
+// The id of the loaded track, used to key its persisted marker set. Null when
+// no track is loaded or the loader was called without one (markers then live
+// only in memory, as before). Set by loadTrack, cleared by unloadTrack.
+let currentTrackId: string | null = null;
+// Pending debounced marker-save timer, or null when no write is queued.
+let markerSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 // --- Rolling monitor (marker-drag preview) ----------------------------------
 // A transient preview mode: while a marker is being dragged, a short window
@@ -210,9 +223,12 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   notify(currentState);
 }
 
-export async function loadTrack(uri: string): Promise<void> {
+export async function loadTrack(uri: string, trackId?: string): Promise<void> {
   try {
     await unloadTrack();
+    // Associate this load with its track so marker changes persist and the
+    // saved set can be restored below. Without an id, markers stay in-memory.
+    currentTrackId = trackId ?? null;
 
     currentState = {
       status: 'loading',
@@ -255,6 +271,12 @@ export async function loadTrack(uri: string): Promise<void> {
         webAudioGain.detach();
         webGainActive = false;
       }
+    }
+
+    // Restore saved markers last, after the load's reset so they aren't
+    // clobbered. Silent and best-effort; no-op without a track id or saved row.
+    if (currentTrackId != null) {
+      await restoreActiveMarkers(currentTrackId);
     }
   } catch (err) {
     currentState = {
@@ -475,6 +497,11 @@ export function setLoopRestartHandler(handler: (() => void) | null): void {
 }
 
 export async function unloadTrack(): Promise<void> {
+  // Persist any change still inside the debounce window for the outgoing track
+  // before its id and markers are cleared, so a quick navigate-away doesn't
+  // drop the last edit. Must run before currentTrackId is nulled below.
+  flushMarkerSave();
+  currentTrackId = null;
   if (webGainActive) {
     webAudioGain.detach();
     webGainActive = false;
@@ -560,6 +587,77 @@ export function loadPersistedVolume(): void {
   notify(currentState);
 }
 
+/**
+ * Write the current marker set for the loaded track to the store. Best-effort
+ * and platform-agnostic: the native store is synchronous and the web store
+ * returns a promise, so the result is wrapped in `Promise.resolve` and its
+ * rejection swallowed — a failed persist must never surface as a playback
+ * error. No-op when no track id is associated with the load.
+ */
+function writeActiveMarkers(): void {
+  const trackId = currentTrackId;
+  if (trackId == null) return;
+  const snapshot: ActiveMarkers = { markerA, markerB, loopEnabled };
+  try {
+    void Promise.resolve(markerStore.setActiveMarkers(trackId, snapshot)).catch(
+      () => {
+        // Persistence is best-effort; swallow async (web) write failures.
+      },
+    );
+  } catch {
+    // Swallow synchronous (native) write failures too.
+  }
+}
+
+/**
+ * Queue a debounced persist of the active markers. Each marker change resets
+ * the timer, so a burst of changes (e.g. a drag) collapses into a single write
+ * carrying the final value. No-op when the track has no id.
+ */
+function scheduleMarkerSave(): void {
+  if (currentTrackId == null) return;
+  if (markerSaveTimer) clearTimeout(markerSaveTimer);
+  markerSaveTimer = setTimeout(() => {
+    markerSaveTimer = null;
+    writeActiveMarkers();
+  }, MARKER_SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * Flush any queued marker save immediately. Called before the loaded track is
+ * torn down so a change made within the debounce window is persisted for the
+ * outgoing track rather than lost (or clobbered by the unload reset).
+ */
+function flushMarkerSave(): void {
+  if (markerSaveTimer) {
+    clearTimeout(markerSaveTimer);
+    markerSaveTimer = null;
+    writeActiveMarkers();
+  }
+}
+
+/**
+ * Restore the persisted markers for the loaded track, overriding the
+ * post-load defaults (empty markers, loop armed). Silent: it mutates the
+ * engine's marker state directly — not via the public setters — so it neither
+ * re-triggers a save nor surfaces UI churn beyond the single state notify.
+ * A track with no saved row is left empty (current behaviour). Best-effort:
+ * a read failure leaves the defaults in place.
+ */
+async function restoreActiveMarkers(trackId: string): Promise<void> {
+  try {
+    const saved = await Promise.resolve(markerStore.getActiveMarkers(trackId));
+    if (!saved) return;
+    markerA = saved.markerA;
+    markerB = saved.markerB;
+    loopEnabled = saved.loopEnabled;
+    currentState = { ...currentState, markerA, markerB, loopEnabled };
+    notify(currentState);
+  } catch {
+    // Best-effort: a failed restore leaves the track with empty markers.
+  }
+}
+
 export function setMarkerA(positionMs: number): void {
   markerA = positionMs;
   if (markerB != null && positionMs >= markerB) {
@@ -567,6 +665,7 @@ export function setMarkerA(positionMs: number): void {
   }
   currentState = { ...currentState, markerA, markerB };
   notify(currentState);
+  scheduleMarkerSave();
 }
 
 /**
@@ -580,6 +679,7 @@ export function setMarkerB(positionMs: number): boolean {
   markerB = positionMs;
   currentState = { ...currentState, markerB };
   notify(currentState);
+  scheduleMarkerSave();
   return true;
 }
 
@@ -588,6 +688,7 @@ export function clearMarkers(): void {
   markerB = null;
   currentState = { ...currentState, markerA: null, markerB: null };
   notify(currentState);
+  scheduleMarkerSave();
 }
 
 /** Clear only the B (loop end) marker, leaving A in place so it can be
@@ -596,6 +697,7 @@ export function clearMarkerB(): void {
   markerB = null;
   currentState = { ...currentState, markerB: null };
   notify(currentState);
+  scheduleMarkerSave();
 }
 
 /**
@@ -607,6 +709,7 @@ export function setLoopEnabled(enabled: boolean): void {
   loopEnabled = enabled;
   currentState = { ...currentState, loopEnabled };
   notify(currentState);
+  scheduleMarkerSave();
 }
 
 export function subscribe(cb: PlaybackListener): () => void {
