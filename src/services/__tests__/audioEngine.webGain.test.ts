@@ -45,6 +45,13 @@ jest.mock('../settingsStore', () => ({
   setNumber: jest.fn(),
 }));
 
+// Stub the marker store so requiring the engine doesn't pull in the
+// SQLite/IndexedDB-backed database module these gain-path tests never exercise.
+jest.mock('../markerStore', () => ({
+  getActiveMarkers: jest.fn(() => null),
+  setActiveMarkers: jest.fn(),
+}));
+
 const mockAttach = jest.fn<boolean, [HTMLMediaElement]>();
 const mockSetGain = jest.fn<void, [number]>();
 const mockResume = jest.fn<void, []>();

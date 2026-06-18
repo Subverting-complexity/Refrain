@@ -13,7 +13,10 @@ const IDLE_STATE: PlaybackState = {
   volume: 1,
 };
 
-export function useAudioPlayer(trackUri: string | null) {
+export function useAudioPlayer(
+  trackUri: string | null,
+  trackId?: string | null,
+) {
   const [state, setState] = useState<PlaybackState>(IDLE_STATE);
 
   useEffect(() => {
@@ -32,11 +35,13 @@ export function useAudioPlayer(trackUri: string | null) {
     // loadTrack handles its own errors internally and reports them via the
     // 'error' status; the .catch() is defence-in-depth so a rejection here
     // can never become an unhandled promise rejection.
-    void audioEngine.loadTrack(trackUri).catch(() => undefined);
+    void audioEngine
+      .loadTrack(trackUri, trackId ?? undefined)
+      .catch(() => undefined);
     return () => {
       void audioEngine.unloadTrack().catch(() => undefined);
     };
-  }, [trackUri]);
+  }, [trackUri, trackId]);
 
   const play = useCallback(() => audioEngine.play(), []);
   const pause = useCallback(() => audioEngine.pause(), []);
