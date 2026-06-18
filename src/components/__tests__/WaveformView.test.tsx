@@ -853,6 +853,116 @@ describe('WaveformView', () => {
     });
   });
 
+  describe('snippet preview wiring', () => {
+    let nowSpy: jest.SpyInstance<number, []>;
+
+    beforeEach(() => {
+      nowSpy = jest.spyOn(Date, 'now');
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
+
+    it('starts the preview and follows the marker while dragging it', () => {
+      const onPreviewStart = jest.fn();
+      const onPreviewMove = jest.fn();
+      const onPreviewEnd = jest.fn();
+      const onMarkerAChange = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onPreviewStart,
+        onPreviewMove,
+        onPreviewEnd,
+      });
+      layout(tree);
+
+      // Grab the A handle (x ≈ 150 → 5000ms): the preview starts there and the
+      // follow fires with the same value at the marker-callback cadence.
+      nowSpy.mockReturnValue(1000);
+      begin(150);
+      expect(onPreviewStart).toHaveBeenCalledWith(5000);
+      expect(onPreviewMove).toHaveBeenCalledWith(5000);
+
+      // A move past the throttle window follows the marker to its new position.
+      nowSpy.mockReturnValue(1100);
+      move(180);
+      expect(onPreviewMove).toHaveBeenCalledWith(6087);
+      expect(onMarkerAChange).toHaveBeenCalledWith(6087);
+
+      // Release stops the preview.
+      nowSpy.mockReturnValue(1120);
+      finalize();
+      expect(onPreviewEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it('previews a tap-to-place placement (start then end)', () => {
+      const onPreviewStart = jest.fn();
+      const onPreviewEnd = jest.fn();
+      const onMarkerAChange = jest.fn();
+      const tree = renderWaveform({
+        durationMs: 10000,
+        placeMode: 'A',
+        onMarkerAChange,
+        onPreviewStart,
+        onPreviewEnd,
+      });
+      layout(tree);
+
+      begin(150);
+      finalize();
+
+      expect(onPreviewStart).toHaveBeenCalledWith(5000);
+      expect(onPreviewEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it('never invokes the preview during a plain seek drag', () => {
+      const onPreviewStart = jest.fn();
+      const onPreviewMove = jest.fn();
+      const onPreviewEnd = jest.fn();
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onSeek,
+        onPreviewStart,
+        onPreviewMove,
+        onPreviewEnd,
+      });
+      layout(tree);
+
+      // x=30 is far from the marker → a seek, not a marker grab.
+      nowSpy.mockReturnValue(1000);
+      begin(30);
+      nowSpy.mockReturnValue(1100);
+      move(60);
+      finalize();
+
+      expect(onSeek).toHaveBeenCalled();
+      expect(onPreviewStart).not.toHaveBeenCalled();
+      expect(onPreviewMove).not.toHaveBeenCalled();
+      expect(onPreviewEnd).not.toHaveBeenCalled();
+    });
+
+    it('drags the marker normally when no preview callbacks are wired', () => {
+      const onMarkerAChange = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        onMarkerAChange,
+      });
+      layout(tree);
+
+      begin(150);
+      finalize();
+
+      // No preview props → marker still moves, nothing throws.
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+    });
+  });
+
   it('accepts style prop override', () => {
     const tree = renderWaveform({ style: { marginTop: 20 } });
 

@@ -96,3 +96,36 @@ describe('setSetting / setNumber', () => {
     await Promise.resolve();
   });
 });
+
+describe('getBoolean / setBoolean', () => {
+  it('round-trips a boolean through the cache and store', async () => {
+    const settings = await loadModule();
+
+    settings.setBoolean('flag', false);
+    // Read reflects the write immediately (synchronous cache).
+    expect(settings.getBoolean('flag', true)).toBe(false);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockPutStoredSetting).toHaveBeenCalledWith('flag', 'false');
+  });
+
+  it('hydrates a stored boolean for synchronous reads', async () => {
+    mockGetAllStoredSettings.mockResolvedValue([
+      { key: 'flag', value: 'true' },
+    ]);
+    const settings = await loadModule();
+
+    expect(settings.getBoolean('flag', false)).toBe(true);
+  });
+
+  it('returns the fallback for an absent or non-boolean value', async () => {
+    mockGetAllStoredSettings.mockResolvedValue([
+      { key: 'flag', value: 'nope' },
+    ]);
+    const settings = await loadModule();
+
+    expect(settings.getBoolean('missing', true)).toBe(true);
+    expect(settings.getBoolean('flag', false)).toBe(false);
+  });
+});

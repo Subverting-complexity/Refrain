@@ -10,6 +10,7 @@ import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SkipControls } from '@/src/components/SkipControls';
+import { SnippetPreviewSettings } from '@/src/components/SnippetPreviewSettings';
 import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
 import { VolumeControl } from '@/src/components/VolumeControl';
@@ -17,6 +18,7 @@ import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
+import { useSnippetPreview } from '@/src/hooks/useSnippetPreview';
 import { useToast } from '@/src/hooks/useToast';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -53,9 +55,33 @@ export default function PlayerScreen() {
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,
+    startMonitor,
+    updateMonitor,
+    stopMonitor,
   } = useAudioPlayer(uri ?? null, trackId ?? null);
 
   const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
+  const { snippetPreviewEnabled, setSnippetPreviewEnabled } =
+    useSnippetPreview();
+
+  // Rolling-monitor preview wiring for marker drags. Built once and passed to
+  // the waveform only while the preference is on, so with it off the monitor is
+  // never invoked and dragging behaves exactly as before.
+  const handlePreviewStart = useCallback(
+    (centerMs: number) => {
+      void startMonitor(centerMs);
+    },
+    [startMonitor],
+  );
+  const handlePreviewMove = useCallback(
+    (centerMs: number) => {
+      updateMonitor(centerMs);
+    },
+    [updateMonitor],
+  );
+  const handlePreviewEnd = useCallback(() => {
+    void stopMonitor();
+  }, [stopMonitor]);
 
   // Tap-to-place arm state. Driven by the A/B buttons; the waveform reads it to
   // decide whether a tap drops a marker or just seeks.
@@ -189,6 +215,15 @@ export default function PlayerScreen() {
               onPlaceComplete={handlePlaceComplete}
               onMarkerAChange={setMarkerA}
               onMarkerBChange={handleSetMarkerB}
+              onPreviewStart={
+                snippetPreviewEnabled ? handlePreviewStart : undefined
+              }
+              onPreviewMove={
+                snippetPreviewEnabled ? handlePreviewMove : undefined
+              }
+              onPreviewEnd={
+                snippetPreviewEnabled ? handlePreviewEnd : undefined
+              }
             />
           ) : (
             <View
@@ -250,6 +285,12 @@ export default function PlayerScreen() {
             config={countdownConfig}
             onConfigChange={setCountdownConfig}
             style={styles.countdownSettings}
+          />
+
+          <SnippetPreviewSettings
+            enabled={snippetPreviewEnabled}
+            onChange={setSnippetPreviewEnabled}
+            style={styles.snippetPreview}
           />
 
           <MarkerControls
@@ -355,6 +396,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   countdownSettings: {
+    marginBottom: spacing.lg,
+  },
+  snippetPreview: {
     marginBottom: spacing.lg,
   },
   seekBar: {
