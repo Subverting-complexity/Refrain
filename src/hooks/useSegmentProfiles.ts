@@ -5,16 +5,29 @@ import {
   listProfiles,
   renameProfile,
   saveProfile,
+  updateProfile,
 } from '../services/markerStore';
 import { SegmentProfile, SegmentProfileInput } from '../types';
+
+/** The region fields overwritten when saving edited markers back. */
+export type SegmentRegion = Pick<
+  SegmentProfile,
+  'markerA' | 'markerB' | 'loopEnabled'
+>;
 
 export interface UseSegmentProfiles {
   /** The current track's saved profiles, in stable (oldest-first) order. */
   profiles: SegmentProfile[];
   /** Re-read the profile list from the store. */
   refresh: () => void;
-  /** Persist a new profile for the current track, then refresh. */
-  save: (input: SegmentProfileInput) => void;
+  /**
+   * Persist a new profile for the current track, then refresh. Resolves with
+   * the stored record so the caller can adopt it as the loaded segment, or
+   * `null` when there is no track or the write fails.
+   */
+  save: (input: SegmentProfileInput) => Promise<SegmentProfile | null>;
+  /** Overwrite a profile's A/B region and loop flag by id, then refresh. */
+  update: (profileId: string, region: SegmentRegion) => void;
   /** Rename a profile by id, then refresh. */
   rename: (profileId: string, name: string) => void;
   /** Delete a profile by id, then refresh. */
@@ -63,17 +76,30 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
   }, [refresh]);
 
   const save = useCallback(
-    (input: SegmentProfileInput) => {
-      if (!trackId) return;
+    async (input: SegmentProfileInput): Promise<SegmentProfile | null> => {
+      if (!trackId) return null;
       try {
-        void Promise.resolve(saveProfile(trackId, input))
+        const profile = await Promise.resolve(saveProfile(trackId, input));
+        refresh();
+        return profile;
+      } catch {
+        return null;
+      }
+    },
+    [trackId, refresh],
+  );
+
+  const update = useCallback(
+    (profileId: string, region: SegmentRegion) => {
+      try {
+        void Promise.resolve(updateProfile(profileId, region))
           .then(refresh)
           .catch(() => {});
       } catch {
         // best-effort
       }
     },
-    [trackId, refresh],
+    [refresh],
   );
 
   const rename = useCallback(
@@ -102,5 +128,5 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     [refresh],
   );
 
-  return { profiles, refresh, save, rename, remove };
+  return { profiles, refresh, save, update, rename, remove };
 }

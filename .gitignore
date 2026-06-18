@@ -27,6 +27,9 @@ graphify-out/.graphify_analysis.json
 # makes them dirty on essentially every run with nothing of value lost.
 graphify-out/manifest.json
 graphify-out/cache/stat-index.json
+# Per-file AST caches are keyed by absolute worktree paths, so they are
+# machine-/worktree-specific and rewritten on every run — never track new ones.
+graphify-out/cache/ast/
 
 # fallow — local analysis cache
 .fallow/

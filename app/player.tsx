@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
+import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
 import { SnippetPreviewSettings } from '@/src/components/SnippetPreviewSettings';
 import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
+import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useSegmentEditor } from '@/src/hooks/useSegmentEditor';
+import { useSegmentProfiles } from '@/src/hooks/useSegmentProfiles';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
 import { useSnippetPreview } from '@/src/hooks/useSnippetPreview';
 import { useToast } from '@/src/hooks/useToast';
@@ -24,8 +29,14 @@ import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { SegmentProfile } from '@/src/types';
+import { nextSegmentName } from '@/src/utils/nextSegmentName';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
+
+/** A pending action blocked by unsaved segment edits. */
+type SegmentGuard =
+  | { kind: 'load'; profile: SegmentProfile }
+  | { kind: 'leave'; proceed: () => void };
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
@@ -60,6 +71,21 @@ export default function PlayerScreen() {
     stopMonitor,
   } = useAudioPlayer(uri ?? null, trackId ?? null);
 
+  // Named-segment list + CRUD for this track, owned here so the player can show
+  // the loaded segment's name and suggest the next one. The sheet receives the
+  // list and the rename/remove actions as props.
+  const { profiles, save, update, rename, remove } = useSegmentProfiles(
+    trackId ?? null,
+  );
+  // Tracks which segment is loaded and whether its A/B region has been edited.
+  const { loadedId, isDirty, markLoaded, clearLoaded } = useSegmentEditor(
+    markerA,
+    markerB,
+  );
+  const loadedProfile = loadedId
+    ? (profiles.find((p) => p.id === loadedId) ?? null)
+    : null;
+
   const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
   const { snippetPreviewEnabled, setSnippetPreviewEnabled } =
     useSnippetPreview();
@@ -90,17 +116,35 @@ export default function PlayerScreen() {
   // Whether the segment-profile sheet is open. The sheet is mounted only while
   // open so its profile store is read on demand, not on every player render.
   const [profilesVisible, setProfilesVisible] = useState(false);
+  // Whether the player's Save dialog is open.
+  const [saveVisible, setSaveVisible] = useState(false);
+  // A load/leave action deferred behind the unsaved-edit guard, or null.
+  const [guard, setGuard] = useState<SegmentGuard | null>(null);
 
-  // Apply a saved profile to the engine. Set A before B so the A < B invariant
-  // holds (saved profiles always carry a valid region), then the loop flag.
-  // Each setter auto-persists the active markers (#117).
-  const handleLoadProfile = useCallback(
+  // Arm a saved profile on the engine: set A before B so the A < B invariant
+  // holds (saved profiles always carry a valid region), then the loop flag, and
+  // adopt it as the loaded segment. Each setter auto-persists the markers (#117).
+  const applyProfile = useCallback(
     (profile: SegmentProfile) => {
       if (profile.markerA != null) setMarkerA(profile.markerA);
       if (profile.markerB != null) setMarkerB(profile.markerB);
       setLoopEnabled(profile.loopEnabled);
+      markLoaded(profile);
     },
-    [setMarkerA, setMarkerB, setLoopEnabled],
+    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded],
+  );
+
+  // Loading from the sheet. If the loaded segment has unsaved marker edits,
+  // defer the load behind the guard; otherwise arm the new segment straight away.
+  const handleRequestLoad = useCallback(
+    (profile: SegmentProfile) => {
+      if (isDirty && loadedId) {
+        setGuard({ kind: 'load', profile });
+      } else {
+        applyProfile(profile);
+      }
+    },
+    [isDirty, loadedId, applyProfile],
   );
 
   const durationPersisted = useRef(false);
@@ -124,6 +168,86 @@ export default function PlayerScreen() {
 
   const { toast, showToast, hideToast } = useToast();
 
+  const canSaveRegion = markerA != null && markerB != null;
+
+  // Save dialog: overwrite the loaded segment with the live region, keeping it
+  // the loaded segment (snapshot moves to the current markers, so it is clean).
+  const handleOverride = useCallback(() => {
+    if (loadedId) {
+      update(loadedId, { markerA, markerB, loopEnabled });
+      markLoaded({ id: loadedId, markerA, markerB });
+    }
+    setSaveVisible(false);
+    showToast('Segment updated');
+  }, [loadedId, update, markerA, markerB, loopEnabled, markLoaded, showToast]);
+
+  // Save dialog: create a new segment, then adopt it as the loaded one.
+  const handleSaveNew = useCallback(
+    (name: string) => {
+      void save({ name, markerA, markerB, loopEnabled }).then((profile) => {
+        if (profile) markLoaded(profile);
+      });
+      setSaveVisible(false);
+      showToast('Segment saved');
+    },
+    [save, markerA, markerB, loopEnabled, markLoaded, showToast],
+  );
+
+  // Carry out a guarded action once the user resolves the unsaved-edit prompt.
+  const proceedGuard = useCallback(
+    (pending: SegmentGuard) => {
+      if (pending.kind === 'load') applyProfile(pending.profile);
+      else pending.proceed();
+    },
+    [applyProfile],
+  );
+
+  // Guard "Save": overwrite the loaded segment, then carry on.
+  const handleGuardSave = useCallback(() => {
+    if (loadedId) update(loadedId, { markerA, markerB, loopEnabled });
+    if (guard) proceedGuard(guard);
+    setGuard(null);
+  }, [loadedId, update, markerA, markerB, loopEnabled, guard, proceedGuard]);
+
+  // Guard "Discard": carry on without saving the named segment. Live per-track
+  // markers persist as today (#117); a load overwrites them as usual.
+  const handleGuardDiscard = useCallback(() => {
+    if (guard) proceedGuard(guard);
+    setGuard(null);
+  }, [guard, proceedGuard]);
+
+  const handleGuardCancel = useCallback(() => setGuard(null), []);
+
+  // Refs let the navigation listener read the latest dirty/loaded state without
+  // re-subscribing every render; the bypass flag lets a resolved guard navigate
+  // through without re-triggering itself.
+  const dirtyRef = useRef(isDirty);
+  const loadedIdRef = useRef(loadedId);
+  const bypassGuardRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = isDirty;
+    loadedIdRef.current = loadedId;
+  });
+
+  // Leaving the player with unsaved segment edits: intercept the back action
+  // and raise the same guard. Fires for in-app Stack back navigation.
+  const navigation = useNavigation();
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (bypassGuardRef.current) return;
+      if (!dirtyRef.current || !loadedIdRef.current) return;
+      event.preventDefault();
+      setGuard({
+        kind: 'leave',
+        proceed: () => {
+          bypassGuardRef.current = true;
+          navigation.dispatch(event.data.action);
+        },
+      });
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   // The B button rejects placements at or before A. Surface that instead of
   // failing silently: announce for screen readers and show a visible toast.
   const handleSetMarkerB = useCallback(
@@ -142,11 +266,14 @@ export default function PlayerScreen() {
   const handlePressA = useCallback(() => {
     if (markerA != null) {
       clearMarkers();
+      // Clearing the region by hand abandons the loaded-segment identity, so
+      // the unsaved-edit guard does not fire on an empty region.
+      clearLoaded();
       setPlaceMode('none');
     } else {
       setPlaceMode((m) => (m === 'A' ? 'none' : 'A'));
     }
-  }, [markerA, clearMarkers]);
+  }, [markerA, clearMarkers, clearLoaded]);
 
   // Pressing B: with B set, clear it and re-arm placing B; otherwise (A exists)
   // arm placing B. A no-op before A is set — the button is disabled then.
@@ -309,6 +436,42 @@ export default function PlayerScreen() {
             style={styles.markers}
           />
 
+          {trackId ? (
+            <View style={styles.segmentActions}>
+              <AccessiblePressable
+                accessibilityRole="button"
+                accessibilityLabel="Save segment"
+                accessibilityState={{ disabled: !canSaveRegion }}
+                accessibilityHint={
+                  canSaveRegion ? undefined : 'Set both loop markers first'
+                }
+                disabled={!canSaveRegion}
+                onPress={() => setSaveVisible(true)}
+                style={(state) => [
+                  styles.segmentsButton,
+                  {
+                    borderColor: theme.colors.accent,
+                    opacity: !canSaveRegion ? 0.4 : state.pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="save-outline"
+                  size={18}
+                  color={theme.colors.accent}
+                />
+                <Text
+                  style={[
+                    theme.typography.body,
+                    { color: theme.colors.accent },
+                  ]}
+                >
+                  Save segment
+                </Text>
+              </AccessiblePressable>
+            </View>
+          ) : null}
+
           <SnippetPreviewSettings
             enabled={snippetPreviewEnabled}
             onChange={setSnippetPreviewEnabled}
@@ -356,12 +519,30 @@ export default function PlayerScreen() {
 
       {profilesVisible && trackId ? (
         <SegmentProfileSheet
-          trackId={trackId}
-          markerA={markerA}
-          markerB={markerB}
-          loopEnabled={loopEnabled}
-          onLoadProfile={handleLoadProfile}
+          profiles={profiles}
+          onLoadProfile={handleRequestLoad}
+          onRename={rename}
+          onRemove={remove}
           onClose={() => setProfilesVisible(false)}
+        />
+      ) : null}
+
+      {saveVisible ? (
+        <SegmentSaveDialog
+          loadedName={isDirty && loadedProfile ? loadedProfile.name : null}
+          suggestedName={nextSegmentName(profiles)}
+          onOverride={handleOverride}
+          onSaveNew={handleSaveNew}
+          onCancel={() => setSaveVisible(false)}
+        />
+      ) : null}
+
+      {guard ? (
+        <UnsavedSegmentDialog
+          profileName={loadedProfile?.name ?? 'this segment'}
+          onSave={handleGuardSave}
+          onDiscard={handleGuardDiscard}
+          onCancel={handleGuardCancel}
         />
       ) : null}
     </SafeAreaView>
@@ -404,6 +585,21 @@ const styles = StyleSheet.create({
   },
   markers: {
     marginBottom: spacing.lg,
+  },
+  segmentActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  segmentsButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: spacing.sm,
   },
   errorBanner: {
     alignItems: 'center',

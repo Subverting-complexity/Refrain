@@ -89,6 +89,25 @@ export async function saveProfile(
   return profile;
 }
 
+/**
+ * Overwrites a profile's region (A/B markers and loop flag) by id, leaving its
+ * name and `createdAt` untouched. No-ops if the profile is gone. Used when the
+ * player saves edited markers back over the loaded segment.
+ */
+export async function updateProfile(
+  profileId: string,
+  region: Pick<SegmentProfile, 'markerA' | 'markerB' | 'loopEnabled'>,
+): Promise<void> {
+  const existing = await getStoredProfile(profileId);
+  if (!existing) return;
+  await putStoredProfile({
+    ...existing,
+    markerA: region.markerA,
+    markerB: region.markerB,
+    loopEnabled: region.loopEnabled,
+  });
+}
+
 /** Renames an existing profile by id. No-ops if the profile is gone. */
 export async function renameProfile(
   profileId: string,

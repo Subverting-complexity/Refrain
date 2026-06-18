@@ -7,21 +7,6 @@ import {
   SegmentProfileSheetProps,
 } from '../SegmentProfileSheet';
 
-const mockSave = jest.fn();
-const mockRename = jest.fn();
-const mockRemove = jest.fn();
-let mockProfiles: SegmentProfile[] = [];
-
-jest.mock('../../hooks/useSegmentProfiles', () => ({
-  useSegmentProfiles: () => ({
-    profiles: mockProfiles,
-    refresh: jest.fn(),
-    save: mockSave,
-    rename: mockRename,
-    remove: mockRemove,
-  }),
-}));
-
 jest.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
     theme: {
@@ -55,16 +40,17 @@ function profile(id: string, name: string): SegmentProfile {
   };
 }
 
+const PROFILES = [profile('p1', 'Segment 1'), profile('p2', 'Chorus')];
+
 function render(overrides: Partial<SegmentProfileSheetProps> = {}) {
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
       <SegmentProfileSheet
-        trackId="t1"
-        markerA={1000}
-        markerB={5000}
-        loopEnabled={true}
+        profiles={PROFILES}
         onLoadProfile={jest.fn()}
+        onRename={jest.fn()}
+        onRemove={jest.fn()}
         onClose={jest.fn()}
         {...overrides}
       />,
@@ -95,11 +81,6 @@ function findText(tree: ReactTestRenderer, text: string) {
   );
 }
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  mockProfiles = [profile('p1', 'Segment 1'), profile('p2', 'Chorus')];
-});
-
 describe('SegmentProfileSheet', () => {
   it('renders the saved profiles', () => {
     const tree = render();
@@ -108,9 +89,13 @@ describe('SegmentProfileSheet', () => {
   });
 
   it('shows an empty state when there are no profiles', () => {
-    mockProfiles = [];
-    const tree = render();
+    const tree = render({ profiles: [] });
     expect(findText(tree, 'No saved segments yet').length).toBe(1);
+  });
+
+  it('has no save control — saving lives in the player now', () => {
+    const tree = render();
+    expect(byLabel(tree, 'Save current segment')).toBeUndefined();
   });
 
   it('loads a profile and closes when a row is tapped', () => {
@@ -126,41 +111,9 @@ describe('SegmentProfileSheet', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('saves the current region under an edited name', () => {
-    const tree = render({ markerA: 2000, markerB: 8000, loopEnabled: false });
-
-    act(() => {
-      byLabel(tree, 'Save current segment').props.onPress();
-    });
-    // The name input is pre-filled with the next "Segment N".
-    expect(inputByLabel(tree, 'New segment name').props.value).toBe(
-      'Segment 2',
-    );
-
-    act(() => {
-      inputByLabel(tree, 'New segment name').props.onChangeText('Bridge');
-    });
-    act(() => {
-      byLabel(tree, 'Confirm save segment').props.onPress();
-    });
-
-    expect(mockSave).toHaveBeenCalledWith({
-      name: 'Bridge',
-      markerA: 2000,
-      markerB: 8000,
-      loopEnabled: false,
-    });
-  });
-
-  it('disables save when there is no valid A/B region', () => {
-    const tree = render({ markerA: 1000, markerB: null });
-    const button = byLabel(tree, 'Save current segment');
-    expect(button.props.accessibilityState).toEqual({ disabled: true });
-    expect(button.props.disabled).toBe(true);
-  });
-
   it('renames a profile', () => {
-    const tree = render();
+    const onRename = jest.fn();
+    const tree = render({ onRename });
 
     act(() => {
       byLabel(tree, 'Rename Chorus').props.onPress();
@@ -172,11 +125,12 @@ describe('SegmentProfileSheet', () => {
       byLabel(tree, 'Confirm rename').props.onPress();
     });
 
-    expect(mockRename).toHaveBeenCalledWith('p2', 'Chorus 2');
+    expect(onRename).toHaveBeenCalledWith('p2', 'Chorus 2');
   });
 
   it('deletes a profile after confirmation', () => {
-    const tree = render();
+    const onRemove = jest.fn();
+    const tree = render({ onRemove });
 
     act(() => {
       byLabel(tree, 'Delete Segment 1').props.onPress();
@@ -185,6 +139,6 @@ describe('SegmentProfileSheet', () => {
       byLabel(tree, 'Confirm delete Segment 1').props.onPress();
     });
 
-    expect(mockRemove).toHaveBeenCalledWith('p1');
+    expect(onRemove).toHaveBeenCalledWith('p1');
   });
 });

@@ -130,6 +130,27 @@ export function saveProfile(
   return profile;
 }
 
+/**
+ * Overwrites a profile's region (A/B markers and loop flag) by id, leaving its
+ * name and `createdAt` untouched. Used when the player saves edited markers
+ * back over the loaded segment.
+ */
+export function updateProfile(
+  profileId: string,
+  region: Pick<SegmentProfile, 'markerA' | 'markerB' | 'loopEnabled'>,
+): void {
+  const db = getDatabase();
+  db.runSync(
+    `UPDATE marker_profiles
+        SET markerA = ?, markerB = ?, loopEnabled = ?
+      WHERE id = ?`,
+    region.markerA,
+    region.markerB,
+    region.loopEnabled ? 1 : 0,
+    profileId,
+  );
+}
+
 /** Renames an existing profile by id. */
 export function renameProfile(profileId: string, name: string): void {
   const db = getDatabase();
