@@ -155,6 +155,20 @@ jest.mock('@/src/components/TransportControls', () => ({
   TransportControls: () => null,
 }));
 
+// Capture the sheet's props so a test can drive its onLoadProfile callback and
+// confirm the player applies a loaded profile to the engine setters.
+let mockSheetProps:
+  | import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps
+  | null = null;
+jest.mock('@/src/components/SegmentProfileSheet', () => ({
+  SegmentProfileSheet: (
+    props: import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps,
+  ) => {
+    mockSheetProps = props;
+    return null;
+  },
+}));
+
 // B placement now happens on the waveform (the dedicated "Set B" button is
 // gone), so drive the screen's handler through the WaveformView's
 // onMarkerBChange prop — the same path a tap-to-place gesture would take.
@@ -179,6 +193,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAudioPlayerState.markerB = null;
   mockSnippetPreviewEnabled = true;
+  mockSheetProps = null;
 });
 
 afterEach(() => {
@@ -301,5 +316,59 @@ describe('PlayerScreen snippet preview', () => {
     expect(waveform.props.onPreviewMove).toBeUndefined();
     expect(waveform.props.onPreviewEnd).toBeUndefined();
     expect(mockAudioPlayerState.startMonitor).not.toHaveBeenCalled();
+  });
+});
+
+function getSegmentsButton(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityLabel === 'Open segment profiles' &&
+      typeof node.props.onPress === 'function',
+  )[0];
+}
+
+describe('PlayerScreen segment profiles', () => {
+  it('mounts the sheet only after the Segments button is pressed', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    expect(mockSheetProps).toBeNull();
+
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+
+    expect(mockSheetProps).not.toBeNull();
+    expect(mockSheetProps?.trackId).toBe('t1');
+  });
+
+  it('applies a loaded profile to the engine setters (A before B, then loop)', () => {
+    mockSetMarkerB.mockReturnValue(true);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+    act(() => {
+      mockSheetProps?.onLoadProfile({
+        id: 'p1',
+        trackId: 't1',
+        name: 'Verse',
+        markerA: 1000,
+        markerB: 5000,
+        loopEnabled: false,
+        createdAt: 1,
+      });
+    });
+
+    expect(mockAudioPlayerState.setMarkerA).toHaveBeenCalledWith(1000);
+    expect(mockSetMarkerB).toHaveBeenCalledWith(5000);
+    expect(mockAudioPlayerState.setLoopEnabled).toHaveBeenCalledWith(false);
   });
 });
