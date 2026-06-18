@@ -247,6 +247,38 @@ describe('markerStore', () => {
     });
   });
 
+  describe('updateProfile', () => {
+    it('overwrites the region and loop flag by id, keeping the name', () => {
+      const { updateProfile } = require('../markerStore');
+
+      updateProfile('p1', { markerA: 2000, markerB: 8000, loopEnabled: false });
+
+      expect(mockRunSync).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE marker_profiles'),
+        2000,
+        8000,
+        0,
+        'p1',
+      );
+    });
+
+    it('stores null markers as null and an enabled loop as 1', () => {
+      const { updateProfile } = require('../markerStore');
+
+      updateProfile('p2', { markerA: null, markerB: null, loopEnabled: true });
+
+      expect(mockRunSync).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'SET markerA = ?, markerB = ?, loopEnabled = ?',
+        ),
+        null,
+        null,
+        1,
+        'p2',
+      );
+    });
+  });
+
   describe('renameProfile', () => {
     it('updates the name by profile id', () => {
       const { renameProfile } = require('../markerStore');

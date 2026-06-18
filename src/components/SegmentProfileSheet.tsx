@@ -2,75 +2,45 @@ import { useState } from 'react';
 import { Modal, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useSegmentProfiles } from '../hooks/useSegmentProfiles';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
-import { nextSegmentName } from '../utils/nextSegmentName';
 import { AccessiblePressable } from './AccessiblePressable';
 
 export interface SegmentProfileSheetProps {
-  /** The track whose profiles are managed. */
-  trackId: string;
-  /** Current A marker, captured when saving a new profile. */
-  markerA: number | null;
-  /** Current B marker, captured when saving a new profile. */
-  markerB: number | null;
-  /** Current loop flag, captured when saving a new profile. */
-  loopEnabled: boolean;
+  /** The track's saved profiles, in stable (oldest-first) order. */
+  profiles: SegmentProfile[];
   /** Apply a saved profile to the player (sets markers + loop). */
   onLoadProfile: (profile: SegmentProfile) => void;
+  /** Rename a profile by id. */
+  onRename: (profileId: string, name: string) => void;
+  /** Delete a profile by id. */
+  onRemove: (profileId: string) => void;
   /** Dismiss the sheet. */
   onClose: () => void;
 }
 
 /**
  * Bottom-sheet surface for managing a track's named A/B segment profiles:
- * save the current region as a new profile, load a saved one (which applies
- * its markers via the player and auto-persists), rename, and delete. Mounted
- * only while open, so the underlying profile store is read only on demand.
+ * load a saved one (which arms its markers via the player and auto-persists),
+ * rename, and delete. Saving is now done from the player, where markers are
+ * edited; this sheet is load + rename + delete only.
  */
 export function SegmentProfileSheet({
-  trackId,
-  markerA,
-  markerB,
-  loopEnabled,
+  profiles,
   onLoadProfile,
+  onRename,
+  onRemove,
   onClose,
 }: SegmentProfileSheetProps) {
   const { theme } = useTheme();
-  const { profiles, save, rename, remove } = useSegmentProfiles(trackId);
 
-  const [saving, setSaving] = useState(false);
-  const [draftName, setDraftName] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
-  // Saving captures the live region, so it is only offered when both markers
-  // are set (a valid A/B loop). Without that there is nothing to store.
-  const canSave = markerA != null && markerB != null;
-
-  const resetRowState = () => {
-    setRenamingId(null);
-    setConfirmingId(null);
-  };
-
-  const openSave = () => {
-    resetRowState();
-    setDraftName(nextSegmentName(profiles));
-    setSaving(true);
-  };
-
-  const confirmSave = () => {
-    const name = draftName.trim() || nextSegmentName(profiles);
-    save({ name, markerA, markerB, loopEnabled });
-    setSaving(false);
-  };
-
   const startRename = (profile: SegmentProfile) => {
-    setSaving(false);
     setConfirmingId(null);
     setRenameDraft(profile.name);
     setRenamingId(profile.id);
@@ -79,19 +49,18 @@ export function SegmentProfileSheet({
   const confirmRename = () => {
     if (renamingId) {
       const name = renameDraft.trim();
-      if (name) rename(renamingId, name);
+      if (name) onRename(renamingId, name);
     }
     setRenamingId(null);
   };
 
   const startDelete = (profile: SegmentProfile) => {
-    setSaving(false);
     setRenamingId(null);
     setConfirmingId(profile.id);
   };
 
   const confirmDelete = () => {
-    if (confirmingId) remove(confirmingId);
+    if (confirmingId) onRemove(confirmingId);
     setConfirmingId(null);
   };
 
@@ -138,67 +107,6 @@ export function SegmentProfileSheet({
               />
             </AccessiblePressable>
           </View>
-
-          {saving ? (
-            <View style={styles.saveRow}>
-              <TextInput
-                accessibilityLabel="New segment name"
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="Segment name"
-                placeholderTextColor={theme.colors.textSecondary}
-                style={inputStyle}
-                autoFocus
-              />
-              <AccessiblePressable
-                accessibilityRole="button"
-                accessibilityLabel="Confirm save segment"
-                onPress={confirmSave}
-              >
-                <Ionicons
-                  name="checkmark"
-                  size={22}
-                  color={theme.colors.accent}
-                />
-              </AccessiblePressable>
-              <AccessiblePressable
-                accessibilityRole="button"
-                accessibilityLabel="Cancel save segment"
-                onPress={() => setSaving(false)}
-              >
-                <Ionicons
-                  name="close"
-                  size={22}
-                  color={theme.colors.textSecondary}
-                />
-              </AccessiblePressable>
-            </View>
-          ) : (
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel="Save current segment"
-              accessibilityState={{ disabled: !canSave }}
-              accessibilityHint={
-                canSave ? undefined : 'Set both loop markers first'
-              }
-              disabled={!canSave}
-              onPress={openSave}
-              style={(state) => [
-                styles.saveButton,
-                {
-                  borderColor: theme.colors.accent,
-                  opacity: !canSave ? 0.4 : state.pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <Ionicons name="add" size={20} color={theme.colors.accent} />
-              <Text
-                style={[theme.typography.body, { color: theme.colors.accent }]}
-              >
-                Save current segment
-              </Text>
-            </AccessiblePressable>
-          )}
 
           {profiles.length === 0 ? (
             <View style={styles.empty}>
@@ -375,15 +283,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: spacing.sm,
   },
   saveRow: {
     flexDirection: 'row',

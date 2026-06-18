@@ -196,6 +196,42 @@ describe('markerStore.web', () => {
       ]);
     });
 
+    it('overwrites a profile region and loop flag, keeping its name', async () => {
+      const store = load();
+      const saved = await store.saveProfile('track-1', {
+        name: 'Verse',
+        markerA: 1000,
+        markerB: 5000,
+        loopEnabled: true,
+      });
+
+      await store.updateProfile(saved.id, {
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: false,
+      });
+
+      const [profile] = await store.listProfiles('track-1');
+      expect(profile).toEqual({
+        ...saved,
+        markerA: 2000,
+        markerB: 8000,
+        loopEnabled: false,
+      });
+    });
+
+    it('updating a missing profile is a no-op', async () => {
+      const store = load();
+      await expect(
+        store.updateProfile('does-not-exist', {
+          markerA: 1,
+          markerB: 2,
+          loopEnabled: true,
+        }),
+      ).resolves.toBeUndefined();
+      expect(await store.listProfiles('track-1')).toEqual([]);
+    });
+
     it('renames a profile', async () => {
       const store = load();
       const saved = await store.saveProfile('track-1', {

@@ -116,12 +116,77 @@ jest.mock('@/src/hooks/useTheme', () => ({
   }),
 }));
 
+// Capture the navigation beforeRemove listener so a test can fire the
+// leave-the-player guard, and the dispatch the resolved guard re-issues.
+let mockBeforeRemoveCb: ((event: unknown) => void) | null = null;
+const mockDispatch = jest.fn();
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({
     uri: 'file:///test.mp3',
     filename: 'test.mp3',
     trackId: 't1',
   }),
+  useNavigation: () => ({
+    addListener: (event: string, cb: (e: unknown) => void) => {
+      if (event === 'beforeRemove') mockBeforeRemoveCb = cb;
+      return () => {
+        mockBeforeRemoveCb = null;
+      };
+    },
+    dispatch: mockDispatch,
+  }),
+}));
+
+const mockSave = jest.fn(() => Promise.resolve(null));
+const mockUpdate = jest.fn();
+const mockRename = jest.fn();
+const mockRemove = jest.fn();
+let mockProfiles: import('@/src/types').SegmentProfile[] = [];
+jest.mock('@/src/hooks/useSegmentProfiles', () => ({
+  useSegmentProfiles: () => ({
+    profiles: mockProfiles,
+    refresh: jest.fn(),
+    save: mockSave,
+    update: mockUpdate,
+    rename: mockRename,
+    remove: mockRemove,
+  }),
+}));
+
+const mockMarkLoaded = jest.fn();
+const mockClearLoaded = jest.fn();
+const mockEditor = { loadedId: null as string | null, isDirty: false };
+jest.mock('@/src/hooks/useSegmentEditor', () => ({
+  useSegmentEditor: () => ({
+    loadedId: mockEditor.loadedId,
+    isDirty: mockEditor.isDirty,
+    markLoaded: mockMarkLoaded,
+    clearLoaded: mockClearLoaded,
+  }),
+}));
+
+let mockSaveDialogProps:
+  | import('@/src/components/SegmentSaveDialog').SegmentSaveDialogProps
+  | null = null;
+jest.mock('@/src/components/SegmentSaveDialog', () => ({
+  SegmentSaveDialog: (
+    props: import('@/src/components/SegmentSaveDialog').SegmentSaveDialogProps,
+  ) => {
+    mockSaveDialogProps = props;
+    return null;
+  },
+}));
+
+let mockGuardProps:
+  | import('@/src/components/UnsavedSegmentDialog').UnsavedSegmentDialogProps
+  | null = null;
+jest.mock('@/src/components/UnsavedSegmentDialog', () => ({
+  UnsavedSegmentDialog: (
+    props: import('@/src/components/UnsavedSegmentDialog').UnsavedSegmentDialogProps,
+  ) => {
+    mockGuardProps = props;
+    return null;
+  },
 }));
 
 jest.mock('react-native-safe-area-context', () => {
@@ -194,6 +259,13 @@ beforeEach(() => {
   mockAudioPlayerState.markerB = null;
   mockSnippetPreviewEnabled = true;
   mockSheetProps = null;
+  mockProfiles = [];
+  mockEditor.loadedId = null;
+  mockEditor.isDirty = false;
+  mockSaveDialogProps = null;
+  mockGuardProps = null;
+  mockBeforeRemoveCb = null;
+  mockSave.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -341,7 +413,8 @@ describe('PlayerScreen segment profiles', () => {
     });
 
     expect(mockSheetProps).not.toBeNull();
-    expect(mockSheetProps?.trackId).toBe('t1');
+    expect(mockSheetProps?.profiles).toEqual([]);
+    expect(typeof mockSheetProps?.onLoadProfile).toBe('function');
   });
 
   it('applies a loaded profile to the engine setters (A before B, then loop)', () => {
@@ -356,19 +429,167 @@ describe('PlayerScreen segment profiles', () => {
       getSegmentsButton(tree).props.onPress();
     });
     act(() => {
-      mockSheetProps?.onLoadProfile({
-        id: 'p1',
-        trackId: 't1',
-        name: 'Verse',
-        markerA: 1000,
-        markerB: 5000,
-        loopEnabled: false,
-        createdAt: 1,
-      });
+      mockSheetProps?.onLoadProfile(loadedProfile('p1', 'Verse'));
     });
 
     expect(mockAudioPlayerState.setMarkerA).toHaveBeenCalledWith(1000);
     expect(mockSetMarkerB).toHaveBeenCalledWith(5000);
     expect(mockAudioPlayerState.setLoopEnabled).toHaveBeenCalledWith(false);
+    expect(mockMarkLoaded).toHaveBeenCalled();
+  });
+});
+
+function loadedProfile(
+  id: string,
+  name: string,
+): import('@/src/types').SegmentProfile {
+  return {
+    id,
+    trackId: 't1',
+    name,
+    markerA: 1000,
+    markerB: 5000,
+    loopEnabled: false,
+    createdAt: 1,
+  };
+}
+
+function getSaveButton(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityLabel === 'Save segment' &&
+      typeof node.props.onPress === 'function',
+  )[0];
+}
+
+describe('PlayerScreen segment save', () => {
+  it('disables the Save button without a valid A/B region', () => {
+    mockAudioPlayerState.markerB = null;
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    const button = getSaveButton(tree);
+    expect(button.props.accessibilityState).toEqual({ disabled: true });
+    expect(button.props.disabled).toBe(true);
+  });
+
+  it('creates a new segment when nothing is loaded', () => {
+    mockAudioPlayerState.markerB = 8000;
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSaveButton(tree).props.onPress());
+    expect(mockSaveDialogProps?.loadedName).toBeNull();
+
+    act(() => mockSaveDialogProps?.onSaveNew('Bridge'));
+
+    expect(mockSave).toHaveBeenCalledWith({
+      name: 'Bridge',
+      markerA: 5000,
+      markerB: 8000,
+      loopEnabled: true,
+    });
+  });
+
+  it('offers override when a dirty segment is loaded', () => {
+    mockAudioPlayerState.markerB = 8000;
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = true;
+    mockProfiles = [loadedProfile('p1', 'Verse')];
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSaveButton(tree).props.onPress());
+    expect(mockSaveDialogProps?.loadedName).toBe('Verse');
+
+    act(() => mockSaveDialogProps?.onOverride());
+
+    expect(mockUpdate).toHaveBeenCalledWith('p1', {
+      markerA: 5000,
+      markerB: 8000,
+      loopEnabled: true,
+    });
+  });
+});
+
+describe('PlayerScreen unsaved-edit guard', () => {
+  it('defers loading a different segment while dirty', () => {
+    mockSetMarkerB.mockReturnValue(true);
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = true;
+    mockProfiles = [loadedProfile('p1', 'Verse')];
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+    act(() => {
+      mockSheetProps?.onLoadProfile(loadedProfile('p2', 'Chorus'));
+    });
+
+    // The load is held behind the guard, not applied yet.
+    expect(mockGuardProps).not.toBeNull();
+    expect(mockAudioPlayerState.setMarkerA).not.toHaveBeenCalled();
+
+    // Discard applies the pending load.
+    act(() => mockGuardProps?.onDiscard());
+    expect(mockAudioPlayerState.setMarkerA).toHaveBeenCalledWith(1000);
+  });
+
+  it('raises the guard on back navigation while dirty, then dispatches on save', () => {
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = true;
+    mockProfiles = [loadedProfile('p1', 'Verse')];
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    const preventDefault = jest.fn();
+    const action = { type: 'GO_BACK' };
+    act(() => {
+      mockBeforeRemoveCb?.({ preventDefault, data: { action } });
+    });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(mockGuardProps).not.toBeNull();
+
+    act(() => mockGuardProps?.onSave());
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockDispatch).toHaveBeenCalledWith(action);
+  });
+
+  it('does not block back navigation when not dirty', () => {
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = false;
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    const preventDefault = jest.fn();
+    act(() => {
+      mockBeforeRemoveCb?.({
+        preventDefault,
+        data: { action: { type: 'GO_BACK' } },
+      });
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(mockGuardProps).toBeNull();
   });
 });

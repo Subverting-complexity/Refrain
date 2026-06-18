@@ -9,6 +9,7 @@ const mockSaveProfile = jest.fn<
   SegmentProfile,
   [string, SegmentProfileInput]
 >();
+const mockUpdateProfile = jest.fn<void, [string, unknown]>();
 const mockRenameProfile = jest.fn<void, [string, string]>();
 const mockDeleteProfile = jest.fn<void, [string]>();
 
@@ -16,6 +17,8 @@ jest.mock('../../services/markerStore', () => ({
   listProfiles: (trackId: string) => mockListProfiles(trackId),
   saveProfile: (trackId: string, input: SegmentProfileInput) =>
     mockSaveProfile(trackId, input),
+  updateProfile: (profileId: string, region: unknown) =>
+    mockUpdateProfile(profileId, region),
   renameProfile: (profileId: string, name: string) =>
     mockRenameProfile(profileId, name),
   deleteProfile: (profileId: string) => mockDeleteProfile(profileId),
@@ -66,7 +69,7 @@ describe('useSegmentProfiles', () => {
     expect(lastResult.profiles).toEqual([]);
   });
 
-  it('saves a new profile then refreshes the list', async () => {
+  it('saves a new profile, refreshes, and returns the stored record', async () => {
     await renderHook();
     const input: SegmentProfileInput = {
       name: 'Chorus',
@@ -74,17 +77,47 @@ describe('useSegmentProfiles', () => {
       markerB: 4000,
       loopEnabled: false,
     };
-    mockListProfiles.mockReturnValue([
-      profile('p1', 'Segment 1'),
-      profile('p2', 'Chorus'),
-    ]);
+    const saved = profile('p2', 'Chorus');
+    mockSaveProfile.mockReturnValue(saved);
+    mockListProfiles.mockReturnValue([profile('p1', 'Segment 1'), saved]);
 
+    let returned: SegmentProfile | null = null;
     await act(async () => {
-      lastResult.save(input);
+      returned = await lastResult.save(input);
     });
 
     expect(mockSaveProfile).toHaveBeenCalledWith('t1', input);
+    expect(returned).toEqual(saved);
     expect(lastResult.profiles).toHaveLength(2);
+  });
+
+  it('returns null from save when there is no track', async () => {
+    await renderHook(null);
+
+    let returned: SegmentProfile | null = profile('x', 'x');
+    await act(async () => {
+      returned = await lastResult.save({
+        name: 'Nope',
+        markerA: 1,
+        markerB: 2,
+        loopEnabled: true,
+      });
+    });
+
+    expect(mockSaveProfile).not.toHaveBeenCalled();
+    expect(returned).toBeNull();
+  });
+
+  it('updates a profile region then refreshes', async () => {
+    await renderHook();
+    const region = { markerA: 3000, markerB: 9000, loopEnabled: false };
+    mockListProfiles.mockReturnValue([profile('p1', 'Segment 1')]);
+
+    await act(async () => {
+      lastResult.update('p1', region);
+    });
+
+    expect(mockUpdateProfile).toHaveBeenCalledWith('p1', region);
   });
 
   it('renames a profile then refreshes', async () => {
