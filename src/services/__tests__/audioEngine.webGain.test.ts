@@ -173,3 +173,38 @@ describe('fallback to native volume', () => {
     expect(mockVolumeSet).toHaveBeenCalledWith(0.2);
   });
 });
+
+describe('rolling monitor (web fallback)', () => {
+  it('seeks once and resumes the gain context on startMonitor', async () => {
+    const { loadTrack, startMonitor } = require('../audioEngine');
+    await loadTrack('blob:track');
+    mockSeekTo.mockClear();
+    mockPlay.mockClear();
+    mockResume.mockClear();
+
+    // Window [30s-2s, 30s+2s] -> start at 28s.
+    await startMonitor(30000);
+
+    expect(mockSeekTo).toHaveBeenCalledWith(28);
+    expect(mockPlay).toHaveBeenCalled();
+    expect(mockResume).toHaveBeenCalled();
+  });
+
+  it('does not re-seek per update on web (degrades to bounds-only follow)', async () => {
+    const {
+      loadTrack,
+      startMonitor,
+      updateMonitor,
+    } = require('../audioEngine');
+    await loadTrack('blob:track');
+    await startMonitor(30000);
+    mockSeekTo.mockClear();
+
+    // Continuous per-update seeking scrubs badly on web / iOS Safari, so the
+    // monitor only moves the loop bounds here — no seek on update.
+    updateMonitor(50000);
+    updateMonitor(10000);
+
+    expect(mockSeekTo).not.toHaveBeenCalled();
+  });
+});

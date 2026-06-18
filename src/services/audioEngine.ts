@@ -47,6 +47,23 @@ let volume = DEFAULT_VOLUME;
 // AudioPlayer's `volume` property. Always false on native platforms.
 let webGainActive = false;
 
+// --- Rolling monitor (marker-drag preview) ----------------------------------
+// A transient preview mode: while a marker is being dragged, a short window
+// around the marker loops so the user can hear where they are, then the prior
+// transport state is restored on release. The monitor never mutates markerA/
+// markerB/loopEnabled — it overrides the active loop region for its lifetime
+// only. See startMonitor/updateMonitor/stopMonitor below.
+
+// Half-width of the preview window: 2s before to 2s after the center.
+const MONITOR_HALF_WINDOW_MS = 2000;
+
+// Whether the rolling monitor is currently previewing.
+let monitorActive = false;
+// The current preview window in ms, clamped to the track, or null when idle.
+let monitorWindow: { start: number; end: number } | null = null;
+// Transport state captured at startMonitor, restored verbatim at stopMonitor.
+let savedTransport: { positionMs: number; isPlaying: boolean } | null = null;
+
 /**
  * The internal `HTMLAudioElement` backing an expo-audio web player, or null when
  * unavailable. Relies on the private `media` field, so it is guarded heavily:
@@ -132,7 +149,12 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     newState.positionMs = newState.durationMs;
   }
 
-  const region = regionBounds();
+  // The monitor window, when active, overrides the A/B region: the preview
+  // loops its own window and always rewinds (it ignores the loop toggle and
+  // any per-loop count-in handler), so a marker drag previews cleanly without
+  // touching the user's loop settings.
+  const monitor = monitorBounds();
+  const region = monitor ?? regionBounds();
   if (
     status.isLoaded &&
     (status.playing || status.didJustFinish) &&
@@ -140,7 +162,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     newState.positionMs >= region.b &&
     player
   ) {
-    if (!loopEnabled) {
+    if (!monitor && !loopEnabled) {
       // Loop disarmed: play the A..B region once, then stop at B. The next
       // play() restarts from A (see play()).
       player.pause();
@@ -149,7 +171,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       return;
     }
 
-    // Loop armed: rewind to A.
+    // Loop armed (or monitor active): rewind to the start.
     player.seekTo(msToSec(region.a)).catch((err) => {
       currentState = {
         ...currentState,
@@ -159,7 +181,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       notify(currentState);
     });
 
-    if (onLoopRestart) {
+    if (!monitor && onLoopRestart) {
       // A per-loop count-in is registered: pause at A and hand off so the
       // caller can run the lead-in before resuming.
       player.pause();
@@ -301,6 +323,37 @@ function regionBounds(): { a: number; b: number } | null {
   return { a: markerA, b: markerB };
 }
 
+/**
+ * The active monitor window expressed as loop bounds, or null when the monitor
+ * is idle. Shares the `{ a, b }` shape with `regionBounds()` so the status
+ * handler can treat it as a drop-in loop region that takes precedence over the
+ * A/B markers while a preview is running.
+ */
+function monitorBounds(): { a: number; b: number } | null {
+  if (!monitorActive || monitorWindow == null) return null;
+  return { a: monitorWindow.start, b: monitorWindow.end };
+}
+
+/**
+ * Build the preview window `[center-2000, center+2000]` clamped to the track.
+ * The upper bound falls back to the raw window end when the duration isn't
+ * known yet (e.g. the very first preview before a status update lands), so the
+ * window is always a non-empty, ordered range.
+ */
+function computeMonitorWindow(centerMs: number): {
+  start: number;
+  end: number;
+} {
+  const duration = currentState.durationMs;
+  const upper = duration > 0 ? duration : centerMs + MONITOR_HALF_WINDOW_MS;
+  const start = Math.max(0, Math.min(centerMs - MONITOR_HALF_WINDOW_MS, upper));
+  const end = Math.max(
+    start,
+    Math.min(centerMs + MONITOR_HALF_WINDOW_MS, upper),
+  );
+  return { start, end };
+}
+
 export async function seekTo(positionMs: number): Promise<void> {
   if (!player) return;
   const bounds = regionBounds();
@@ -322,6 +375,93 @@ export async function skipBy(deltaMs: number): Promise<void> {
   const hi = bounds ? bounds.b : currentState.durationMs;
   const next = Math.max(lo, Math.min(currentState.positionMs + deltaMs, hi));
   await player.seekTo(msToSec(next));
+}
+
+/**
+ * Begin a rolling monitor preview around `centerMs`: seek to a short window
+ * `[centerMs-2000, centerMs+2000]` (clamped to the track) and loop it so the
+ * user hears where a marker sits while dragging it. The transport state
+ * (playhead position and whether playback was running) is captured on the
+ * first call and restored exactly by `stopMonitor`.
+ *
+ * The preview overrides the A/B loop region for its lifetime but never mutates
+ * `markerA`/`markerB`/`loopEnabled`. Calling `startMonitor` again while already
+ * monitoring just moves the window (the captured transport state is kept), so
+ * it is safe to treat repeated starts as updates.
+ */
+export async function startMonitor(centerMs: number): Promise<void> {
+  if (!player) return;
+  if (!monitorActive) {
+    // Capture the prior transport once, on entry, so a second startMonitor
+    // (or any updateMonitor) can't overwrite the state we must restore.
+    savedTransport = {
+      positionMs: currentState.positionMs,
+      isPlaying: currentState.status === 'playing',
+    };
+    monitorActive = true;
+  }
+  monitorWindow = computeMonitorWindow(centerMs);
+  // Resume the web audio graph on this gesture so the preview isn't left
+  // silently suspended by the autoplay policy (mirrors play()).
+  if (webGainActive) webAudioGain.resume();
+  await player.seekTo(msToSec(monitorWindow.start));
+  player.play();
+}
+
+/**
+ * Move the rolling monitor to follow a new center position. Cheap enough to
+ * call at the drag-throttle rate (~20/sec). No-op when the monitor isn't
+ * running.
+ *
+ * Platform note: continuous per-update re-seeking scrubs badly on web / iOS
+ * Safari — seeking an `HTMLMediaElement` mid-playback stalls and clicks. So the
+ * preview degrades gracefully there: on web it only moves the loop bounds and
+ * lets the looping window carry the playhead into the new region at the next
+ * rewind (it follows the marker at loop granularity rather than frame-tight).
+ * On native it re-seeks to keep the playhead inside the moved window so the
+ * preview tracks the marker continuously.
+ */
+export function updateMonitor(centerMs: number): void {
+  if (!monitorActive || !player) return;
+  monitorWindow = computeMonitorWindow(centerMs);
+
+  if (Platform.OS === 'web') {
+    // Web fallback: bounds-only follow, no per-update seek (see note above).
+    return;
+  }
+
+  // Native: pull the playhead back into the window only when it has fallen
+  // outside the freshly moved bounds, so small drags don't restart playback
+  // and large jumps still keep audio within [center-2s, center+2s].
+  const pos = currentState.positionMs;
+  if (pos < monitorWindow.start || pos >= monitorWindow.end) {
+    player.seekTo(msToSec(monitorWindow.start)).catch(() => {
+      // Best-effort: a failed follow-seek must not break the drag.
+    });
+  }
+}
+
+/**
+ * Stop the rolling monitor and fully restore the transport captured at
+ * `startMonitor`: seek back to the prior playhead and resume or pause to match
+ * the prior play/pause state. No-op when the monitor isn't running.
+ */
+export async function stopMonitor(): Promise<void> {
+  if (!monitorActive) return;
+  const saved = savedTransport;
+  monitorActive = false;
+  monitorWindow = null;
+  savedTransport = null;
+
+  if (!player) return;
+
+  // Restore the exact prior playhead, then the prior play/pause state.
+  await player.seekTo(msToSec(saved ? saved.positionMs : 0));
+  if (saved?.isPlaying) {
+    player.play();
+  } else {
+    player.pause();
+  }
 }
 
 /**
@@ -350,6 +490,11 @@ export async function unloadTrack(): Promise<void> {
   markerA = null;
   markerB = null;
   loopEnabled = true;
+  // A monitor preview is transient and track-scoped: tear it down so neither
+  // its window nor the captured transport leaks into the next track.
+  monitorActive = false;
+  monitorWindow = null;
+  savedTransport = null;
   // Per-loop count-in is a per-session concern: drop any handler so it can't
   // leak into the next track and pause the loop for a track that never armed
   // one. The player re-registers it from the count-in config when needed.
