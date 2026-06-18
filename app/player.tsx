@@ -6,18 +6,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { AccessiblePressable } from '@/src/components/AccessiblePressable';
+import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
-import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
-import { SkipControls } from '@/src/components/SkipControls';
 import { SnippetPreviewSettings } from '@/src/components/SnippetPreviewSettings';
 import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
 import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
-import { VolumeControl } from '@/src/components/VolumeControl';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
@@ -426,18 +424,6 @@ export default function PlayerScreen() {
         )}
 
         <View style={styles.controls}>
-          <CountdownSettings
-            config={countdownConfig}
-            onConfigChange={setCountdownConfig}
-            style={styles.countdownSettings}
-          />
-
-          <SnippetPreviewSettings
-            enabled={snippetPreviewEnabled}
-            onChange={setSnippetPreviewEnabled}
-            style={styles.snippetPreview}
-          />
-
           <MarkerControls
             status={status}
             markerA={markerA}
@@ -483,35 +469,14 @@ export default function PlayerScreen() {
                   Save segment
                 </Text>
               </AccessiblePressable>
-
-              <AccessiblePressable
-                accessibilityRole="button"
-                accessibilityLabel="Open segment profiles"
-                onPress={() => setProfilesVisible(true)}
-                style={(state) => [
-                  styles.segmentsButton,
-                  {
-                    borderColor: theme.colors.border,
-                    opacity: state.pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="bookmarks-outline"
-                  size={18}
-                  color={theme.colors.textPrimary}
-                />
-                <Text
-                  style={[
-                    theme.typography.body,
-                    { color: theme.colors.textPrimary },
-                  ]}
-                >
-                  Segments
-                </Text>
-              </AccessiblePressable>
             </View>
           ) : null}
+
+          <SnippetPreviewSettings
+            enabled={snippetPreviewEnabled}
+            onChange={setSnippetPreviewEnabled}
+            style={styles.snippetPreview}
+          />
 
           <SeekBar
             positionMs={positionMs}
@@ -522,16 +487,17 @@ export default function PlayerScreen() {
             style={styles.seekBar}
           />
 
-          <VolumeControl
+          <ControlsDrawer
+            countdownConfig={countdownConfig}
+            onCountdownConfigChange={setCountdownConfig}
             volume={volume}
             onVolumeChange={setVolume}
-            style={styles.volume}
-          />
-
-          <SkipControls
             skipSeconds={skipSeconds}
             onSkipSecondsChange={setSkipSeconds}
-            style={styles.skip}
+            onOpenSegments={
+              trackId ? () => setProfilesVisible(true) : undefined
+            }
+            style={styles.drawer}
           />
 
           <TransportControls
@@ -647,19 +613,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
   },
-  countdownSettings: {
-    marginBottom: spacing.lg,
-  },
   snippetPreview: {
     marginBottom: spacing.lg,
   },
   seekBar: {
     marginBottom: spacing.lg,
   },
-  volume: {
-    marginBottom: spacing.lg,
-  },
-  skip: {
+  drawer: {
     marginBottom: spacing.xl,
   },
   transport: {

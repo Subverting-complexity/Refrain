@@ -54,11 +54,11 @@ describe('useSkipInterval', () => {
   it('persists and updates when a new amount is set', () => {
     renderTestHook();
     act(() => {
-      lastResult.setSkipSeconds(2);
+      lastResult.setSkipSeconds(15);
     });
-    expect(lastResult.skipSeconds).toBe(2);
-    expect(lastResult.skipMs).toBe(2000);
-    expect(mockSetNumber).toHaveBeenCalledWith('playback.skipSeconds', 2);
+    expect(lastResult.skipSeconds).toBe(15);
+    expect(lastResult.skipMs).toBe(15000);
+    expect(mockSetNumber).toHaveBeenCalledWith('playback.skipSeconds', 15);
   });
 
   it('falls back to the default when reading from storage throws', () => {
@@ -83,6 +83,6 @@ describe('useSkipInterval', () => {
   });
 
   it('exposes the selectable presets', () => {
-    expect(SKIP_PRESETS).toEqual([1, 2, 5, 10]);
+    expect(SKIP_PRESETS).toEqual([1, 3, 5, 10, 15, 30]);
   });
 });
