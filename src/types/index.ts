@@ -56,6 +56,17 @@ export interface PlaybackState {
   lastError?: string;
 }
 
+/**
+ * The active A/B loop marker set persisted per track. Mirrors the marker
+ * fields of {@link PlaybackState}; `null` markers mean "unset". Named segment
+ * profiles are layered on top of this same store later.
+ */
+export interface ActiveMarkers {
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: boolean;
+}
+
 export type WaveformPeaks = number[];
 
 export type CountdownMode = 'silent' | 'metronome';

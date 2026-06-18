@@ -12,15 +12,20 @@
  * already used here for audio blobs (see `webBlobStore.web`). So web metadata
  * lives in IndexedDB too.
  *
- * Two object stores, both keyed by their natural id:
- *   - `tracks`   — one record per imported track (keyPath `id`).
- *   - `settings` — key/value app preferences (keyPath `key`).
+ * Three object stores, each keyed by its natural id:
+ *   - `tracks`        — one record per imported track (keyPath `id`).
+ *   - `settings`      — key/value app preferences (keyPath `key`).
+ *   - `track_markers` — active A/B markers per track (keyPath `trackId`).
  */
 
 const DB_NAME = 'refrain-meta';
-const DB_VERSION = 1;
+// v2 adds the `track_markers` store. The upgrade handler creates stores
+// conditionally, so bumping the version leaves existing `tracks`/`settings`
+// data intact.
+const DB_VERSION = 2;
 const TRACKS_STORE = 'tracks';
 const SETTINGS_STORE = 'settings';
+const MARKERS_STORE = 'track_markers';
 
 /**
  * Persisted shape of a track. The playable `uri` is intentionally not stored:
@@ -42,6 +47,14 @@ export interface StoredSetting {
   value: string;
 }
 
+/** Persisted active A/B marker set for a single track, keyed by `trackId`. */
+export interface StoredMarkers {
+  trackId: string;
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: boolean;
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDb(): Promise<IDBDatabase> {
@@ -56,6 +69,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(MARKERS_STORE)) {
+        db.createObjectStore(MARKERS_STORE, { keyPath: 'trackId' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -113,6 +129,30 @@ export function getStoredTrackIds(): Promise<string[]> {
   return runTransaction<IDBValidKey[]>(TRACKS_STORE, 'readonly', (store) =>
     store.getAllKeys(),
   ).then((keys) => keys.map((k) => String(k)));
+}
+
+// --- Markers --------------------------------------------------------------
+
+export function getStoredMarkers(
+  trackId: string,
+): Promise<StoredMarkers | null> {
+  return runTransaction<StoredMarkers | undefined>(
+    MARKERS_STORE,
+    'readonly',
+    (store) => store.get(trackId),
+  ).then((markers) => markers ?? null);
+}
+
+export function putStoredMarkers(markers: StoredMarkers): Promise<void> {
+  return runTransaction(MARKERS_STORE, 'readwrite', (store) =>
+    store.put(markers),
+  ).then(() => undefined);
+}
+
+export function deleteStoredMarkers(trackId: string): Promise<void> {
+  return runTransaction(MARKERS_STORE, 'readwrite', (store) =>
+    store.delete(trackId),
+  ).then(() => undefined);
 }
 
 // --- Settings -------------------------------------------------------------
