@@ -1249,4 +1249,301 @@ describe('audioEngine', () => {
       expect(mockPause).not.toHaveBeenCalled();
     });
   });
+
+  describe('rolling monitor', () => {
+    it('seeks to the window start and plays on startMonitor', async () => {
+      const { loadTrack, startMonitor } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      // Window [30s-2s, 30s+2s] = [28s, 32s] -> start at 28s.
+      await startMonitor(30000);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(28);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('does nothing when no player is loaded', async () => {
+      const { startMonitor } = require('../audioEngine');
+
+      await startMonitor(30000);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+    });
+
+    it('clamps the window to the track start', async () => {
+      const { loadTrack, startMonitor } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      mockSeekTo.mockClear();
+
+      // Center 1s would give [-1s, 3s]; the start clamps to 0.
+      await startMonitor(1000);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+    });
+
+    it('clamps the window to the track end', async () => {
+      const { loadTrack, startMonitor } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      mockSeekTo.mockClear();
+
+      // Center 59s gives [57s, 61s]; the end clamps to the 60s duration, the
+      // start stays at 57s.
+      await startMonitor(59000);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(57);
+    });
+
+    it('loops within its window, rewinding to the window start at the end', async () => {
+      const { loadTrack, startMonitor, subscribe } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000); // window [28s, 32s]
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+
+      // Reaching the window end rewinds to the window start.
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 32 }));
+
+      expect(mockSeekTo).toHaveBeenCalledWith(28);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'playing', positionMs: 28000 }),
+      );
+    });
+
+    it('loops the window even when the A/B loop is disarmed', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        setLoopEnabled,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      setLoopEnabled(false);
+      await startMonitor(30000); // window [28s, 32s]
+      mockSeekTo.mockClear();
+      mockPause.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 32 }));
+
+      // Monitor rewinds rather than one-shot stopping at the window end.
+      expect(mockSeekTo).toHaveBeenCalledWith(28);
+      expect(mockPause).not.toHaveBeenCalled();
+    });
+
+    it('ignores the per-loop count-in handler while monitoring', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        setLoopRestartHandler,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+      await startMonitor(30000); // window [28s, 32s]
+      mockSeekTo.mockClear();
+      mockPause.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 32 }));
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
+      expect(mockSeekTo).toHaveBeenCalledWith(28);
+    });
+
+    it('follows the marker by re-seeking when the playhead leaves the window', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        updateMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000); // window [28s, 32s]
+      // Playhead advances to 30s inside the window.
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      mockSeekTo.mockClear();
+
+      // New center 50s -> window [48s, 52s]; the 30s playhead is now outside,
+      // so it re-seeks to the new window start.
+      updateMonitor(50000);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(48);
+    });
+
+    it('does not re-seek when a small move keeps the playhead in the window', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        updateMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000); // window [28s, 32s]
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      mockSeekTo.mockClear();
+
+      // New center 31s -> window [29s, 33s]; the 30s playhead is still inside.
+      updateMonitor(31000);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('updateMonitor is a no-op when the monitor is not running', async () => {
+      const { loadTrack, updateMonitor } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      mockSeekTo.mockClear();
+
+      updateMonitor(50000);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('restores the playhead and resumes when playback was running', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        stopMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 20 }));
+      await startMonitor(40000);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+      mockPause.mockClear();
+
+      await stopMonitor();
+
+      // Restores the captured 20s playhead and resumes playback.
+      expect(mockSeekTo).toHaveBeenCalledWith(20);
+      expect(mockPlay).toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
+    });
+
+    it('restores the playhead and stays paused when playback was paused', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        stopMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: false, currentTime: 20 }));
+      await startMonitor(40000);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+      mockPause.mockClear();
+
+      await stopMonitor();
+
+      expect(mockSeekTo).toHaveBeenCalledWith(20);
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+    });
+
+    it('stopMonitor is a no-op when the monitor is not running', async () => {
+      const { loadTrack, stopMonitor } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 20, duration: 60 }));
+      mockSeekTo.mockClear();
+      mockPause.mockClear();
+
+      await stopMonitor();
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
+    });
+
+    it('keeps the captured transport when startMonitor is called again', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        stopMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 20 }));
+      await startMonitor(40000); // captures the 20s / playing transport
+
+      // The monitor moves on; a second start must not overwrite the capture.
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 38 }));
+      await startMonitor(50000);
+      mockSeekTo.mockClear();
+
+      await stopMonitor();
+
+      // Restores the original 20s capture, not the later 38s position.
+      expect(mockSeekTo).toHaveBeenCalledWith(20);
+    });
+
+    it('does not mutate the markers or loop flag', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        setLoopEnabled,
+        startMonitor,
+        updateMonitor,
+        stopMonitor,
+        getState,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(15000);
+      setLoopEnabled(false);
+
+      await startMonitor(40000);
+      updateMonitor(45000);
+      await stopMonitor();
+
+      const state = getState();
+      expect(state.markerA).toBe(5000);
+      expect(state.markerB).toBe(15000);
+      expect(state.loopEnabled).toBe(false);
+    });
+
+    it('tears down an active monitor on unload', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        updateMonitor,
+        unloadTrack,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000);
+
+      await unloadTrack();
+      mockSeekTo.mockClear();
+
+      // The monitor is gone, so a stray follow update does nothing.
+      updateMonitor(50000);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+  });
 });
