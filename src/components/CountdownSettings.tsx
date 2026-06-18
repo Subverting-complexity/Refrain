@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -15,7 +15,6 @@ import { ChipGroup, ChipOption } from './ChipGroup';
 interface CountdownSettingsProps {
   config: CountdownConfig;
   onConfigChange: (config: CountdownConfig) => void;
-  style?: ViewStyle;
 }
 
 // Lead-in length presets, in seconds. Seconds read more clearly than musical
@@ -53,7 +52,6 @@ function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
 export function CountdownSettings({
   config,
   onConfigChange,
-  style,
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
   const [bpmText, setBpmText] = useState(String(config.bpm));
@@ -95,7 +93,7 @@ export function CountdownSettings({
   const showBpm = config.mode === 'metronome';
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={styles.container}>
       <View style={styles.enableRow}>
         <Text
           style={[theme.typography.body, { color: theme.colors.textPrimary }]}

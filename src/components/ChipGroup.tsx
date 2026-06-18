@@ -4,6 +4,7 @@ import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+import { CHIP_HIT_SLOP, chipStyles, pillColors } from './chipStyles';
 
 export interface ChipOption<T> {
   label: string;
@@ -27,10 +28,6 @@ interface ChipGroupProps<T> {
   style?: ViewStyle;
 }
 
-// Slim pills read as ~30pt tall; pad the touch area back out to the 44pt
-// minimum vertically (and a little horizontally) without inflating the visual.
-const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 2, right: 2 } as const;
-
 // A compact row of single-select chips. Extracted so the count-in settings
 // (mode / length / repeat) and the skip-interval control share one tactile,
 // theme-aware control instead of each re-implementing chip rendering.
@@ -48,6 +45,7 @@ export function ChipGroup<T>({
     <View style={[styles.row, style]}>
       {options.map((option) => {
         const selected = isEqual(value, option.value);
+        const colors = pillColors(theme, selected);
         return (
           <AccessiblePressable
             key={option.label}
@@ -59,25 +57,15 @@ export function ChipGroup<T>({
             // tappable area so the slimmer visual keeps the touch target.
             hitSlop={CHIP_HIT_SLOP}
             style={[
+              chipStyles.pill,
               styles.chip,
               {
-                backgroundColor: selected ? theme.colors.accent : 'transparent',
-                borderColor: selected
-                  ? theme.colors.accent
-                  : theme.colors.border,
+                backgroundColor: colors.backgroundColor,
+                borderColor: colors.borderColor,
               },
             ]}
           >
-            <Text
-              style={[
-                styles.chipText,
-                {
-                  color: selected
-                    ? theme.colors.accentText
-                    : theme.colors.textPrimary,
-                },
-              ]}
-            >
+            <Text style={[chipStyles.pillText, { color: colors.textColor }]}>
               {option.label}
             </Text>
           </AccessiblePressable>
@@ -96,15 +84,7 @@ const styles = StyleSheet.create({
   chip: {
     minWidth: 40,
     minHeight: 30,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderWidth: 1,
-    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
 });

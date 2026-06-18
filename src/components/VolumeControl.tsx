@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Text,
   View,
-  ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +23,6 @@ interface VolumeControlProps {
   volume: number;
   /** Called with the new volume (0..1) as the user drags or steps. */
   onVolumeChange: (volume: number) => void;
-  style?: ViewStyle;
 }
 
 function clamp01(value: number): number {
@@ -38,11 +36,7 @@ function iconForVolume(volume: number): keyof typeof Ionicons.glyphMap {
   return 'volume-high';
 }
 
-export function VolumeControl({
-  volume,
-  onVolumeChange,
-  style,
-}: VolumeControlProps) {
+export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
   const { theme } = useTheme();
   const trackWidth = useRef(0);
 
@@ -128,7 +122,7 @@ export function VolumeControl({
   );
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={styles.container}>
       <View style={styles.row}>
         <View style={styles.icon}>
           <Ionicons
