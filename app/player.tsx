@@ -5,10 +5,12 @@ import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { CountdownSettings } from '@/src/components/CountdownSettings';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
+import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SkipControls } from '@/src/components/SkipControls';
 import { SnippetPreviewSettings } from '@/src/components/SnippetPreviewSettings';
 import { Toast } from '@/src/components/Toast';
@@ -24,6 +26,7 @@ import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
+import { SegmentProfile } from '@/src/types';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
 
@@ -86,6 +89,22 @@ export default function PlayerScreen() {
   // Tap-to-place arm state. Driven by the A/B buttons; the waveform reads it to
   // decide whether a tap drops a marker or just seeks.
   const [placeMode, setPlaceMode] = useState<PlaceMode>('none');
+
+  // Whether the segment-profile sheet is open. The sheet is mounted only while
+  // open so its profile store is read on demand, not on every player render.
+  const [profilesVisible, setProfilesVisible] = useState(false);
+
+  // Apply a saved profile to the engine. Set A before B so the A < B invariant
+  // holds (saved profiles always carry a valid region), then the loop flag.
+  // Each setter auto-persists the active markers (#117).
+  const handleLoadProfile = useCallback(
+    (profile: SegmentProfile) => {
+      if (profile.markerA != null) setMarkerA(profile.markerA);
+      if (profile.markerB != null) setMarkerB(profile.markerB);
+      setLoopEnabled(profile.loopEnabled);
+    },
+    [setMarkerA, setMarkerB, setLoopEnabled],
+  );
 
   const durationPersisted = useRef(false);
   useEffect(() => {
@@ -305,6 +324,35 @@ export default function PlayerScreen() {
             style={styles.markers}
           />
 
+          {trackId ? (
+            <AccessiblePressable
+              accessibilityRole="button"
+              accessibilityLabel="Open segment profiles"
+              onPress={() => setProfilesVisible(true)}
+              style={(state) => [
+                styles.segmentsButton,
+                {
+                  borderColor: theme.colors.border,
+                  opacity: state.pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name="bookmarks-outline"
+                size={18}
+                color={theme.colors.textPrimary}
+              />
+              <Text
+                style={[
+                  theme.typography.body,
+                  { color: theme.colors.textPrimary },
+                ]}
+              >
+                Segments
+              </Text>
+            </AccessiblePressable>
+          ) : null}
+
           <SeekBar
             positionMs={positionMs}
             durationMs={durationMs}
@@ -342,6 +390,17 @@ export default function PlayerScreen() {
         variant={toast?.variant}
         onDismiss={hideToast}
       />
+
+      {profilesVisible && trackId ? (
+        <SegmentProfileSheet
+          trackId={trackId}
+          markerA={markerA}
+          markerB={markerB}
+          loopEnabled={loopEnabled}
+          onLoadProfile={handleLoadProfile}
+          onClose={() => setProfilesVisible(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -381,6 +440,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   markers: {
+    marginBottom: spacing.lg,
+  },
+  segmentsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: spacing.sm,
     marginBottom: spacing.lg,
   },
   errorBanner: {
