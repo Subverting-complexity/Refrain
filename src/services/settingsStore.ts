@@ -49,3 +49,19 @@ export function getNumber(key: string, fallback: number): number {
 export function setNumber(key: string, value: number): void {
   setSetting(key, String(value));
 }
+
+/**
+ * Read a boolean setting. Stored as the text `'true'`/`'false'`; any other or
+ * absent value returns `fallback`, so a missing or corrupted row falls back to
+ * the caller's default rather than coercing to `false`.
+ */
+export function getBoolean(key: string, fallback: boolean): boolean {
+  const raw = getSetting(key);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return fallback;
+}
+
+export function setBoolean(key: string, value: boolean): void {
+  setSetting(key, value ? 'true' : 'false');
+}

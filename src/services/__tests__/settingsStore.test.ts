@@ -96,4 +96,61 @@ describe('settingsStore', () => {
       );
     });
   });
+
+  describe('getBoolean', () => {
+    it('reads a stored true', () => {
+      mockGetFirstSync.mockReturnValue({ value: 'true' });
+      const { getBoolean } = require('../settingsStore');
+
+      expect(getBoolean('flag', false)).toBe(true);
+    });
+
+    it('reads a stored false', () => {
+      mockGetFirstSync.mockReturnValue({ value: 'false' });
+      const { getBoolean } = require('../settingsStore');
+
+      expect(getBoolean('flag', true)).toBe(false);
+    });
+
+    it('returns the fallback when the key is absent', () => {
+      mockGetFirstSync.mockReturnValue(undefined);
+      const { getBoolean } = require('../settingsStore');
+
+      expect(getBoolean('flag', true)).toBe(true);
+      expect(getBoolean('flag', false)).toBe(false);
+    });
+
+    it('returns the fallback when the stored value is not a boolean', () => {
+      mockGetFirstSync.mockReturnValue({ value: 'maybe' });
+      const { getBoolean } = require('../settingsStore');
+
+      expect(getBoolean('flag', true)).toBe(true);
+    });
+  });
+
+  describe('setBoolean', () => {
+    it('stores true as the text "true"', () => {
+      const { setBoolean } = require('../settingsStore');
+
+      setBoolean('flag', true);
+
+      expect(mockRunSync).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO settings'),
+        'flag',
+        'true',
+      );
+    });
+
+    it('stores false as the text "false"', () => {
+      const { setBoolean } = require('../settingsStore');
+
+      setBoolean('flag', false);
+
+      expect(mockRunSync).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO settings'),
+        'flag',
+        'false',
+      );
+    });
+  });
 });

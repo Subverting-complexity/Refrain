@@ -44,8 +44,23 @@ interface WaveformViewProps {
   onPlaceComplete?: (marker: 'A' | 'B') => void;
   onMarkerAChange?: (positionMs: number) => void;
   onMarkerBChange?: (positionMs: number) => void;
+  /**
+   * Snippet-preview hooks for the engine's rolling monitor. Fired only for
+   * marker gestures (dragging an existing A/B handle, or a tap-to-place), never
+   * for plain seeks. `onPreviewStart` runs once when the gesture grabs/places a
+   * marker; `onPreviewMove` follows the marker at the same throttled cadence as
+   * the marker callback; `onPreviewEnd` runs on release. Omit them (the player
+   * passes nothing when the preference is off) to disable the preview — dragging
+   * then behaves exactly as before.
+   */
+  onPreviewStart?: (centerMs: number) => void;
+  onPreviewMove?: (centerMs: number) => void;
+  onPreviewEnd?: () => void;
   style?: ViewStyle;
 }
+
+const isMarkerTarget = (target: DragTarget): boolean =>
+  target === 'markerA' || target === 'markerB';
 
 const WAVEFORM_HEIGHT = 132;
 // The grab zone around a marker. Generous so a fingertip can land the thin
@@ -95,6 +110,9 @@ export function WaveformView({
   onPlaceComplete,
   onMarkerAChange,
   onMarkerBChange,
+  onPreviewStart,
+  onPreviewMove,
+  onPreviewEnd,
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
@@ -247,9 +265,25 @@ export function WaveformView({
         isPlacement.current = false;
         return;
       }
-      const ms = clampForTarget(dragTarget.current, raw);
+      const target = dragTarget.current;
+      const ms = clampForTarget(target, raw);
       setDragMs(ms);
-      dragThrottle.begin(ms, callbackForTarget(dragTarget.current));
+
+      // Wire the rolling-monitor preview to marker gestures only (never plain
+      // seeks). Start it once here, and compose its follow into the throttled
+      // marker callback so it tracks the marker at the same ~20/sec cadence.
+      let throttledCallback = callbackForTarget(target);
+      if (isMarkerTarget(target) && (onPreviewStart || onPreviewMove)) {
+        onPreviewStart?.(ms);
+        if (onPreviewMove) {
+          const base = throttledCallback;
+          throttledCallback = (value: number) => {
+            base(value);
+            onPreviewMove(value);
+          };
+        }
+      }
+      dragThrottle.begin(ms, throttledCallback);
     },
     [
       detectDragTarget,
@@ -257,6 +291,8 @@ export function WaveformView({
       clampForTarget,
       callbackForTarget,
       dragThrottle,
+      onPreviewStart,
+      onPreviewMove,
     ],
   );
 
@@ -276,13 +312,19 @@ export function WaveformView({
   // if this was an arm-driven placement, then drop back to the prop-driven
   // visual.
   const endDrag = useCallback(() => {
+    // Commit the final throttled value (which also delivers the final preview
+    // follow) before tearing the preview down, so the monitor restores from the
+    // correct end state.
     dragThrottle.end();
+    if (isMarkerTarget(dragTarget.current)) {
+      onPreviewEnd?.();
+    }
     if (isPlacement.current) {
       isPlacement.current = false;
       onPlaceComplete?.(dragTarget.current === 'markerA' ? 'A' : 'B');
     }
     setDragMs(null);
-  }, [dragThrottle, onPlaceComplete]);
+  }, [dragThrottle, onPlaceComplete, onPreviewEnd]);
 
   // Route the gesture through refs to the latest callbacks so the Pan object
   // itself is created once. A marker drag updates markerA/markerB mid-gesture

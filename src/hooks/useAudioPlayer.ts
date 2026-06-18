@@ -71,6 +71,15 @@ export function useAudioPlayer(
     [],
   );
   const setVolume = useCallback((v: number) => audioEngine.setVolume(v), []);
+  const startMonitor = useCallback(
+    (centerMs: number) => audioEngine.startMonitor(centerMs),
+    [],
+  );
+  const updateMonitor = useCallback(
+    (centerMs: number) => audioEngine.updateMonitor(centerMs),
+    [],
+  );
+  const stopMonitor = useCallback(() => audioEngine.stopMonitor(), []);
 
   return {
     ...state,
@@ -86,5 +95,8 @@ export function useAudioPlayer(
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,
+    startMonitor,
+    updateMonitor,
+    stopMonitor,
   };
 }

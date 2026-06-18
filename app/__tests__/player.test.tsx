@@ -27,7 +27,13 @@ const mockAudioPlayerState = {
   setLoopEnabled: jest.fn(),
   setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),
+  startMonitor: jest.fn(),
+  updateMonitor: jest.fn(),
+  stopMonitor: jest.fn(),
 };
+
+let mockSnippetPreviewEnabled = true;
+const mockSetSnippetPreviewEnabled = jest.fn<void, [boolean]>();
 
 // Render the gesture-handler ScrollView as a plain View and stub the gesture
 // API; the screen only needs them to mount (the waveform itself falls back to
@@ -56,6 +62,13 @@ jest.mock('react-native-gesture-handler', () => {
 
 jest.mock('@/src/hooks/useAudioPlayer', () => ({
   useAudioPlayer: () => mockAudioPlayerState,
+}));
+
+jest.mock('@/src/hooks/useSnippetPreview', () => ({
+  useSnippetPreview: () => ({
+    snippetPreviewEnabled: mockSnippetPreviewEnabled,
+    setSnippetPreviewEnabled: mockSetSnippetPreviewEnabled,
+  }),
 }));
 
 jest.mock('@/src/hooks/useWaveformData', () => ({
@@ -165,6 +178,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   mockAudioPlayerState.markerB = null;
+  mockSnippetPreviewEnabled = true;
 });
 
 afterEach(() => {
@@ -213,5 +227,79 @@ describe('PlayerScreen marker B feedback', () => {
     expect(mockSetMarkerB).toHaveBeenCalledWith(1000);
     expect(announceSpy).not.toHaveBeenCalled();
     expect(findToastMessage(tree)).toBeUndefined();
+  });
+});
+
+function getWaveform(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) => typeof node.props.onMarkerBChange === 'function',
+  )[0];
+}
+
+function getSnippetToggle(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityRole === 'switch' &&
+      typeof node.props.accessibilityLabel === 'string' &&
+      node.props.accessibilityLabel.startsWith('Snippet preview'),
+  )[0];
+}
+
+describe('PlayerScreen snippet preview', () => {
+  it('renders the snippet preview toggle', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    expect(getSnippetToggle(tree)).toBeDefined();
+  });
+
+  it('persists the preference when the toggle is pressed', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSnippetToggle(tree).props.onPress());
+
+    // Default is on, so a press turns it off.
+    expect(mockSetSnippetPreviewEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('wires marker-drag preview to the engine monitor when enabled', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    const waveform = getWaveform(tree);
+    expect(typeof waveform.props.onPreviewStart).toBe('function');
+    expect(typeof waveform.props.onPreviewMove).toBe('function');
+    expect(typeof waveform.props.onPreviewEnd).toBe('function');
+
+    act(() => waveform.props.onPreviewStart(4000));
+    expect(mockAudioPlayerState.startMonitor).toHaveBeenCalledWith(4000);
+
+    act(() => waveform.props.onPreviewMove(4200));
+    expect(mockAudioPlayerState.updateMonitor).toHaveBeenCalledWith(4200);
+
+    act(() => waveform.props.onPreviewEnd());
+    expect(mockAudioPlayerState.stopMonitor).toHaveBeenCalled();
+  });
+
+  it('never invokes the monitor when the preference is off', () => {
+    mockSnippetPreviewEnabled = false;
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    const waveform = getWaveform(tree);
+    expect(waveform.props.onPreviewStart).toBeUndefined();
+    expect(waveform.props.onPreviewMove).toBeUndefined();
+    expect(waveform.props.onPreviewEnd).toBeUndefined();
+    expect(mockAudioPlayerState.startMonitor).not.toHaveBeenCalled();
   });
 });

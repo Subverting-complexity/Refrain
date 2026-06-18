@@ -21,6 +21,9 @@ const mockSetVolume = jest.fn<void, [number]>();
 const mockSetMarkerB = jest.fn<boolean, [number]>();
 const mockSetLoopEnabled = jest.fn<void, [boolean]>();
 const mockLoadPersistedVolume = jest.fn<void, []>();
+const mockStartMonitor = jest.fn<Promise<void>, [number]>();
+const mockUpdateMonitor = jest.fn<void, [number]>();
+const mockStopMonitor = jest.fn<Promise<void>, []>();
 
 jest.mock('../../services/audioEngine', () => ({
   subscribe: (cb: (state: PlaybackState) => void) => {
@@ -42,6 +45,9 @@ jest.mock('../../services/audioEngine', () => ({
   setLoopEnabled: (enabled: boolean) => mockSetLoopEnabled(enabled),
   setVolume: (v: number) => mockSetVolume(v),
   loadPersistedVolume: () => mockLoadPersistedVolume(),
+  startMonitor: (ms: number) => mockStartMonitor(ms),
+  updateMonitor: (ms: number) => mockUpdateMonitor(ms),
+  stopMonitor: () => mockStopMonitor(),
 }));
 
 let lastResult: ReturnType<typeof useAudioPlayer>;
@@ -184,5 +190,24 @@ describe('useAudioPlayer', () => {
     });
 
     expect(mockSetLoopEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('forwards the rolling-monitor controls to the engine', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      void lastResult.startMonitor(4200);
+    });
+    expect(mockStartMonitor).toHaveBeenCalledWith(4200);
+
+    act(() => {
+      lastResult.updateMonitor(4300);
+    });
+    expect(mockUpdateMonitor).toHaveBeenCalledWith(4300);
+
+    act(() => {
+      void lastResult.stopMonitor();
+    });
+    expect(mockStopMonitor).toHaveBeenCalled();
   });
 });
