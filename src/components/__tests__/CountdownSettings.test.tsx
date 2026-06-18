@@ -77,19 +77,6 @@ function findAllByLabel(root: ReactTestRenderer['root'], label: string) {
   return root.findAll((node) => node.props.accessibilityLabel === label);
 }
 
-// The settings panel is collapsed by default; reveal Mode/Length/BPM by
-// pressing the expand affordance before asserting on the inner controls.
-function expand(tree: ReactTestRenderer) {
-  const btn = tree.root.findAll(
-    (node) =>
-      node.props.accessibilityLabel === 'Expand count-in settings' &&
-      typeof node.props.onPress === 'function',
-  )[0];
-  act(() => {
-    btn.props.onPress();
-  });
-}
-
 function findBpmInput(tree: ReactTestRenderer) {
   return tree.root.findAll(
     (node) =>
@@ -120,46 +107,20 @@ describe('CountdownSettings', () => {
     );
   });
 
-  it('keeps the controls collapsed until expanded', () => {
+  it('renders mode and the seconds-based length presets inline', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    expect(findByText(tree.root, 'Silent')).toHaveLength(0);
-    expect(findByText(tree.root, '3s')).toHaveLength(0);
-  });
-
-  it('shows a settings summary when enabled', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome' }),
-      onChange,
-    );
-    expect(findByText(tree.root, '3s · Metronome · Once')).toHaveLength(1);
-  });
-
-  it('reflects an every-loop count-in in the summary', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, repeat: 'everyLoop' }),
-      onChange,
-    );
-    expect(findByText(tree.root, '3s · Silent · Every loop')).toHaveLength(1);
-  });
-
-  it('shows mode and seconds-based length when expanded', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    expand(tree);
     expect(findByText(tree.root, 'Silent')).toHaveLength(1);
     expect(findByText(tree.root, 'Metronome')).toHaveLength(1);
     expect(findByText(tree.root, '1s')).toHaveLength(1);
     expect(findByText(tree.root, '3s')).toHaveLength(1);
+    expect(findByText(tree.root, '15s')).toHaveLength(1);
     expect(findByText(tree.root, '30s')).toHaveLength(1);
   });
 
   it('switches mode to metronome', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    expand(tree);
     const metronomeChip = findByLabel(tree.root, 'Mode Metronome')[0];
     act(() => {
       metronomeChip.props.onPress();
@@ -172,7 +133,6 @@ describe('CountdownSettings', () => {
   it('switches length preset', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    expand(tree);
     const tenSecondsChip = findByLabel(tree.root, 'Length 10s')[0];
     act(() => {
       tenSecondsChip.props.onPress();
@@ -187,7 +147,6 @@ describe('CountdownSettings', () => {
   it('switches the count-in repeat scope', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    expand(tree);
     const everyLoopChip = findByLabel(tree.root, 'Count in Every loop')[0];
     act(() => {
       everyLoopChip.props.onPress();
@@ -203,7 +162,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome' }),
       onChange,
     );
-    expand(tree);
     expect(findAllByLabel(tree.root, 'BPM').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -213,7 +171,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'silent' }),
       onChange,
     );
-    expand(tree);
     expect(findAllByLabel(tree.root, 'BPM')).toHaveLength(0);
   });
 
@@ -223,7 +180,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('100');
@@ -239,7 +195,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome' }),
       onChange,
     );
-    expand(tree);
     expect(findByText(tree.root, '1–300')).toHaveLength(1);
   });
 
@@ -249,7 +204,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('');
@@ -267,7 +221,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('999');
@@ -285,7 +238,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('999');
@@ -306,7 +258,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('999');
@@ -325,7 +276,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('0');
@@ -344,7 +294,6 @@ describe('CountdownSettings', () => {
       defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
       onChange,
     );
-    expand(tree);
     const bpmInput = findBpmInput(tree);
     act(() => {
       bpmInput.props.onChangeText('');

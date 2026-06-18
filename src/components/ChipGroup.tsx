@@ -27,6 +27,10 @@ interface ChipGroupProps<T> {
   style?: ViewStyle;
 }
 
+// Slim pills read as ~30pt tall; pad the touch area back out to the 44pt
+// minimum vertically (and a little horizontally) without inflating the visual.
+const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 2, right: 2 } as const;
+
 // A compact row of single-select chips. Extracted so the count-in settings
 // (mode / length / repeat) and the skip-interval control share one tactile,
 // theme-aware control instead of each re-implementing chip rendering.
@@ -51,12 +55,13 @@ export function ChipGroup<T>({
             accessibilityLabel={`${accessibilityLabelPrefix} ${option.label}`}
             accessibilityState={{ selected }}
             onPress={() => onChange(option.value)}
+            // The pill is intentionally short; the hitSlop restores a ≥44pt
+            // tappable area so the slimmer visual keeps the touch target.
+            hitSlop={CHIP_HIT_SLOP}
             style={[
               styles.chip,
               {
-                backgroundColor: selected
-                  ? theme.colors.accent
-                  : theme.colors.background,
+                backgroundColor: selected ? theme.colors.accent : 'transparent',
                 borderColor: selected
                   ? theme.colors.accent
                   : theme.colors.border,
@@ -89,11 +94,12 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   chip: {
-    minWidth: 44,
-    minHeight: 36,
-    paddingHorizontal: spacing.sm,
+    minWidth: 40,
+    minHeight: 30,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -81,7 +81,7 @@ jest.mock('@/src/hooks/useSkipInterval', () => ({
     skipMs: 5000,
     setSkipSeconds: jest.fn(),
   }),
-  SKIP_PRESETS: [1, 2, 5, 10],
+  SKIP_PRESETS: [1, 3, 5, 10, 15, 30],
 }));
 
 jest.mock('@/src/hooks/useCountdown', () => ({
