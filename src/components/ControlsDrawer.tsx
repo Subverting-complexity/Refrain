@@ -6,6 +6,7 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { CountdownConfig } from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
+import { CHIP_HIT_SLOP, chipStyles, pillColors } from './chipStyles';
 import { CountdownSettings } from './CountdownSettings';
 import { SkipControls } from './SkipControls';
 import { VolumeControl } from './VolumeControl';
@@ -39,9 +40,6 @@ const PANEL_CHIPS: {
   { key: 'skip', label: 'Skip', icon: 'play-skip-forward-outline' },
 ];
 
-// Slim chips read short; pad the touch area back to the 44pt minimum.
-const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 2, right: 2 } as const;
-
 /**
  * Consolidates the count-in, volume, skip, and segment controls into a single
  * drawer. A chip row triggers the controls: tapping Count-in / Volume / Skip
@@ -72,39 +70,36 @@ export function ControlsDrawer({
     accessibilityLabel: string,
     onPress: () => void,
     accessibilityState?: { expanded?: boolean },
-  ) => (
-    <AccessiblePressable
-      key={label}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={accessibilityState}
-      onPress={onPress}
-      hitSlop={CHIP_HIT_SLOP}
-      style={[
-        styles.chip,
-        {
-          backgroundColor: active ? theme.colors.accent : 'transparent',
-          borderColor: active ? theme.colors.accent : theme.colors.border,
-        },
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={16}
-        color={active ? theme.colors.accentText : theme.colors.textSecondary}
-      />
-      <Text
+  ) => {
+    const colors = pillColors(theme, active);
+    return (
+      <AccessiblePressable
+        key={label}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={accessibilityState}
+        onPress={onPress}
+        hitSlop={CHIP_HIT_SLOP}
         style={[
-          styles.chipText,
+          chipStyles.pill,
+          styles.chip,
           {
-            color: active ? theme.colors.accentText : theme.colors.textPrimary,
+            backgroundColor: colors.backgroundColor,
+            borderColor: colors.borderColor,
           },
         ]}
       >
-        {label}
-      </Text>
-    </AccessiblePressable>
-  );
+        <Ionicons
+          name={icon}
+          size={16}
+          color={active ? theme.colors.accentText : theme.colors.textSecondary}
+        />
+        <Text style={[chipStyles.pillText, { color: colors.textColor }]}>
+          {label}
+        </Text>
+      </AccessiblePressable>
+    );
+  };
 
   return (
     <View
@@ -179,14 +174,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     minHeight: 32,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderWidth: 1,
-    borderRadius: 999,
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   panel: {
     borderTopWidth: 1,

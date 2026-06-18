@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -10,7 +10,6 @@ import { ChipGroup, ChipOption } from './ChipGroup';
 interface SkipControlsProps {
   skipSeconds: number;
   onSkipSecondsChange: (seconds: number) => void;
-  style?: ViewStyle;
 }
 
 const OPTIONS: ChipOption<number>[] = SKIP_PRESETS.map((s) => ({
@@ -24,12 +23,11 @@ const OPTIONS: ChipOption<number>[] = SKIP_PRESETS.map((s) => ({
 export function SkipControls({
   skipSeconds,
   onSkipSecondsChange,
-  style,
 }: SkipControlsProps) {
   const { theme } = useTheme();
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={styles.container}>
       <View style={styles.label}>
         <Ionicons
           name="play-skip-forward-outline"
