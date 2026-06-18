@@ -22,6 +22,11 @@ graphify-out/cost.json
 graphify-out/.graphify_python
 graphify-out/.graphify_root
 graphify-out/.graphify_analysis.json
+# Keyed by absolute paths + mtimes, so graphify rewrites them on every run
+# (including the per-session Stop hook). In a worktree-per-session setup that
+# makes them dirty on essentially every run with nothing of value lost.
+graphify-out/manifest.json
+graphify-out/cache/stat-index.json
 
 # fallow — local analysis cache
 .fallow/
