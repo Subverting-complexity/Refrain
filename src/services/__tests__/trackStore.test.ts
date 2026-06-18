@@ -209,6 +209,19 @@ describe('deleteTrack', () => {
     );
   });
 
+  it('cascade-removes the track segment profiles', () => {
+    jest.resetModules();
+    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+
+    const { deleteTrack } = require('../trackStore');
+    deleteTrack('track-1');
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM marker_profiles'),
+      'track-1',
+    );
+  });
+
   it('deletes the audio file from disk on removal', () => {
     jest.resetModules();
     mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
@@ -232,15 +245,21 @@ describe('deleteTrack', () => {
       return { uri: sampleTrack.uri };
     });
     mockRunSync.mockImplementation((sql: string) => {
-      callOrder.push(
-        sql.includes('track_markers') ? 'delete-markers' : 'delete-row',
-      );
+      if (sql.includes('track_markers')) callOrder.push('delete-markers');
+      else if (sql.includes('marker_profiles'))
+        callOrder.push('delete-profiles');
+      else callOrder.push('delete-row');
     });
 
     const { deleteTrack } = require('../trackStore');
     deleteTrack('track-1');
 
-    expect(callOrder).toEqual(['lookup', 'delete-row', 'delete-markers']);
+    expect(callOrder).toEqual([
+      'lookup',
+      'delete-row',
+      'delete-markers',
+      'delete-profiles',
+    ]);
   });
 
   it('does not throw when the file is already missing', () => {

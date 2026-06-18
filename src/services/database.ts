@@ -26,6 +26,17 @@ export function getDatabase(): SQLite.SQLiteDatabase {
         markerB INTEGER,
         loopEnabled INTEGER NOT NULL DEFAULT 1
       );
+      CREATE TABLE IF NOT EXISTS marker_profiles (
+        id TEXT PRIMARY KEY NOT NULL,
+        trackId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        markerA INTEGER,
+        markerB INTEGER,
+        loopEnabled INTEGER NOT NULL DEFAULT 1,
+        createdAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_marker_profiles_trackId
+        ON marker_profiles (trackId);
     `);
     migrateTracksSchema(db);
   }

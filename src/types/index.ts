@@ -67,6 +67,31 @@ export interface ActiveMarkers {
   loopEnabled: boolean;
 }
 
+/**
+ * A named, saved A/B segment for a single track. Wraps an {@link ActiveMarkers}
+ * set with an identity (`id`), the owning track (`trackId`), a user-facing
+ * `name`, and a `createdAt` timestamp used for stable ordering. Persisted
+ * alongside the active markers in the per-track store.
+ */
+export interface SegmentProfile {
+  id: string;
+  trackId: string;
+  name: string;
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: boolean;
+  createdAt: number;
+}
+
+/**
+ * The caller-supplied fields when saving a new {@link SegmentProfile}. The
+ * store generates `id` and `createdAt` and derives `trackId` from its argument.
+ */
+export type SegmentProfileInput = Pick<
+  SegmentProfile,
+  'name' | 'markerA' | 'markerB' | 'loopEnabled'
+>;
+
 export type WaveformPeaks = number[];
 
 export type CountdownMode = 'silent' | 'metronome';

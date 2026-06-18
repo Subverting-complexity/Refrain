@@ -7,7 +7,7 @@ import {
   putStoredTrack,
   StoredTrack,
 } from './database.web';
-import { deleteMarkers } from './markerStore.web';
+import { deleteMarkers, deleteProfilesForTrack } from './markerStore.web';
 import {
   deleteBlob,
   getObjectUrl,
@@ -75,6 +75,7 @@ export async function updateTrackDuration(
 export async function deleteTrack(id: string): Promise<void> {
   await deleteStoredTrack(id);
   await deleteMarkers(id);
+  await deleteProfilesForTrack(id);
   // Revoke the cached object URL and drop the blob. Fire-and-forget: a
   // failed blob delete must not interrupt removal from the library.
   revokeObjectUrl(id);

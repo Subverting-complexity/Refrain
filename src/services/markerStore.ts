@@ -1,4 +1,5 @@
-import { ActiveMarkers } from '../types';
+import { ActiveMarkers, SegmentProfile, SegmentProfileInput } from '../types';
+import { generateId } from '../utils/generateId';
 import { getDatabase } from './database';
 
 /**
@@ -57,4 +58,96 @@ export function setActiveMarkers(
 export function deleteMarkers(trackId: string): void {
   const db = getDatabase();
   db.runSync('DELETE FROM track_markers WHERE trackId = ?', trackId);
+}
+
+// --- Segment profiles ------------------------------------------------------
+
+interface ProfileRow {
+  id: string;
+  trackId: string;
+  name: string;
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: number;
+  createdAt: number;
+}
+
+function toProfile(row: ProfileRow): SegmentProfile {
+  return {
+    id: row.id,
+    trackId: row.trackId,
+    name: row.name,
+    markerA: row.markerA,
+    markerB: row.markerB,
+    loopEnabled: row.loopEnabled === 1,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Lists a track's saved segment profiles in a stable order (oldest first,
+ * then by id to break createdAt ties).
+ */
+export function listProfiles(trackId: string): SegmentProfile[] {
+  const db = getDatabase();
+  const rows = db.getAllSync<ProfileRow>(
+    `SELECT id, trackId, name, markerA, markerB, loopEnabled, createdAt
+       FROM marker_profiles
+      WHERE trackId = ?
+      ORDER BY createdAt ASC, id ASC`,
+    trackId,
+  );
+  return rows.map(toProfile);
+}
+
+/** Saves a new segment profile for a track and returns the stored record. */
+export function saveProfile(
+  trackId: string,
+  input: SegmentProfileInput,
+): SegmentProfile {
+  const db = getDatabase();
+  const profile: SegmentProfile = {
+    id: generateId(),
+    trackId,
+    name: input.name,
+    markerA: input.markerA,
+    markerB: input.markerB,
+    loopEnabled: input.loopEnabled,
+    createdAt: Date.now(),
+  };
+  db.runSync(
+    `INSERT INTO marker_profiles
+       (id, trackId, name, markerA, markerB, loopEnabled, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    profile.id,
+    profile.trackId,
+    profile.name,
+    profile.markerA,
+    profile.markerB,
+    profile.loopEnabled ? 1 : 0,
+    profile.createdAt,
+  );
+  return profile;
+}
+
+/** Renames an existing profile by id. */
+export function renameProfile(profileId: string, name: string): void {
+  const db = getDatabase();
+  db.runSync(
+    'UPDATE marker_profiles SET name = ? WHERE id = ?',
+    name,
+    profileId,
+  );
+}
+
+/** Deletes a single profile by id. */
+export function deleteProfile(profileId: string): void {
+  const db = getDatabase();
+  db.runSync('DELETE FROM marker_profiles WHERE id = ?', profileId);
+}
+
+/** Removes all profiles for a track. Used when a track is deleted. */
+export function deleteProfilesForTrack(trackId: string): void {
+  const db = getDatabase();
+  db.runSync('DELETE FROM marker_profiles WHERE trackId = ?', trackId);
 }
