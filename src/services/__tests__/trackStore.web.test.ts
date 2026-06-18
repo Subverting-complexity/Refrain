@@ -26,6 +26,12 @@ jest.mock('../database.web', () => ({
   getStoredTrackIds: () => mockGetStoredTrackIds(),
 }));
 
+const mockDeleteMarkers = jest.fn<Promise<void>, [string]>();
+
+jest.mock('../markerStore.web', () => ({
+  deleteMarkers: (id: string) => mockDeleteMarkers(id),
+}));
+
 const mockGetObjectUrl = jest.fn<Promise<string | null>, [string]>();
 const mockRevokeObjectUrl = jest.fn();
 const mockDeleteBlob = jest.fn<Promise<void>, [string]>();
@@ -72,6 +78,7 @@ beforeEach(() => {
   mockGetObjectUrl.mockResolvedValue('blob:obj/track-1');
   mockDeleteBlob.mockResolvedValue(undefined);
   mockListBlobIds.mockResolvedValue([]);
+  mockDeleteMarkers.mockResolvedValue(undefined);
 });
 
 describe('loadTracks', () => {
@@ -136,9 +143,10 @@ describe('updateTrackDuration', () => {
 });
 
 describe('deleteTrack', () => {
-  it('deletes the row, revokes the URL, and removes the blob', async () => {
+  it('deletes the row, markers, revokes the URL, and removes the blob', async () => {
     await deleteTrack('track-1');
     expect(mockDeleteStoredTrack).toHaveBeenCalledWith('track-1');
+    expect(mockDeleteMarkers).toHaveBeenCalledWith('track-1');
     expect(mockRevokeObjectUrl).toHaveBeenCalledWith('track-1');
     expect(mockDeleteBlob).toHaveBeenCalledWith('track-1');
   });

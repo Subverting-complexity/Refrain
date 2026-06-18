@@ -20,6 +20,12 @@ export function getDatabase(): SQLite.SQLiteDatabase {
         key TEXT PRIMARY KEY NOT NULL,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS track_markers (
+        trackId TEXT PRIMARY KEY NOT NULL,
+        markerA INTEGER,
+        markerB INTEGER,
+        loopEnabled INTEGER NOT NULL DEFAULT 1
+      );
     `);
     migrateTracksSchema(db);
   }

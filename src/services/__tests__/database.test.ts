@@ -55,6 +55,14 @@ describe('getDatabase', () => {
     );
   });
 
+  it('creates the track_markers table', () => {
+    getDatabase();
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('CREATE TABLE IF NOT EXISTS track_markers'),
+    );
+  });
+
   it('does not ALTER when durationEstimated already exists (fresh DB)', () => {
     mockGetAllSync.mockReturnValue(FRESH_COLUMNS);
 

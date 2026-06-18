@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { Track } from '../types';
 import { getDatabase } from './database';
+import { deleteMarkers } from './markerStore';
 
 let migrated = false;
 
@@ -96,6 +97,7 @@ export function deleteTrack(id: string): void {
     id,
   );
   db.runSync('DELETE FROM tracks WHERE id = ?', id);
+  deleteMarkers(id);
   if (row?.uri) {
     deleteFileIfExists(row.uri);
   }
