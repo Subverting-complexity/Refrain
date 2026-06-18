@@ -33,7 +33,7 @@ export function CenteredDialog({
     <Modal visible transparent animationType="fade" onRequestClose={onDismiss}>
       <View style={styles.overlay}>
         <AccessiblePressable
-          style={styles.backdrop}
+          style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           accessibilityRole="button"
           accessibilityLabel="Dismiss dialog"
           onPress={onDismiss}
@@ -73,7 +73,6 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   card: {
     width: '100%',

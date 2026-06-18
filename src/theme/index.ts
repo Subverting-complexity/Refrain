@@ -39,6 +39,8 @@ export interface ThemeColors {
   markerAText: string;
   markerB: string;
   markerBText: string;
+  /** Dimming scrim behind centred modal dialogs. */
+  overlay: string;
 }
 
 export interface ThemeTypography {
@@ -85,6 +87,7 @@ const darkColors: ThemeColors = {
   markerAText: '#3a2600',
   markerB: '#ff5d77',
   markerBText: '#ffffff',
+  overlay: 'rgba(0, 0, 0, 0.5)',
 };
 
 const lightColors: ThemeColors = {
@@ -101,6 +104,7 @@ const lightColors: ThemeColors = {
   markerAText: '#ffffff',
   markerB: '#c4485f',
   markerBText: '#ffffff',
+  overlay: 'rgba(0, 0, 0, 0.5)',
 };
 
 export const darkTheme: Theme = {
