@@ -12,6 +12,7 @@
       "bundleIdentifier": "com.subvertingcomplexity.refrain",
       "supportsTablet": true,
       "infoPlist": {
+        "UIBackgroundModes": ["audio"],
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Audio",
