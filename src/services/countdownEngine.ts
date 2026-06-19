@@ -12,13 +12,16 @@ const IDLE_STATE: CountdownState = {
   displayValue: 0,
 };
 
-const DEFAULT_BPM = 120;
 const BEATS_PER_BAR = 4;
+// The count-in ticks once per second so the audible click lines up exactly with
+// the on-screen number (3 → 2 → 1). One tick = one second = one click.
+const TICK_MS = 1000;
 
 let currentState: CountdownState = { ...IDLE_STATE };
 const listeners = new Set<CountdownListener>();
 let timerId: ReturnType<typeof setTimeout> | null = null;
 let clickPlayer: AudioPlayer | null = null;
+let startTimestamp = 0;
 
 function notify(state: CountdownState): void {
   for (const cb of listeners) {
@@ -26,20 +29,14 @@ function notify(state: CountdownState): void {
   }
 }
 
-export function computeTotalBeats(
-  duration: CountdownDuration,
-  bpm: number,
-): number {
+// Total ticks (= seconds = clicks) for a count-in. Seconds-type durations map
+// straight to seconds; bar-type durations expand to a beat per bar-quarter,
+// each still a one-second tick.
+export function computeTotalBeats(duration: CountdownDuration): number {
   if (duration.type === 'bars') {
     return duration.bars * BEATS_PER_BAR;
   }
-  const effectiveBpm = bpm > 0 ? bpm : DEFAULT_BPM;
-  return Math.max(1, Math.round((duration.seconds * effectiveBpm) / 60));
-}
-
-export function beatIntervalMs(bpm: number): number {
-  const effectiveBpm = bpm > 0 ? bpm : DEFAULT_BPM;
-  return 60000 / effectiveBpm;
+  return Math.max(1, Math.round(duration.seconds));
 }
 
 async function loadClick(): Promise<void> {
@@ -49,6 +46,14 @@ async function loadClick(): Promise<void> {
   } catch {
     clickPlayer = null;
   }
+}
+
+/**
+ * Warm up the click sound ahead of time so the first beat isn't late while the
+ * asset decodes. Safe to call repeatedly; a no-op once loaded.
+ */
+export async function preload(): Promise<void> {
+  await loadClick();
 }
 
 async function playClick(): Promise<void> {
@@ -61,21 +66,14 @@ async function playClick(): Promise<void> {
   }
 }
 
-let startTimestamp = 0;
-let activeDuration: CountdownDuration | null = null;
-let activeTotalBeats = 0;
-
-function computeDisplayValue(beatsRemaining: number): number {
-  if (!activeDuration || activeDuration.type === 'bars') {
-    return beatsRemaining;
-  }
-  // For seconds-type: map remaining beats proportionally to remaining seconds.
-  // This is beat-count-based (not wall-clock-based) so it works correctly with
-  // the drift-corrected timer that may fire zero-delay ticks at the same timestamp.
-  return Math.max(
-    1,
-    Math.ceil((beatsRemaining / activeTotalBeats) * activeDuration.seconds),
-  );
+// Schedule the next tick with drift correction: anchor every beat to the
+// original start so accumulated setTimeout slop can't make the count-in drift.
+function scheduleNext(config: CountdownConfig, onFinished: () => void): void {
+  const nextBeat = currentState.currentBeat + 1;
+  const delay = Math.max(0, startTimestamp + nextBeat * TICK_MS - Date.now());
+  timerId = setTimeout(() => {
+    void tick(config, onFinished);
+  }, delay);
 }
 
 async function tick(
@@ -84,10 +82,7 @@ async function tick(
 ): Promise<void> {
   if (currentState.phase !== 'counting') return;
 
-  if (config.mode === 'metronome') {
-    await playClick();
-  }
-
+  // The just-elapsed second was the last one: time to play.
   if (currentState.beatsRemaining <= 1) {
     currentState = {
       phase: 'finished',
@@ -102,22 +97,21 @@ async function tick(
   }
 
   const nextBeat = currentState.currentBeat + 1;
-  const nextBeatsRemaining = currentState.beatsRemaining - 1;
+  const beatsRemaining = currentState.beatsRemaining - 1;
   currentState = {
     phase: 'counting',
-    beatsRemaining: nextBeatsRemaining,
+    beatsRemaining,
     totalBeats: currentState.totalBeats,
     currentBeat: nextBeat,
-    displayValue: computeDisplayValue(nextBeatsRemaining),
+    displayValue: beatsRemaining,
   };
   notify(currentState);
 
-  const interval = beatIntervalMs(config.bpm);
-  const expectedNext = startTimestamp + nextBeat * interval;
-  const delay = Math.max(0, expectedNext - Date.now());
-  timerId = setTimeout(() => {
-    void tick(config, onFinished);
-  }, delay);
+  if (config.mode === 'metronome') {
+    await playClick();
+  }
+
+  scheduleNext(config, onFinished);
 }
 
 export async function start(
@@ -131,9 +125,7 @@ export async function start(
     return;
   }
 
-  const totalBeats = computeTotalBeats(config.duration, config.bpm);
-  activeDuration = config.duration;
-  activeTotalBeats = totalBeats;
+  const totalBeats = computeTotalBeats(config.duration);
 
   if (config.mode === 'metronome') {
     await loadClick();
@@ -145,14 +137,17 @@ export async function start(
     beatsRemaining: totalBeats,
     totalBeats,
     currentBeat: 0,
-    displayValue: computeDisplayValue(totalBeats),
+    displayValue: totalBeats,
   };
   notify(currentState);
 
-  const interval = beatIntervalMs(config.bpm);
-  timerId = setTimeout(() => {
-    void tick(config, onFinished);
-  }, interval);
+  // Click on the very first second (the downbeat) so there's an immediate beat
+  // instead of a silent gap before the first tick.
+  if (config.mode === 'metronome') {
+    await playClick();
+  }
+
+  scheduleNext(config, onFinished);
 }
 
 export function cancel(): void {
@@ -160,8 +155,6 @@ export function cancel(): void {
     clearTimeout(timerId);
     timerId = null;
   }
-  activeDuration = null;
-  activeTotalBeats = 0;
   if (currentState.phase !== 'idle') {
     currentState = { ...IDLE_STATE };
     notify(currentState);

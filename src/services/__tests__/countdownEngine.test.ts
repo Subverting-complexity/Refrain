@@ -22,7 +22,7 @@ function silentConfig(
     enabled: true,
     mode: 'silent',
     duration: { type: 'bars', bars: 1 },
-    bpm: 120,
+    repeat: 'once',
     ...overrides,
   };
 }
@@ -34,9 +34,15 @@ function metronomeConfig(
     enabled: true,
     mode: 'metronome',
     duration: { type: 'bars', bars: 1 },
-    bpm: 120,
+    repeat: 'once',
     ...overrides,
   };
+}
+
+// Let the awaited click playback (seekTo → play) settle between ticks.
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe('countdownEngine', () => {
@@ -55,51 +61,31 @@ describe('countdownEngine', () => {
   });
 
   describe('computeTotalBeats', () => {
-    it('computes beats for bar-based duration', () => {
-      expect(
-        countdownEngine.computeTotalBeats({ type: 'bars', bars: 1 }, 120),
-      ).toBe(4);
-      expect(
-        countdownEngine.computeTotalBeats({ type: 'bars', bars: 2 }, 120),
-      ).toBe(8);
-      expect(
-        countdownEngine.computeTotalBeats({ type: 'bars', bars: 4 }, 120),
-      ).toBe(16);
+    it('computes one tick per bar-quarter for bar durations', () => {
+      expect(countdownEngine.computeTotalBeats({ type: 'bars', bars: 1 })).toBe(
+        4,
+      );
+      expect(countdownEngine.computeTotalBeats({ type: 'bars', bars: 2 })).toBe(
+        8,
+      );
+      expect(countdownEngine.computeTotalBeats({ type: 'bars', bars: 4 })).toBe(
+        16,
+      );
     });
 
-    it('computes beats for seconds-based duration', () => {
+    it('computes one tick per second for second durations', () => {
       expect(
-        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 2 }, 120),
-      ).toBe(4);
-      expect(
-        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 3 }, 60),
+        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 3 }),
       ).toBe(3);
+      expect(
+        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 10 }),
+      ).toBe(10);
     });
 
-    it('uses default BPM when bpm is zero', () => {
+    it('returns at least 1 tick', () => {
       expect(
-        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 2 }, 0),
-      ).toBe(4);
-    });
-
-    it('returns at least 1 beat', () => {
-      expect(
-        countdownEngine.computeTotalBeats(
-          { type: 'seconds', seconds: 0.01 },
-          60,
-        ),
+        countdownEngine.computeTotalBeats({ type: 'seconds', seconds: 0.01 }),
       ).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  describe('beatIntervalMs', () => {
-    it('calculates interval from BPM', () => {
-      expect(countdownEngine.beatIntervalMs(120)).toBe(500);
-      expect(countdownEngine.beatIntervalMs(60)).toBe(1000);
-    });
-
-    it('uses default BPM when zero', () => {
-      expect(countdownEngine.beatIntervalMs(0)).toBe(500);
     });
   });
 
@@ -119,8 +105,8 @@ describe('countdownEngine', () => {
       unsub();
 
       const onFinished = jest.fn();
-      countdownEngine.start(silentConfig(), onFinished);
-      jest.advanceTimersByTime(500);
+      void countdownEngine.start(silentConfig(), onFinished);
+      jest.advanceTimersByTime(1000);
 
       expect(listener).not.toHaveBeenCalled();
     });
@@ -133,13 +119,12 @@ describe('countdownEngine', () => {
       expect(onFinished).toHaveBeenCalled();
     });
 
-    it('starts countdown with correct total beats', async () => {
+    it('starts the countdown with the full tick count', async () => {
       const listener = jest.fn();
       countdownEngine.subscribe(listener);
       listener.mockClear();
 
-      const onFinished = jest.fn();
-      await countdownEngine.start(silentConfig(), onFinished);
+      await countdownEngine.start(silentConfig(), jest.fn());
 
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -152,18 +137,18 @@ describe('countdownEngine', () => {
       );
     });
 
-    it('ticks through all beats and finishes', async () => {
+    it('ticks once per second and finishes', async () => {
       const states: CountdownState[] = [];
       countdownEngine.subscribe((s) => states.push({ ...s }));
 
       const onFinished = jest.fn();
       await countdownEngine.start(silentConfig(), onFinished);
 
-      // 4 beats at 120 BPM = 4 * 500ms = 2000ms
-      jest.advanceTimersByTime(500);
-      jest.advanceTimersByTime(500);
-      jest.advanceTimersByTime(500);
-      jest.advanceTimersByTime(500);
+      // 4 ticks at one second each.
+      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(1000);
 
       expect(onFinished).toHaveBeenCalledTimes(1);
 
@@ -174,88 +159,27 @@ describe('countdownEngine', () => {
     });
 
     it('does not play click sounds in silent mode', async () => {
-      const onFinished = jest.fn();
-      await countdownEngine.start(silentConfig(), onFinished);
-
-      jest.advanceTimersByTime(2000);
-
+      await countdownEngine.start(silentConfig(), jest.fn());
+      jest.advanceTimersByTime(4000);
       expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
     });
   });
 
-  describe('displayValue for bars-type duration', () => {
-    it('equals beatsRemaining on initial state', async () => {
-      const listener = jest.fn();
-      countdownEngine.subscribe(listener);
-      listener.mockClear();
-
-      await countdownEngine.start(silentConfig(), jest.fn());
-
-      expect(listener).toHaveBeenCalledWith(
-        expect.objectContaining({ beatsRemaining: 4, displayValue: 4 }),
-      );
-    });
-
-    it('counts down with beatsRemaining as ticks fire', async () => {
+  describe('displayValue', () => {
+    it('counts down in seconds, one per tick', async () => {
       const states: CountdownState[] = [];
       countdownEngine.subscribe((s) => states.push({ ...s }));
-      await countdownEngine.start(silentConfig(), jest.fn());
 
-      jest.advanceTimersByTime(500); // beat 1
-      jest.advanceTimersByTime(500); // beat 2
-
-      const counting = states.filter((s) => s.phase === 'counting');
-      expect(counting[0].displayValue).toBe(4); // initial
-      expect(counting[1].displayValue).toBe(3); // after beat 1
-      expect(counting[2].displayValue).toBe(2); // after beat 2
-    });
-  });
-
-  describe('displayValue for seconds-type duration', () => {
-    it('shows total seconds on initial state, not total beats', async () => {
-      const listener = jest.fn();
-      countdownEngine.subscribe(listener);
-      listener.mockClear();
-
-      // 3s at 120 BPM = 6 beats, but displayValue should start at 3
       await countdownEngine.start(
         silentConfig({ duration: { type: 'seconds', seconds: 3 } }),
         jest.fn(),
       );
 
-      expect(listener).toHaveBeenCalledWith(
-        expect.objectContaining({ beatsRemaining: 6, displayValue: 3 }),
-      );
-    });
-
-    it('decrements in seconds as beats fire', async () => {
-      const states: CountdownState[] = [];
-      countdownEngine.subscribe((s) => states.push({ ...s }));
-
-      // 3s at 120 BPM = 6 beats (totalBeats=6)
-      await countdownEngine.start(
-        silentConfig({ duration: { type: 'seconds', seconds: 3 } }),
-        jest.fn(),
-      );
-
-      // The drift-corrected timer fires beat 1 at 500ms, then immediately
-      // fires beat 2 with a 0ms delay (both within the same 500ms advance).
-      // Beat 3 is scheduled with a 500ms delay, so the 2nd advance fires it.
-      jest.advanceTimersByTime(500); // fires beats 1 & 2 (0-delay chain)
-      jest.advanceTimersByTime(500); // fires beat 3
-      jest.advanceTimersByTime(500); // fires beat 4
+      jest.advanceTimersByTime(1000); // tick 1
+      jest.advanceTimersByTime(1000); // tick 2
 
       const counting = states.filter((s) => s.phase === 'counting');
-      // counting[0]: initial, beatsRemaining=6, ceil(6/6*3)=3
-      expect(counting[0].displayValue).toBe(3);
-      // counting[1]: beat 1, beatsRemaining=5, ceil(5/6*3)=ceil(2.5)=3
-      expect(counting[1].displayValue).toBe(3);
-      // counting[2]: beat 2, beatsRemaining=4, ceil(4/6*3)=ceil(2.0)=2
-      expect(counting[2].displayValue).toBe(2);
-      // counting[3]: beat 3, beatsRemaining=3, ceil(3/6*3)=ceil(1.5)=2
-      expect(counting[3].displayValue).toBe(2);
-      // counting[4]: beat 4, beatsRemaining=2, ceil(2/6*3)=ceil(1.0)=1
-      expect(counting[4].displayValue).toBe(1);
+      expect(counting.map((s) => s.displayValue)).toEqual([3, 2, 1]);
     });
 
     it('never shows a value below 1 while counting', async () => {
@@ -266,7 +190,6 @@ describe('countdownEngine', () => {
         silentConfig({ duration: { type: 'seconds', seconds: 1 } }),
         jest.fn(),
       );
-
       jest.advanceTimersByTime(1000);
 
       const counting = states.filter((s) => s.phase === 'counting');
@@ -275,16 +198,27 @@ describe('countdownEngine', () => {
   });
 
   describe('start (metronome mode)', () => {
-    it('loads and plays click sounds', async () => {
-      const onFinished = jest.fn();
-      await countdownEngine.start(metronomeConfig(), onFinished);
+    it('preloads the click and plays a downbeat at the start', async () => {
+      await countdownEngine.start(metronomeConfig(), jest.fn());
 
       expect(mockCreateAudioPlayer).toHaveBeenCalled();
+      // The downbeat fires immediately, not after the first second.
+      expect(mockPlay).toHaveBeenCalledTimes(1);
+    });
 
-      jest.advanceTimersByTime(500);
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(mockPlay).toHaveBeenCalled();
+    it('plays a click on each subsequent tick', async () => {
+      await countdownEngine.start(metronomeConfig(), jest.fn());
+      mockPlay.mockClear();
+
+      jest.advanceTimersByTime(1000);
+      await flushMicrotasks();
+
+      expect(mockPlay).toHaveBeenCalledTimes(1);
+    });
+
+    it('preload() warms the click sound without starting', async () => {
+      await countdownEngine.preload();
+      expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -293,13 +227,12 @@ describe('countdownEngine', () => {
       const onFinished = jest.fn();
       await countdownEngine.start(silentConfig(), onFinished);
 
-      jest.advanceTimersByTime(500);
+      jest.advanceTimersByTime(1000);
       countdownEngine.cancel();
 
-      const state = countdownEngine.getState();
-      expect(state.phase).toBe('idle');
+      expect(countdownEngine.getState().phase).toBe('idle');
 
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(4000);
       expect(onFinished).not.toHaveBeenCalled();
     });
 

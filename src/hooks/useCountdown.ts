@@ -8,7 +8,6 @@ const DEFAULT_CONFIG: CountdownConfig = {
   mode: 'silent',
   duration: { type: 'seconds', seconds: 3 },
   repeat: 'once',
-  bpm: 120,
 };
 
 const IDLE_STATE: CountdownState = {
@@ -36,6 +35,14 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     const unsub = countdownEngine.subscribe(setCountdownState);
     return unsub;
   }, []);
+
+  // Warm up the click asset as soon as the metronome is armed so the first beat
+  // of the count-in plays without the initial decode delay.
+  useEffect(() => {
+    if (config.enabled && config.mode === 'metronome') {
+      void countdownEngine.preload();
+    }
+  }, [config.enabled, config.mode]);
 
   useEffect(() => {
     return () => {

@@ -28,10 +28,19 @@ export const chipStyles = StyleSheet.create({
 // Selected/unselected pill colours, resolved from the active theme. Both
 // chip variants share the same rule: selected fills with the accent, an
 // unselected chip is a transparent outline.
+//
+// Selected text must read on the accent fill in BOTH themes. The accent is a
+// light mint in dark mode and a mid green in light mode, so the legible
+// foreground is the *dark* colour of each palette: `accentText` (dark) in dark
+// mode, `textPrimary` (dark) in light mode. Using light-mode `accentText`
+// (white) here is what produced the low-contrast white-on-green chips.
 export function pillColors(theme: Theme, selected: boolean) {
+  const selectedText = theme.dark
+    ? theme.colors.accentText
+    : theme.colors.textPrimary;
   return {
     backgroundColor: selected ? theme.colors.accent : 'transparent',
     borderColor: selected ? theme.colors.accent : theme.colors.border,
-    textColor: selected ? theme.colors.accentText : theme.colors.textPrimary,
+    textColor: selected ? selectedText : theme.colors.textPrimary,
   };
 }
