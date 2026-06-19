@@ -31,6 +31,11 @@
     },
     "android": {
       "package": "com.subvertingcomplexity.refrain",
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#111d1f",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
