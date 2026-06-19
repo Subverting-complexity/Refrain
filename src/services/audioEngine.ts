@@ -224,13 +224,53 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   notify(currentState);
 }
 
-export async function loadTrack(
+// --- Lifecycle serialization -------------------------------------------------
+// loadTrack and unloadTrack each run a chain of awaits over the same singleton
+// (player, statusSubscription, currentTrackId). If two are allowed to interleave
+// — a back-then-tap, a double-tapped track that stacks two player screens, or
+// fast switching — two `createAudioPlayer` calls race: the module ends up
+// pointing at one player while the other is orphaned (still loaded, its status
+// subscription overwritten so it can never be removed, and unreachable by
+// play/pause/stop), or a late-finishing unload nulls the reference to the live
+// player. Both surface as two tracks overlapping with no way to stop them.
+//
+// To make that impossible, every load/unload is funnelled through a single
+// promise chain so they run strictly one-at-a-time. The internal *Impl
+// functions hold the real work and call each other directly (never the
+// enqueued public wrappers, which would deadlock on the chain).
+let lifecycleChain: Promise<unknown> = Promise.resolve();
+
+function enqueueLifecycle<T>(op: () => Promise<T>): Promise<T> {
+  // Run `op` after whatever is already queued, regardless of how the prior op
+  // settled. Keep the chain alive with a settled promise so one failure can't
+  // poison every later load/unload.
+  const result = lifecycleChain.then(op, op);
+  lifecycleChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+export function loadTrack(
+  uri: string,
+  trackId?: string,
+  trackName?: string,
+): Promise<void> {
+  return enqueueLifecycle(() => loadTrackImpl(uri, trackId, trackName));
+}
+
+export function unloadTrack(): Promise<void> {
+  return enqueueLifecycle(() => unloadTrackImpl());
+}
+
+async function loadTrackImpl(
   uri: string,
   trackId?: string,
   trackName?: string,
 ): Promise<void> {
   try {
-    await unloadTrack();
+    await unloadTrackImpl();
     // Associate this load with its track so marker changes persist and the
     // saved set can be restored below. Without an id, markers stay in-memory.
     currentTrackId = trackId ?? null;
@@ -518,7 +558,7 @@ export function setLoopRestartHandler(handler: (() => void) | null): void {
   onLoopRestart = handler;
 }
 
-export async function unloadTrack(): Promise<void> {
+async function unloadTrackImpl(): Promise<void> {
   // Persist any change still inside the debounce window for the outgoing track
   // before its id and markers are cleared, so a quick navigate-away doesn't
   // drop the last edit. Must run before currentTrackId is nulled below.

@@ -127,6 +127,24 @@ describe('audioEngine', () => {
       expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
     });
 
+    it('serializes concurrent loads so the previous player is always removed (no orphan)', async () => {
+      const { loadTrack } = require('../audioEngine');
+
+      // Fire two loads without awaiting the first: a back-then-tap or a
+      // double-tapped track that stacks two player screens. Serialization must
+      // make the second load fully unload the first, so exactly one player is
+      // ever live — never two overlapping, un-stoppable players.
+      await Promise.all([
+        loadTrack('file:///first.mp3'),
+        loadTrack('file:///second.mp3'),
+      ]);
+
+      expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
+      // The second load removed the first player; without serialization both
+      // loads would have seen a null player and removed nothing (orphan).
+      expect(mockRemove).toHaveBeenCalledTimes(1);
+    });
+
     it('registers the player for lock screen controls when a track name is provided', async () => {
       const { loadTrack } = require('../audioEngine');
 
