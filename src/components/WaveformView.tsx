@@ -56,13 +56,19 @@ interface WaveformViewProps {
   onPreviewStart?: (centerMs: number) => void;
   onPreviewMove?: (centerMs: number) => void;
   onPreviewEnd?: () => void;
+  /**
+   * Overall height of the waveform surface. Lets the player scale it to the
+   * screen so it fills the available space instead of sitting small and
+   * boxed-in. Defaults to {@link DEFAULT_WAVEFORM_HEIGHT}.
+   */
+  height?: number;
   style?: ViewStyle;
 }
 
 const isMarkerTarget = (target: DragTarget): boolean =>
   target === 'markerA' || target === 'markerB';
 
-const WAVEFORM_HEIGHT = 132;
+const DEFAULT_WAVEFORM_HEIGHT = 180;
 // The grab zone around a marker. Generous so a fingertip can land the thin
 // line, and matched to the visible handle width so the handle reads as the
 // thing you grab.
@@ -113,6 +119,7 @@ export function WaveformView({
   onPreviewStart,
   onPreviewMove,
   onPreviewEnd,
+  height = DEFAULT_WAVEFORM_HEIGHT,
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
@@ -192,13 +199,13 @@ export function WaveformView({
         ) <= MARKER_HIT_ZONE_PX;
 
       if (aHit && bHit) {
-        return y < WAVEFORM_HEIGHT / 2 ? 'markerA' : 'markerB';
+        return y < height / 2 ? 'markerA' : 'markerB';
       }
       if (aHit) return 'markerA';
       if (bHit) return 'markerB';
       return 'seek';
     },
-    [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange],
+    [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange, height],
   );
 
   // Decide what a touch does: grab an existing handle (fine-tune), drop an
@@ -543,7 +550,7 @@ export function WaveformView({
       accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
       <GestureDetector gesture={pan}>
-        <View style={styles.touchArea} onLayout={handleLayout}>
+        <View style={[styles.touchArea, { height }]} onLayout={handleLayout}>
           <View style={styles.track}>
             <View style={styles.barsContainer}>{bars}</View>
 
@@ -573,7 +580,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   touchArea: {
-    height: WAVEFORM_HEIGHT,
     paddingVertical: spacing.sm,
     position: 'relative',
   },

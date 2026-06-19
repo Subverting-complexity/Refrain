@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +44,12 @@ type SegmentGuard =
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
+  const { height: windowHeight } = useWindowDimensions();
+  // Scale the waveform to the viewport so it fills the space instead of sitting
+  // small and boxed-in — taller on bigger screens, with sane phone bounds.
+  const waveformHeight = Math.round(
+    Math.min(340, Math.max(180, windowHeight * 0.28)),
+  );
   const { uri, filename, trackId } = useLocalSearchParams<{
     uri: string;
     filename: string;
@@ -380,6 +392,7 @@ export default function PlayerScreen() {
               onPreviewEnd={
                 snippetPreviewEnabled ? handlePreviewEnd : undefined
               }
+              height={waveformHeight}
             />
           ) : (
             <View
@@ -530,9 +543,8 @@ const styles = StyleSheet.create({
   },
   waveformArea: {
     flexGrow: 1,
-    minHeight: 200,
     justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
   artworkPlaceholder: {
     width: 240,
@@ -542,7 +554,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   controls: {
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   markers: {

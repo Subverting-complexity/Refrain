@@ -65,7 +65,7 @@ describe('useCountdown', () => {
       enabled: true,
       mode: 'silent',
       duration: { type: 'bars', bars: 1 },
-      bpm: 120,
+      repeat: 'once',
     };
 
     act(() => {
@@ -87,7 +87,7 @@ describe('useCountdown', () => {
         enabled: true,
         mode: 'silent',
         duration: { type: 'bars', bars: 1 },
-        bpm: 120,
+        repeat: 'once',
       });
     });
 
@@ -95,8 +95,9 @@ describe('useCountdown', () => {
       await lastResult.playWithCountdown();
     });
 
+    // 1 bar = 4 one-second ticks.
     await act(async () => {
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(4000);
     });
 
     expect(mockPlay).toHaveBeenCalled();
@@ -110,7 +111,7 @@ describe('useCountdown', () => {
         enabled: true,
         mode: 'silent',
         duration: { type: 'bars', bars: 1 },
-        bpm: 120,
+        repeat: 'once',
       });
     });
 
@@ -134,7 +135,7 @@ describe('useCountdown', () => {
         enabled: true,
         mode: 'metronome',
         duration: { type: 'seconds', seconds: 5 },
-        bpm: 100,
+        repeat: 'once',
       });
     });
 
@@ -142,7 +143,7 @@ describe('useCountdown', () => {
       enabled: true,
       mode: 'metronome',
       duration: { type: 'seconds', seconds: 5 },
-      bpm: 100,
+      repeat: 'once',
     });
   });
 });

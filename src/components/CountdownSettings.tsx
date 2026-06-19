@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -48,49 +48,17 @@ function durationEqual(a: CountdownDuration, b: CountdownDuration): boolean {
 
 // Header-less count-in panel body. The controls drawer chip is the trigger, so
 // this no longer manages its own collapse — it renders the enable toggle plus
-// the Mode / Length / Repeat / BPM fields inline.
+// the Mode / Length / Repeat fields inline. The count-in ticks once per second,
+// so there is no tempo (BPM) to set.
 export function CountdownSettings({
   config,
   onConfigChange,
 }: CountdownSettingsProps) {
   const { theme } = useTheme();
-  const [bpmText, setBpmText] = useState(String(config.bpm));
-  const [bpmValid, setBpmValid] = useState(true);
 
   const toggleEnabled = () => {
     onConfigChange({ ...config, enabled: !config.enabled });
   };
-
-  const handleBpmChange = (text: string) => {
-    const digits = text.replace(/[^0-9]/g, '');
-    setBpmText(digits);
-    const parsed = parseInt(digits, 10);
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 300) {
-      setBpmValid(true);
-      onConfigChange({ ...config, bpm: parsed });
-    } else {
-      setBpmValid(false);
-    }
-  };
-
-  const handleBpmBlur = () => {
-    if (bpmText === '') {
-      setBpmText(String(config.bpm));
-      setBpmValid(true);
-      return;
-    }
-    const parsed = parseInt(bpmText, 10);
-    if (isNaN(parsed) || parsed <= 0) {
-      setBpmText('1');
-      onConfigChange({ ...config, bpm: 1 });
-    } else if (parsed > 300) {
-      setBpmText('300');
-      onConfigChange({ ...config, bpm: 300 });
-    }
-    setBpmValid(true);
-  };
-
-  const showBpm = config.mode === 'metronome';
 
   return (
     <View style={styles.container}>
@@ -160,44 +128,6 @@ export function CountdownSettings({
             accessibilityLabelPrefix="Count in"
           />
         </View>
-
-        {showBpm && (
-          <View style={styles.field}>
-            <Text style={[theme.typography.bodySmall, styles.label]}>BPM</Text>
-            <View style={styles.bpmRow}>
-              <TextInput
-                accessibilityLabel="BPM"
-                keyboardType="number-pad"
-                value={bpmText}
-                onChangeText={handleBpmChange}
-                onBlur={handleBpmBlur}
-                maxLength={3}
-                style={[
-                  styles.bpmInput,
-                  {
-                    color: theme.colors.textPrimary,
-                    backgroundColor: theme.colors.background,
-                    borderColor: bpmValid
-                      ? theme.colors.border
-                      : theme.colors.error,
-                  },
-                ]}
-              />
-              <Text
-                style={[
-                  theme.typography.caption,
-                  {
-                    color: bpmValid
-                      ? theme.colors.textSecondary
-                      : theme.colors.error,
-                  },
-                ]}
-              >
-                1–300
-              </Text>
-            </View>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -223,20 +153,6 @@ const styles = StyleSheet.create({
   },
   label: {
     width: 56,
-  },
-  bpmRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  bpmInput: {
-    width: 64,
-    height: 36,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: spacing.sm,
-    textAlign: 'center',
-    fontSize: 14,
   },
   toggle: {
     width: 44,

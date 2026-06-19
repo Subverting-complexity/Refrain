@@ -42,7 +42,6 @@ function defaultConfig(
     mode: 'silent',
     duration: { type: 'seconds', seconds: 3 },
     repeat: 'once',
-    bpm: 120,
     ...overrides,
   };
 }
@@ -75,14 +74,6 @@ function findByLabel(root: ReactTestRenderer['root'], label: string) {
 
 function findAllByLabel(root: ReactTestRenderer['root'], label: string) {
   return root.findAll((node) => node.props.accessibilityLabel === label);
-}
-
-function findBpmInput(tree: ReactTestRenderer) {
-  return tree.root.findAll(
-    (node) =>
-      node.props.accessibilityLabel === 'BPM' &&
-      node.props.onChangeText != null,
-  )[0];
 }
 
 describe('CountdownSettings', () => {
@@ -156,152 +147,13 @@ describe('CountdownSettings', () => {
     );
   });
 
-  it('shows BPM input in metronome mode', () => {
+  it('renders no BPM control — the count-in is one click per second', () => {
     const onChange = jest.fn();
     const tree = renderSettings(
       defaultConfig({ enabled: true, mode: 'metronome' }),
-      onChange,
-    );
-    expect(findAllByLabel(tree.root, 'BPM').length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('does not show BPM input in silent mode', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'silent' }),
       onChange,
     );
     expect(findAllByLabel(tree.root, 'BPM')).toHaveLength(0);
-  });
-
-  it('updates BPM', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('100');
-    });
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ bpm: 100 }),
-    );
-  });
-
-  it('shows BPM range hint', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome' }),
-      onChange,
-    );
-    expect(findByText(tree.root, '1–300')).toHaveLength(1);
-  });
-
-  it('shows error state when BPM input is empty', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('');
-    });
-    const inputStyle = bpmInput.props.style;
-    const flatStyle = Array.isArray(inputStyle)
-      ? Object.assign({}, ...inputStyle)
-      : inputStyle;
-    expect(flatStyle.borderColor).toBe('#f87171');
-  });
-
-  it('shows error state when BPM input is out of range', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('999');
-    });
-    const inputStyle = bpmInput.props.style;
-    const flatStyle = Array.isArray(inputStyle)
-      ? Object.assign({}, ...inputStyle)
-      : inputStyle;
-    expect(flatStyle.borderColor).toBe('#f87171');
-  });
-
-  it('clears error when valid BPM is entered after invalid', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('999');
-    });
-    act(() => {
-      bpmInput.props.onChangeText('120');
-    });
-    const inputStyle = bpmInput.props.style;
-    const flatStyle = Array.isArray(inputStyle)
-      ? Object.assign({}, ...inputStyle)
-      : inputStyle;
-    expect(flatStyle.borderColor).toBe('#2d4a40');
-  });
-
-  it('blur with out-of-range value clamps to 300', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('999');
-    });
-    act(() => {
-      bpmInput.props.onBlur();
-    });
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ bpm: 300 }),
-    );
-  });
-
-  it('blur with value of 0 clamps to 1', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('0');
-    });
-    act(() => {
-      bpmInput.props.onBlur();
-    });
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ bpm: 1 }),
-    );
-  });
-
-  it('blur with empty value reverts to last valid BPM without re-calling onChange', () => {
-    const onChange = jest.fn();
-    const tree = renderSettings(
-      defaultConfig({ enabled: true, mode: 'metronome', bpm: 120 }),
-      onChange,
-    );
-    const bpmInput = findBpmInput(tree);
-    act(() => {
-      bpmInput.props.onChangeText('');
-    });
-    const callCountBeforeBlur = onChange.mock.calls.length;
-    act(() => {
-      bpmInput.props.onBlur();
-    });
-    expect(onChange.mock.calls.length).toBe(callCountBeforeBlur);
+    expect(findByText(tree.root, 'BPM')).toHaveLength(0);
   });
 });

@@ -12,12 +12,13 @@ interface SnippetPreviewSettingsProps {
   style?: ViewStyle;
 }
 
-// Visual switch geometry. The track is a pill; the thumb travels the gap
-// between the two end insets. Kept as constants so the travel distance stays
-// in sync if the dimensions change.
-const TRACK_WIDTH = 48;
-const TRACK_HEIGHT = 28;
-const THUMB_SIZE = 22;
+// Visual switch geometry. A full-pill track with a large knob that nearly
+// fills its height reads as a modern toggle; the thumb travels the gap between
+// the two end insets. Kept as constants so the travel distance stays in sync if
+// the dimensions change.
+const TRACK_WIDTH = 52;
+const TRACK_HEIGHT = 32;
+const THUMB_SIZE = 26;
 const THUMB_INSET = 3;
 const THUMB_TRAVEL = TRACK_WIDTH - THUMB_SIZE - THUMB_INSET * 2;
 
@@ -140,5 +141,11 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
+    // A soft lift so the knob reads as floating above the track.
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });

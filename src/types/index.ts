@@ -112,7 +112,6 @@ export interface CountdownConfig {
   mode: CountdownMode;
   duration: CountdownDuration;
   repeat: CountdownRepeat;
-  bpm: number;
 }
 
 export type CountdownPhase = 'idle' | 'counting' | 'finished';
@@ -122,6 +121,9 @@ export interface CountdownState {
   beatsRemaining: number;
   totalBeats: number;
   currentBeat: number;
-  /** Number to display in the overlay. Equals beatsRemaining for bars-type; equals seconds remaining for seconds-type. */
+  /**
+   * Number to display in the overlay. The count-in ticks once per second, so
+   * this equals `beatsRemaining` — the seconds left before playback.
+   */
   displayValue: number;
 }
