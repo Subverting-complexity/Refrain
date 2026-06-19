@@ -3,6 +3,7 @@ import {
   AudioStatus,
   createAudioPlayer,
   setAudioModeAsync,
+  setIsAudioActiveAsync,
 } from 'expo-audio';
 import type { EventSubscription } from 'expo-modules-core';
 import { Platform } from 'react-native';
@@ -223,7 +224,11 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   notify(currentState);
 }
 
-export async function loadTrack(uri: string, trackId?: string): Promise<void> {
+export async function loadTrack(
+  uri: string,
+  trackId?: string,
+  trackName?: string,
+): Promise<void> {
   try {
     await unloadTrack();
     // Associate this load with its track so marker changes persist and the
@@ -244,12 +249,23 @@ export async function loadTrack(uri: string, trackId?: string): Promise<void> {
     await setAudioModeAsync({
       playsInSilentMode: true,
       shouldPlayInBackground: true,
+      interruptionMode: 'doNotMix',
     });
 
     const newPlayer = createAudioPlayer({ uri }, { updateInterval: 100 });
     // Seed the current volume so the very first frame plays at the persisted
     // level; setVolume() handles later live changes.
     newPlayer.volume = volume;
+    // Register this player for lock screen / Now Playing controls on native so
+    // the user can play, pause, and seek from the lock screen and Control Centre.
+    // Requires interruptionMode: 'doNotMix' (set above) per expo-audio docs.
+    if (Platform.OS !== 'web') {
+      newPlayer.setActiveForLockScreen(
+        true,
+        { title: trackName, artist: 'Refrain' },
+        { showSeekForward: false, showSeekBackward: false },
+      );
+    }
     statusSubscription = newPlayer.addListener(
       'playbackStatusUpdate',
       onPlaybackStatusUpdate,
@@ -331,6 +347,12 @@ export async function stop(): Promise<void> {
   // expo-audio has no stop(); emulate by pausing and rewinding.
   player.pause();
   await player.seekTo(msToSec(markerA ?? 0));
+  // Deactivate the audio session so iOS/Android restores focus to other apps
+  // (music, podcasts, etc.). pause() intentionally leaves the session active so
+  // a quick resume doesn't re-interrupt; stop() is a deliberate "done" action.
+  if (Platform.OS !== 'web') {
+    await setIsAudioActiveAsync(false);
+  }
 }
 
 /**
@@ -511,6 +533,12 @@ export async function unloadTrack(): Promise<void> {
     statusSubscription = null;
   }
   if (player) {
+    if (Platform.OS !== 'web') {
+      player.clearLockScreenControls();
+      // Release audio focus so other apps can resume if playback was active or
+      // paused (stop() already does this, but unload may run without a prior stop).
+      await setIsAudioActiveAsync(false);
+    }
     player.remove();
     player = null;
   }

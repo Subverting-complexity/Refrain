@@ -4,6 +4,8 @@ const mockPlay = jest.fn();
 const mockPause = jest.fn();
 const mockSeekTo = jest.fn();
 const mockRemove = jest.fn();
+const mockSetActiveForLockScreen = jest.fn();
+const mockClearLockScreenControls = jest.fn();
 const mockSubscriptionRemove = jest.fn();
 const mockVolumeSet = jest.fn<void, [number]>();
 let statusCallback: ((status: unknown) => void) | null = null;
@@ -22,6 +24,8 @@ const mockCreateAudioPlayer = jest.fn().mockImplementation(() => {
     seekTo: mockSeekTo,
     remove: mockRemove,
     addListener: mockAddListener,
+    setActiveForLockScreen: mockSetActiveForLockScreen,
+    clearLockScreenControls: mockClearLockScreenControls,
   };
   Object.defineProperty(player, 'volume', {
     get: () => 1,
@@ -32,10 +36,13 @@ const mockCreateAudioPlayer = jest.fn().mockImplementation(() => {
 });
 
 const mockSetAudioModeAsync = jest.fn();
+const mockSetIsAudioActiveAsync = jest.fn();
 
 jest.mock('expo-audio', () => ({
   createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
   setAudioModeAsync: (...args: unknown[]) => mockSetAudioModeAsync(...args),
+  setIsAudioActiveAsync: (...args: unknown[]) =>
+    mockSetIsAudioActiveAsync(...args),
 }));
 
 const mockGetNumber = jest.fn<number, [string, number]>();
