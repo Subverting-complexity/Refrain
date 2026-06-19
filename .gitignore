@@ -7,6 +7,11 @@ web-build/
 .DS_Store
 coverage/
 
+# Local secrets — Expo auth token (per-user, never commit). .env.example is tracked.
+.env
+.env.local
+.direnv/
+
 # Local store-build logs (tools/ps/)
 tools/ps/ios-build-log.json
 tools/ps/android-build-log.json

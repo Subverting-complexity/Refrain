@@ -2,7 +2,7 @@
   "expo": {
     "name": "Refrain",
     "slug": "refrain-app",
-    "owner": "adrienne-bosch",
+    "owner": "subvertingcomplexity",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -87,10 +87,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "127b747b-5c29-4f61-8c34-4f3fa58eaca2"
-      }
+      "router": {}
     }
   }
 }
