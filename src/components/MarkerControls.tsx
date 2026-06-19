@@ -21,25 +21,14 @@ interface MarkerControlsProps {
   /** Press the B button: arm placing B (or clear B when B is set). */
   onPressB: () => void;
   onToggleLoop: (enabled: boolean) => void;
+  /**
+   * Save the current A/B region. Omitted when there is no track to save to —
+   * the Save square is then shown disabled.
+   */
+  onSave?: () => void;
+  /** Clear both markers and drop the loaded-segment identity. */
+  onClear?: () => void;
   style?: ViewStyle;
-}
-
-// One-line guidance under the controls so the arm-then-tap flow is
-// discoverable instead of something you have to guess at.
-function statusCaption(
-  markerA: number | null,
-  markerB: number | null,
-  loopEnabled: boolean,
-  placeMode: PlaceMode,
-): string {
-  if (placeMode === 'A') return 'Tap the wave to drop A';
-  if (placeMode === 'B') return 'Tap the wave to drop B after A';
-  if (markerA == null && markerB == null) return 'Tap A to start a loop';
-  if (markerA != null && markerB == null) return 'Tap B to place the loop end';
-  if (markerA == null && markerB != null)
-    return 'Tap A to place the loop start';
-  const range = `${formatDuration(markerA as number)}–${formatDuration(markerB as number)}`;
-  return loopEnabled ? `Looping ${range}` : `Plays ${range} once, then stops`;
 }
 
 export function MarkerControls({
@@ -51,6 +40,8 @@ export function MarkerControls({
   onPressA,
   onPressB,
   onToggleLoop,
+  onSave,
+  onClear,
   style,
 }: MarkerControlsProps) {
   const { theme } = useTheme();
@@ -58,6 +49,10 @@ export function MarkerControls({
   const canLoop = markerA != null && markerB != null;
   const loopActive = canLoop && loopEnabled;
   const loopDisabled = isDisabled || !canLoop;
+  // Save needs a complete region and somewhere to save it; Clear needs at
+  // least a start marker to wipe.
+  const saveDisabled = isDisabled || !canLoop || !onSave;
+  const clearDisabled = isDisabled || markerA == null || !onClear;
 
   const renderButton = (
     label: 'A' | 'B',
@@ -90,7 +85,7 @@ export function MarkerControls({
         onPress={onPress}
         disabled={disabled}
         style={(pressState) => [
-          styles.button,
+          styles.tile,
           {
             borderColor: arming || value != null ? color : theme.colors.border,
             borderWidth: arming ? 2 : 1,
@@ -99,9 +94,9 @@ export function MarkerControls({
           },
         ]}
       >
-        <Text style={[styles.buttonLabel, { color }]}>{label}</Text>
+        <Text style={[styles.tileLabel, { color }]}>{label}</Text>
         <Text
-          style={[styles.buttonValue, { color: theme.colors.textPrimary }]}
+          style={[styles.tileValue, { color: theme.colors.textPrimary }]}
           numberOfLines={1}
         >
           {sub}
@@ -109,6 +104,42 @@ export function MarkerControls({
       </AccessiblePressable>
     );
   };
+
+  const renderSquare = (
+    icon: keyof typeof Ionicons.glyphMap,
+    accessibilityLabel: string,
+    active: boolean,
+    disabled: boolean,
+    onPress: () => void,
+    extraAccessibility?: {
+      role?: 'button' | 'switch';
+      state?: Record<string, boolean>;
+      hint?: string;
+    },
+  ) => (
+    <AccessiblePressable
+      accessibilityRole={extraAccessibility?.role ?? 'button'}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled, ...extraAccessibility?.state }}
+      accessibilityHint={extraAccessibility?.hint}
+      onPress={onPress}
+      disabled={disabled}
+      style={(pressState) => [
+        styles.square,
+        {
+          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+          borderColor: active ? theme.colors.accent : theme.colors.border,
+          opacity: disabled ? 0.4 : pressState.pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={20}
+        color={active ? theme.colors.accentText : theme.colors.textSecondary}
+      />
+    </AccessiblePressable>
+  );
 
   return (
     <View style={[styles.container, style]}>
@@ -131,42 +162,41 @@ export function MarkerControls({
           onPressB,
         )}
 
-        <AccessiblePressable
-          accessibilityRole="switch"
-          accessibilityLabel={loopActive ? 'Turn loop off' : 'Turn loop on'}
-          accessibilityState={{ disabled: loopDisabled, checked: loopActive }}
-          accessibilityHint="Repeats playback between the A and B points"
-          onPress={() => onToggleLoop(!loopEnabled)}
-          disabled={loopDisabled}
-          style={(pressState) => [
-            styles.loopButton,
-            {
-              backgroundColor: loopActive
-                ? theme.colors.accent
-                : theme.colors.surface,
-              borderColor: loopActive
-                ? theme.colors.accent
-                : theme.colors.border,
-              opacity: loopDisabled ? 0.4 : pressState.pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Ionicons
-            name="repeat"
-            size={20}
-            color={
-              loopActive ? theme.colors.accentText : theme.colors.textSecondary
-            }
-          />
-        </AccessiblePressable>
+        {renderSquare(
+          'repeat',
+          loopActive ? 'Turn loop off' : 'Turn loop on',
+          loopActive,
+          loopDisabled,
+          () => onToggleLoop(!loopEnabled),
+          {
+            role: 'switch',
+            state: { checked: loopActive },
+            hint: 'Repeats playback between the A and B points',
+          },
+        )}
+        {renderSquare(
+          'save-outline',
+          'Save segment',
+          false,
+          saveDisabled,
+          () => onSave?.(),
+          {
+            hint: saveDisabled ? 'Set both loop markers first' : undefined,
+          },
+        )}
+        {renderSquare('close', 'Clear loop markers', false, clearDisabled, () =>
+          onClear?.(),
+        )}
       </View>
 
-      {!isDisabled && (
+      {!isDisabled && (placeMode === 'A' || placeMode === 'B') && (
         <Text
           style={[styles.caption, { color: theme.colors.textSecondary }]}
           accessibilityLiveRegion="polite"
         >
-          {statusCaption(markerA, markerB, loopEnabled, placeMode)}
+          {placeMode === 'A'
+            ? 'Tap the wave to drop A'
+            : 'Tap the wave to drop B after A'}
         </Text>
       )}
     </View>
@@ -181,28 +211,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
-  button: {
-    minWidth: 84,
+  tile: {
+    minWidth: 50,
     height: 52,
     borderRadius: 12,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonLabel: {
+  tileLabel: {
     fontSize: 13,
     fontWeight: '700',
   },
-  buttonValue: {
+  tileValue: {
     fontSize: 12,
     marginTop: 2,
   },
-  loopButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  // Loop / Save / Clear share one square recipe. 44pt keeps five controls on a
+  // single row down to a ~272pt content width (iPhone SE) without wrapping.
+  square: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',

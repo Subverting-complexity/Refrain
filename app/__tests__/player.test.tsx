@@ -120,6 +120,7 @@ jest.mock('@/src/hooks/useTheme', () => ({
 // leave-the-player guard, and the dispatch the resolved guard re-issues.
 let mockBeforeRemoveCb: ((event: unknown) => void) | null = null;
 const mockDispatch = jest.fn();
+const mockSetOptions = jest.fn();
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({
     uri: 'file:///test.mp3',
@@ -134,6 +135,7 @@ jest.mock('expo-router', () => ({
       };
     },
     dispatch: mockDispatch,
+    setOptions: mockSetOptions,
   }),
 }));
 
@@ -323,34 +325,43 @@ function getWaveform(tree: ReactTestRenderer) {
   )[0];
 }
 
-function getSnippetToggle(tree: ReactTestRenderer) {
-  return tree.root.findAll(
-    (node) =>
-      node.props.accessibilityRole === 'switch' &&
-      typeof node.props.accessibilityLabel === 'string' &&
-      node.props.accessibilityLabel.startsWith('Snippet preview'),
-  )[0];
-}
+describe('PlayerScreen header title', () => {
+  it('folds the track filename into the navigation header', () => {
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockSetOptions).toHaveBeenCalledWith({ title: 'test.mp3' });
+  });
+});
 
 describe('PlayerScreen snippet preview', () => {
-  it('renders the snippet preview toggle', () => {
+  it('passes snippet-preview state into the Segments sheet', () => {
     let tree!: ReactTestRenderer;
     act(() => {
       tree = create(<PlayerScreen />);
     });
 
-    expect(getSnippetToggle(tree)).toBeDefined();
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+
+    expect(mockSheetProps?.snippetPreviewEnabled).toBe(true);
+    expect(typeof mockSheetProps?.onSnippetPreviewChange).toBe('function');
   });
 
-  it('persists the preference when the toggle is pressed', () => {
+  it('persists the preference when the sheet toggles it', () => {
     let tree!: ReactTestRenderer;
     act(() => {
       tree = create(<PlayerScreen />);
     });
 
-    act(() => getSnippetToggle(tree).props.onPress());
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+    act(() => mockSheetProps?.onSnippetPreviewChange(false));
 
-    // Default is on, so a press turns it off.
+    // Default is on, so a toggle turns it off.
     expect(mockSetSnippetPreviewEnabled).toHaveBeenCalledWith(false);
   });
 

@@ -7,6 +7,7 @@ import { spacing } from '../theme';
 import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { SnippetPreviewSettings } from './SnippetPreviewSettings';
 
 export interface SegmentProfileSheetProps {
   /** The track's saved profiles, in stable (oldest-first) order. */
@@ -17,6 +18,10 @@ export interface SegmentProfileSheetProps {
   onRename: (profileId: string, name: string) => void;
   /** Delete a profile by id. */
   onRemove: (profileId: string) => void;
+  /** Whether marker-drag snippet preview is enabled. */
+  snippetPreviewEnabled: boolean;
+  /** Toggle marker-drag snippet preview. */
+  onSnippetPreviewChange: (enabled: boolean) => void;
   /** Dismiss the sheet. */
   onClose: () => void;
 }
@@ -32,6 +37,8 @@ export function SegmentProfileSheet({
   onLoadProfile,
   onRename,
   onRemove,
+  snippetPreviewEnabled,
+  onSnippetPreviewChange,
   onClose,
 }: SegmentProfileSheetProps) {
   const { theme } = useTheme();
@@ -107,6 +114,14 @@ export function SegmentProfileSheet({
               />
             </AccessiblePressable>
           </View>
+
+          <SnippetPreviewSettings
+            enabled={snippetPreviewEnabled}
+            onChange={onSnippetPreviewChange}
+          />
+          <View
+            style={[styles.divider, { backgroundColor: theme.colors.border }]}
+          />
 
           {profiles.length === 0 ? (
             <View style={styles.empty}>
@@ -283,6 +298,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
   },
   saveRow: {
     flexDirection: 'row',

@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { CountdownConfig } from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
-import { CHIP_HIT_SLOP, chipStyles, pillColors } from './chipStyles';
+import { BottomSheet } from './BottomSheet';
 import { CountdownSettings } from './CountdownSettings';
 import { SkipControls } from './SkipControls';
 import { VolumeControl } from './VolumeControl';
 
-// The three chips that expand an inline panel. Segments is handled separately
-// because it opens a bottom sheet instead of an accordion panel.
+// The three launchers that open a settings sheet. Segments is handled
+// separately because it opens the segment-profile sheet owned by the player.
 type PanelKey = 'countIn' | 'volume' | 'skip';
 
 interface ControlsDrawerProps {
@@ -24,27 +24,44 @@ interface ControlsDrawerProps {
   onSkipSecondsChange: (seconds: number) => void;
   /**
    * Opens the segment-profile sheet. When omitted (no track loaded) the
-   * Segments chip is hidden, since there is nothing to manage.
+   * Segments launcher is hidden, since there is nothing to manage.
    */
   onOpenSegments?: () => void;
   style?: ViewStyle;
 }
 
-const PANEL_CHIPS: {
+const PANEL_LAUNCHERS: {
   key: PanelKey;
   label: string;
+  title: string;
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
-  { key: 'countIn', label: 'Count-in', icon: 'timer-outline' },
-  { key: 'volume', label: 'Volume', icon: 'volume-medium-outline' },
-  { key: 'skip', label: 'Skip', icon: 'play-skip-forward-outline' },
+  {
+    key: 'countIn',
+    label: 'Count-in settings',
+    title: 'Count-in',
+    icon: 'timer-outline',
+  },
+  {
+    key: 'volume',
+    label: 'Volume settings',
+    title: 'Volume',
+    icon: 'volume-medium-outline',
+  },
+  {
+    key: 'skip',
+    label: 'Skip settings',
+    title: 'Skip',
+    icon: 'play-skip-forward-outline',
+  },
 ];
 
 /**
- * Consolidates the count-in, volume, skip, and segment controls into a single
- * drawer. A chip row triggers the controls: tapping Count-in / Volume / Skip
- * expands an inline panel below the row (accordion — only one open at a time),
- * while Segments opens the existing bottom sheet without expanding inline.
+ * The player's secondary-control launcher row: four icon-only squares for
+ * count-in, volume, skip, and segments. Count-in / Volume / Skip each open a
+ * bottom sheet carrying their settings body; Segments defers to the player's
+ * segment-profile sheet. Keeping every launcher a pure sheet trigger lets the
+ * row stay compact and sit in the footer above the transport.
  */
 export function ControlsDrawer({
   countdownConfig,
@@ -59,83 +76,60 @@ export function ControlsDrawer({
   const { theme } = useTheme();
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
 
-  const togglePanel = (key: PanelKey) => {
-    setOpenPanel((prev) => (prev === key ? null : key));
-  };
-
-  const renderChip = (
-    label: string,
+  const renderSquare = (
     icon: keyof typeof Ionicons.glyphMap,
-    active: boolean,
     accessibilityLabel: string,
+    active: boolean,
     onPress: () => void,
     accessibilityState?: { expanded?: boolean },
-  ) => {
-    const colors = pillColors(theme, active);
-    return (
-      <AccessiblePressable
-        key={label}
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        accessibilityState={accessibilityState}
-        onPress={onPress}
-        hitSlop={CHIP_HIT_SLOP}
-        style={[
-          chipStyles.pill,
-          styles.chip,
-          {
-            backgroundColor: colors.backgroundColor,
-            borderColor: colors.borderColor,
-          },
-        ]}
-      >
-        <Ionicons
-          name={icon}
-          size={16}
-          color={active ? theme.colors.accentText : theme.colors.textSecondary}
-        />
-        <Text style={[chipStyles.pillText, { color: colors.textColor }]}>
-          {label}
-        </Text>
-      </AccessiblePressable>
-    );
-  };
-
-  return (
-    <View
-      style={[
-        styles.container,
+  ) => (
+    <AccessiblePressable
+      key={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
+      onPress={onPress}
+      style={(pressState) => [
+        styles.square,
         {
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
+          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+          borderColor: active ? theme.colors.accent : theme.colors.border,
+          opacity: pressState.pressed ? 0.7 : 1,
         },
-        style,
       ]}
     >
-      <View style={styles.chipRow}>
-        {PANEL_CHIPS.map((chip) =>
-          renderChip(
-            chip.label,
-            chip.icon,
-            openPanel === chip.key,
-            `${chip.label} settings`,
-            () => togglePanel(chip.key),
-            { expanded: openPanel === chip.key },
-          ),
-        )}
-        {onOpenSegments
-          ? renderChip(
-              'Segments',
-              'bookmarks-outline',
-              false,
-              'Open segment profiles',
-              onOpenSegments,
-            )
-          : null}
-      </View>
+      <Ionicons
+        name={icon}
+        size={20}
+        color={active ? theme.colors.accentText : theme.colors.textSecondary}
+      />
+    </AccessiblePressable>
+  );
 
-      {openPanel !== null ? (
-        <View style={[styles.panel, { borderTopColor: theme.colors.border }]}>
+  const openTitle = PANEL_LAUNCHERS.find((p) => p.key === openPanel)?.title;
+
+  return (
+    <View style={[styles.row, style]}>
+      {PANEL_LAUNCHERS.map((launcher) =>
+        renderSquare(
+          launcher.icon,
+          launcher.label,
+          openPanel === launcher.key,
+          () => setOpenPanel(launcher.key),
+          { expanded: openPanel === launcher.key },
+        ),
+      )}
+      {onOpenSegments
+        ? renderSquare(
+            'bookmarks-outline',
+            'Open segment profiles',
+            false,
+            onOpenSegments,
+          )
+        : null}
+
+      {openPanel !== null && openTitle ? (
+        <BottomSheet title={openTitle} onClose={() => setOpenPanel(null)}>
           {openPanel === 'countIn' ? (
             <CountdownSettings
               config={countdownConfig}
@@ -151,33 +145,24 @@ export function ControlsDrawer({
               onSkipSecondsChange={onSkipSecondsChange}
             />
           ) : null}
-        </View>
+        </BottomSheet>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    borderWidth: 1,
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  square: {
+    width: 48,
+    height: 48,
     borderRadius: 12,
-    overflow: 'hidden',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  chip: {
-    flexDirection: 'row',
+    borderWidth: 1,
     alignItems: 'center',
-    gap: spacing.xs,
-    minHeight: 32,
-  },
-  panel: {
-    borderTopWidth: 1,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    justifyContent: 'center',
   },
 });

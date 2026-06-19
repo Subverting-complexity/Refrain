@@ -15,6 +15,7 @@ jest.mock('../../hooks/useTheme', () => ({
         textPrimary: '#fff',
         textSecondary: '#aaa',
         accent: '#0f0',
+        accentText: '#000',
         border: '#333',
         error: '#f00',
       },
@@ -26,6 +27,27 @@ jest.mock('../../hooks/useTheme', () => ({
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');
   return { Ionicons: (props: Record<string, unknown>) => <View {...props} /> };
+});
+
+// Stub the toggle so this suite tests the sheet's prop wiring, not the
+// SnippetPreviewSettings animation (which would otherwise leak a timer).
+jest.mock('../SnippetPreviewSettings', () => {
+  const { View } = require('react-native');
+  return {
+    SnippetPreviewSettings: ({
+      enabled,
+      onChange,
+    }: {
+      enabled: boolean;
+      onChange: (next: boolean) => void;
+    }) => (
+      <View
+        accessibilityRole="switch"
+        accessibilityLabel={`Snippet preview ${enabled ? 'on' : 'off'}`}
+        onPress={() => onChange(!enabled)}
+      />
+    ),
+  };
 });
 
 function profile(id: string, name: string): SegmentProfile {
@@ -51,6 +73,8 @@ function render(overrides: Partial<SegmentProfileSheetProps> = {}) {
         onLoadProfile={jest.fn()}
         onRename={jest.fn()}
         onRemove={jest.fn()}
+        snippetPreviewEnabled={false}
+        onSnippetPreviewChange={jest.fn()}
         onClose={jest.fn()}
         {...overrides}
       />,
@@ -91,6 +115,20 @@ describe('SegmentProfileSheet', () => {
   it('shows an empty state when there are no profiles', () => {
     const tree = render({ profiles: [] });
     expect(findText(tree, 'No saved segments yet').length).toBe(1);
+  });
+
+  it('hosts the snippet-preview toggle at the top', () => {
+    const onSnippetPreviewChange = jest.fn();
+    const tree = render({
+      snippetPreviewEnabled: false,
+      onSnippetPreviewChange,
+    });
+
+    const toggle = byLabel(tree, 'Snippet preview off');
+    expect(toggle).toBeDefined();
+
+    act(() => toggle.props.onPress());
+    expect(onSnippetPreviewChange).toHaveBeenCalledWith(true);
   });
 
   it('has no save control — saving lives in the player now', () => {

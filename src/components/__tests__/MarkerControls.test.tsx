@@ -224,39 +224,73 @@ describe('MarkerControls', () => {
     expect(onToggleLoop).toHaveBeenCalledWith(false);
   });
 
-  it('shows a guidance caption for the current marker state', () => {
-    expect(
-      findCaption(renderControls(), 'Tap A to start a loop').length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(
-      findCaption(renderControls({ markerA: 1000 }), 'Tap B').length,
-    ).toBeGreaterThanOrEqual(1);
+  it('shows no resting caption once a region is set', () => {
     expect(
       findCaption(
         renderControls({ markerA: 1000, markerB: 5000, loopEnabled: true }),
         'Looping',
-      ).length,
-    ).toBeGreaterThanOrEqual(1);
+      ),
+    ).toHaveLength(0);
+    expect(findCaption(renderControls(), 'Tap A to start a loop')).toHaveLength(
+      0,
+    );
   });
 
-  it('captions the one-shot state when the loop is off', () => {
-    expect(
-      findCaption(
-        renderControls({ markerA: 1000, markerB: 5000, loopEnabled: false }),
-        'once, then stops',
-      ).length,
-    ).toBeGreaterThanOrEqual(1);
-  });
-
-  it('captions the arming state', () => {
+  it('captions only the arming state', () => {
     expect(
       findCaption(renderControls({ placeMode: 'A' }), 'drop A').length,
     ).toBeGreaterThanOrEqual(1);
+    expect(
+      findCaption(renderControls({ placeMode: 'B' }), 'drop B after A').length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it('hides the caption when playback is idle', () => {
-    const tree = renderControls({ status: 'idle' });
-    expect(findCaption(tree, 'Tap A')).toHaveLength(0);
+  it('hides the arming caption when playback is idle', () => {
+    const tree = renderControls({ status: 'idle', placeMode: 'A' });
+    expect(findCaption(tree, 'drop A')).toHaveLength(0);
+  });
+
+  it('renders Save and Clear squares', () => {
+    const tree = renderControls();
+    expect(
+      findPressableByLabel(tree, 'Save segment').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      findPressableByLabel(tree, 'Clear loop markers').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('enables Save only with a full region and a save handler', () => {
+    const onSave = jest.fn();
+    const noHandler = renderControls({ markerA: 1000, markerB: 5000 });
+    expect(
+      findPressableByLabel(noHandler, 'Save segment')[0].props.disabled,
+    ).toBe(true);
+
+    const partial = renderControls({ markerA: 1000, onSave });
+    expect(
+      findPressableByLabel(partial, 'Save segment')[0].props.disabled,
+    ).toBe(true);
+
+    const ready = renderControls({ markerA: 1000, markerB: 5000, onSave });
+    const save = findPressableByLabel(ready, 'Save segment')[0];
+    expect(save.props.disabled).toBe(false);
+    act(() => save.props.onPress());
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  it('enables Clear once A is set and calls onClear', () => {
+    const onClear = jest.fn();
+    const empty = renderControls({ onClear });
+    expect(
+      findPressableByLabel(empty, 'Clear loop markers')[0].props.disabled,
+    ).toBe(true);
+
+    const set = renderControls({ markerA: 1000, onClear });
+    const clear = findPressableByLabel(set, 'Clear loop markers')[0];
+    expect(clear.props.disabled).toBe(false);
+    act(() => clear.props.onPress());
+    expect(onClear).toHaveBeenCalled();
   });
 
   it('tints the A button border with the marker A color when set', () => {

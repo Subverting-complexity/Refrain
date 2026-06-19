@@ -93,7 +93,9 @@ export function SnippetPreviewSettings({
           accessibilityState={{ checked: enabled }}
           onPress={() => onChange(!enabled)}
         >
-          <Animated.View style={[styles.track, { backgroundColor: trackColor }]}>
+          <Animated.View
+            style={[styles.track, { backgroundColor: trackColor }]}
+          >
             <Animated.View
               style={[
                 styles.thumb,

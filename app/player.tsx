@@ -5,14 +5,12 @@ import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
-import { SnippetPreviewSettings } from '@/src/components/SnippetPreviewSettings';
 import { Toast } from '@/src/components/Toast';
 import { TransportControls } from '@/src/components/TransportControls';
 import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
@@ -168,8 +166,6 @@ export default function PlayerScreen() {
 
   const { toast, showToast, hideToast } = useToast();
 
-  const canSaveRegion = markerA != null && markerB != null;
-
   // Save dialog: overwrite the loaded segment with the live region, keeping it
   // the loaded segment (snapshot moves to the current markers, so it is clean).
   const handleOverride = useCallback(() => {
@@ -232,6 +228,14 @@ export default function PlayerScreen() {
   // Leaving the player with unsaved segment edits: intercept the back action
   // and raise the same guard. Fires for in-app Stack back navigation.
   const navigation = useNavigation();
+
+  // Fold the track title into the header: the stack screen's static
+  // "Now Playing" title is replaced by the filename so the player body no
+  // longer needs a separate centered title band.
+  useEffect(() => {
+    navigation.setOptions({ title: filename ?? 'Now Playing' });
+  }, [navigation, filename]);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
       if (bypassGuardRef.current) return;
@@ -274,6 +278,15 @@ export default function PlayerScreen() {
       setPlaceMode((m) => (m === 'A' ? 'none' : 'A'));
     }
   }, [markerA, clearMarkers, clearLoaded]);
+
+  // Clear button: wipe both markers and drop the loaded-segment identity (so
+  // the unsaved-edit guard does not fire on an empty region), then disarm.
+  // Mirrors the A-button clear shortcut as an always-visible control.
+  const handleClear = useCallback(() => {
+    clearMarkers();
+    clearLoaded();
+    setPlaceMode('none');
+  }, [clearMarkers, clearLoaded]);
 
   // Pressing B: with B set, clear it and re-arm placing B; otherwise (A exists)
   // arm placing B. A no-op before A is set — the button is disabled then.
@@ -384,16 +397,6 @@ export default function PlayerScreen() {
           )}
         </View>
 
-        <View style={styles.trackInfo}>
-          <Text
-            style={[theme.typography.heading, styles.trackName]}
-            numberOfLines={2}
-            ellipsizeMode="tail"
-          >
-            {filename ?? 'Unknown track'}
-          </Text>
-        </View>
-
         {status === 'error' && (
           <View style={styles.errorBanner}>
             <View style={styles.errorHeadline}>
@@ -433,49 +436,9 @@ export default function PlayerScreen() {
             onPressA={handlePressA}
             onPressB={handlePressB}
             onToggleLoop={setLoopEnabled}
+            onSave={trackId ? () => setSaveVisible(true) : undefined}
+            onClear={handleClear}
             style={styles.markers}
-          />
-
-          {trackId ? (
-            <View style={styles.segmentActions}>
-              <AccessiblePressable
-                accessibilityRole="button"
-                accessibilityLabel="Save segment"
-                accessibilityState={{ disabled: !canSaveRegion }}
-                accessibilityHint={
-                  canSaveRegion ? undefined : 'Set both loop markers first'
-                }
-                disabled={!canSaveRegion}
-                onPress={() => setSaveVisible(true)}
-                style={(state) => [
-                  styles.segmentsButton,
-                  {
-                    borderColor: theme.colors.accent,
-                    opacity: !canSaveRegion ? 0.4 : state.pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="save-outline"
-                  size={18}
-                  color={theme.colors.accent}
-                />
-                <Text
-                  style={[
-                    theme.typography.body,
-                    { color: theme.colors.accent },
-                  ]}
-                >
-                  Save segment
-                </Text>
-              </AccessiblePressable>
-            </View>
-          ) : null}
-
-          <SnippetPreviewSettings
-            enabled={snippetPreviewEnabled}
-            onChange={setSnippetPreviewEnabled}
-            style={styles.snippetPreview}
           />
 
           <SeekBar
@@ -487,27 +450,31 @@ export default function PlayerScreen() {
             style={styles.seekBar}
           />
 
-          <ControlsDrawer
-            countdownConfig={countdownConfig}
-            onCountdownConfigChange={setCountdownConfig}
-            volume={volume}
-            onVolumeChange={setVolume}
-            skipSeconds={skipSeconds}
-            onSkipSecondsChange={setSkipSeconds}
-            onOpenSegments={
-              trackId ? () => setProfilesVisible(true) : undefined
-            }
-            style={styles.drawer}
-          />
+          <View
+            style={[styles.footer, { borderTopColor: theme.colors.border }]}
+          >
+            <ControlsDrawer
+              countdownConfig={countdownConfig}
+              onCountdownConfigChange={setCountdownConfig}
+              volume={volume}
+              onVolumeChange={setVolume}
+              skipSeconds={skipSeconds}
+              onSkipSecondsChange={setSkipSeconds}
+              onOpenSegments={
+                trackId ? () => setProfilesVisible(true) : undefined
+              }
+              style={styles.drawer}
+            />
 
-          <TransportControls
-            status={isCounting ? 'playing' : status}
-            onPlay={handlePlay}
-            onPause={isCounting ? cancelCountdown : pause}
-            onSkipBack={() => skipBy(-skipMs)}
-            onSkipForward={() => skipBy(skipMs)}
-            style={styles.transport}
-          />
+            <TransportControls
+              status={isCounting ? 'playing' : status}
+              onPlay={handlePlay}
+              onPause={isCounting ? cancelCountdown : pause}
+              onSkipBack={() => skipBy(-skipMs)}
+              onSkipForward={() => skipBy(skipMs)}
+              style={styles.transport}
+            />
+          </View>
         </View>
       </ScrollView>
 
@@ -523,6 +490,8 @@ export default function PlayerScreen() {
           onLoadProfile={handleRequestLoad}
           onRename={rename}
           onRemove={remove}
+          snippetPreviewEnabled={snippetPreviewEnabled}
+          onSnippetPreviewChange={setSnippetPreviewEnabled}
           onClose={() => setProfilesVisible(false)}
         />
       ) : null}
@@ -572,34 +541,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  trackInfo: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.lg,
-  },
-  trackName: {
-    textAlign: 'center',
-  },
   controls: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
   },
   markers: {
     marginBottom: spacing.lg,
-  },
-  segmentActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  segmentsButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: spacing.sm,
   },
   errorBanner: {
     alignItems: 'center',
@@ -613,14 +560,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
   },
-  snippetPreview: {
-    marginBottom: spacing.lg,
-  },
   seekBar: {
     marginBottom: spacing.lg,
   },
+  // Footer groups the launcher row with the transport under a divider so the
+  // secondary controls read as part of the playback cluster, not a floating
+  // mid-screen band.
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.lg,
+  },
   drawer: {
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   transport: {
     marginBottom: spacing.lg,
