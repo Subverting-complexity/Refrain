@@ -52,7 +52,7 @@ jest.mock('expo-file-system', () => {
   return {
     File,
     Directory,
-    Paths: { document: 'file:///data' },
+    Paths: { document: { uri: 'file:///data' } },
   };
 });
 
@@ -81,7 +81,9 @@ describe('migration from JSON', () => {
 
     mockJsonExists = true;
     mockText.mockResolvedValue(JSON.stringify([sampleTrack]));
-    mockGetAllSync.mockReturnValue([sampleTrack]);
+    mockGetAllSync.mockReturnValue([
+      { ...sampleTrack, uri: 'tracks/track-1.mp3', durationEstimated: 1 },
+    ]);
 
     const { loadTracks } = require('../trackStore');
     await loadTracks();
@@ -90,7 +92,7 @@ describe('migration from JSON', () => {
       expect.stringContaining('INSERT OR IGNORE'),
       sampleTrack.id,
       sampleTrack.filename,
-      sampleTrack.uri,
+      `tracks/${sampleTrack.id}.${sampleTrack.format}`,
       sampleTrack.format,
       sampleTrack.durationMs,
       1,
@@ -105,7 +107,11 @@ describe('loadTracks', () => {
   it('returns tracks from the database with boolean durationEstimated', async () => {
     jest.resetModules();
 
-    const dbRow = { ...sampleTrack, durationEstimated: 1 };
+    const dbRow = {
+      ...sampleTrack,
+      uri: 'tracks/track-1.mp3',
+      durationEstimated: 1,
+    };
     mockGetAllSync.mockReturnValue([dbRow]);
 
     const { loadTracks } = require('../trackStore');
@@ -118,10 +124,25 @@ describe('loadTracks', () => {
     );
   });
 
+  it('resolves relative URIs to absolute using the current sandbox root', async () => {
+    jest.resetModules();
+
+    mockGetAllSync.mockReturnValue([
+      { ...sampleTrack, uri: 'tracks/track-1.mp3', durationEstimated: 1 },
+    ]);
+
+    const { loadTracks } = require('../trackStore');
+    const tracks = await loadTracks();
+
+    expect(tracks[0].uri).toBe('file:///data/tracks/track-1.mp3');
+  });
+
   it('sweeps orphan files on load', async () => {
     jest.resetModules();
 
-    mockGetAllSync.mockReturnValue([{ ...sampleTrack, durationEstimated: 1 }]);
+    mockGetAllSync.mockReturnValue([
+      { ...sampleTrack, uri: 'tracks/track-1.mp3', durationEstimated: 1 },
+    ]);
     mockDirEntries = [
       { name: 'track-1.mp3', uri: sampleTrack.uri },
       { name: 'orphan.wav', uri: 'file:///data/tracks/orphan.wav' },
@@ -136,7 +157,11 @@ describe('loadTracks', () => {
   it('converts durationEstimated 0 to false', async () => {
     jest.resetModules();
 
-    const dbRow = { ...sampleTrack, durationEstimated: 0 };
+    const dbRow = {
+      ...sampleTrack,
+      uri: 'tracks/track-1.mp3',
+      durationEstimated: 0,
+    };
     mockGetAllSync.mockReturnValue([dbRow]);
 
     const { loadTracks } = require('../trackStore');
@@ -147,7 +172,7 @@ describe('loadTracks', () => {
 });
 
 describe('insertTrack', () => {
-  it('inserts a track into the database with durationEstimated as integer', () => {
+  it('inserts a track into the database with a relative URI and durationEstimated as integer', () => {
     jest.resetModules();
 
     const { insertTrack } = require('../trackStore');
@@ -157,7 +182,7 @@ describe('insertTrack', () => {
       expect.stringContaining('INSERT INTO tracks'),
       sampleTrack.id,
       sampleTrack.filename,
-      sampleTrack.uri,
+      `tracks/${sampleTrack.id}.${sampleTrack.format}`,
       sampleTrack.format,
       sampleTrack.durationMs,
       1,
@@ -185,7 +210,7 @@ describe('updateTrackDuration', () => {
 describe('deleteTrack', () => {
   it('deletes a track by id', () => {
     jest.resetModules();
-    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockGetFirstSync.mockReturnValue({ uri: 'tracks/track-1.mp3' });
 
     const { deleteTrack } = require('../trackStore');
     deleteTrack('track-1');
@@ -198,7 +223,7 @@ describe('deleteTrack', () => {
 
   it('cascade-removes the track marker row', () => {
     jest.resetModules();
-    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockGetFirstSync.mockReturnValue({ uri: 'tracks/track-1.mp3' });
 
     const { deleteTrack } = require('../trackStore');
     deleteTrack('track-1');
@@ -211,7 +236,7 @@ describe('deleteTrack', () => {
 
   it('cascade-removes the track segment profiles', () => {
     jest.resetModules();
-    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockGetFirstSync.mockReturnValue({ uri: 'tracks/track-1.mp3' });
 
     const { deleteTrack } = require('../trackStore');
     deleteTrack('track-1');
@@ -224,7 +249,7 @@ describe('deleteTrack', () => {
 
   it('deletes the audio file from disk on removal', () => {
     jest.resetModules();
-    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockGetFirstSync.mockReturnValue({ uri: 'tracks/track-1.mp3' });
     mockFileExists[sampleTrack.uri] = true;
 
     const { deleteTrack } = require('../trackStore');
@@ -242,7 +267,7 @@ describe('deleteTrack', () => {
     const callOrder: string[] = [];
     mockGetFirstSync.mockImplementation(() => {
       callOrder.push('lookup');
-      return { uri: sampleTrack.uri };
+      return { uri: 'tracks/track-1.mp3' };
     });
     mockRunSync.mockImplementation((sql: string) => {
       if (sql.includes('track_markers')) callOrder.push('delete-markers');
@@ -264,7 +289,7 @@ describe('deleteTrack', () => {
 
   it('does not throw when the file is already missing', () => {
     jest.resetModules();
-    mockGetFirstSync.mockReturnValue({ uri: sampleTrack.uri });
+    mockGetFirstSync.mockReturnValue({ uri: 'tracks/track-1.mp3' });
     mockFileExists[sampleTrack.uri] = false;
 
     const { deleteTrack } = require('../trackStore');

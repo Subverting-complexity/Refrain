@@ -20,6 +20,9 @@ const mockOpenDatabaseSync = SQLite.openDatabaseSync as jest.Mock;
 const ALTER_SQL =
   'ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;';
 
+const URI_MIGRATION_SQL =
+  `UPDATE tracks SET uri = 'tracks/' || id || '.' || format WHERE uri LIKE 'file://%';`;
+
 /** Columns present on a current-schema database (durationEstimated included). */
 const FRESH_COLUMNS = [
   { name: 'id' },
@@ -78,6 +81,12 @@ describe('getDatabase', () => {
     getDatabase();
 
     expect(mockExecSync).toHaveBeenCalledWith(ALTER_SQL);
+  });
+
+  it('runs the URI migration to convert absolute paths to relative on open', () => {
+    getDatabase();
+
+    expect(mockExecSync).toHaveBeenCalledWith(URI_MIGRATION_SQL);
   });
 
   it('reuses the same database instance on subsequent calls', () => {

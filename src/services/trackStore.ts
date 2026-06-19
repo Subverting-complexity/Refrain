@@ -4,6 +4,22 @@ import { Track } from '../types';
 import { getDatabase } from './database';
 import { deleteMarkers, deleteProfilesForTrack } from './markerStore';
 
+/**
+ * Converts a relative track path (`tracks/<id>.<format>`) to an absolute URI
+ * using the current sandbox root. Absolute URIs (legacy or blob:) pass through
+ * unchanged so the function is safe to call unconditionally.
+ *
+ * Relative storage is required on iOS because the sandbox UUID in
+ * `Paths.document` changes on every TestFlight update, invalidating any
+ * absolute path that was captured at import time.
+ */
+function resolveUri(relOrAbsUri: string): string {
+  if (relOrAbsUri.startsWith('file://') || relOrAbsUri.startsWith('blob:')) {
+    return relOrAbsUri;
+  }
+  return `${Paths.document.uri}/${relOrAbsUri}`;
+}
+
 let migrated = false;
 
 async function migrateFromJson(): Promise<void> {
@@ -22,7 +38,7 @@ async function migrateFromJson(): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         track.id,
         track.filename,
-        track.uri,
+        `tracks/${track.id}.${track.format}`,
         track.format,
         track.durationMs,
         track.durationEstimated === false ? 0 : 1,
@@ -52,6 +68,7 @@ function rowToTrack(row: TrackRow): Track {
     ...row,
     format: row.format as Track['format'],
     durationEstimated: row.durationEstimated === 1,
+    uri: resolveUri(row.uri),
   };
 }
 
@@ -72,7 +89,7 @@ export function insertTrack(track: Track): void {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     track.id,
     track.filename,
-    track.uri,
+    `tracks/${track.id}.${track.format}`,
     track.format,
     track.durationMs,
     track.durationEstimated ? 1 : 0,
@@ -100,7 +117,7 @@ export function deleteTrack(id: string): void {
   deleteMarkers(id);
   deleteProfilesForTrack(id);
   if (row?.uri) {
-    deleteFileIfExists(row.uri);
+    deleteFileIfExists(resolveUri(row.uri));
   }
 }
 

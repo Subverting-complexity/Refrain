@@ -51,6 +51,10 @@ export function getDatabase(): SQLite.SQLiteDatabase {
  * column existed do not. Rather than issue the `ALTER` unconditionally and
  * swallow the guaranteed "duplicate column" error on every fresh DB, inspect
  * the existing columns and only add what is missing.
+ *
+ * URIs are stored as relative paths (`tracks/<id>.<format>`) so they survive
+ * iOS sandbox UUID rotation on TestFlight updates. Any absolute `file://` URIs
+ * left over from an older build are converted here on first open after upgrade.
  */
 function migrateTracksSchema(database: SQLite.SQLiteDatabase): void {
   const columns = database.getAllSync<{ name: string }>(
@@ -64,6 +68,9 @@ function migrateTracksSchema(database: SQLite.SQLiteDatabase): void {
       `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
     );
   }
+  database.execSync(
+    `UPDATE tracks SET uri = 'tracks/' || id || '.' || format WHERE uri LIKE 'file://%';`,
+  );
 }
 
 export function closeDatabase(): void {
