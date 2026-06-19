@@ -56,6 +56,29 @@ function Wait-AndExit {
 }
 function Test-Command { param([string]$cmd) $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+# Load KEY=VALUE pairs from a local .env file into the process environment.
+# Existing environment values win, so an explicitly-set EXPO_TOKEN is never
+# clobbered. Lines that are blank or start with '#' are ignored.
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($line in Get-Content $Path) {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
+        $eq = $trimmed.IndexOf('=')
+        if ($eq -lt 1) { continue }
+        $key = $trimmed.Substring(0, $eq).Trim()
+        $val = $trimmed.Substring($eq + 1).Trim()
+        if ($val.Length -ge 2 -and
+            (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+             ($val.StartsWith("'") -and $val.EndsWith("'")))) {
+            $val = $val.Substring(1, $val.Length - 2)
+        }
+        if (-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key))) { continue }
+        Set-Item -Path "Env:$key" -Value $val
+    }
+}
+
 # -- Build log functions ------------------------------------------------------
 function Get-BuildLogPath {
     return Join-Path $PSScriptRoot 'ios-build-log.json'
@@ -141,6 +164,21 @@ if (-not (Test-Path (Join-Path $AppDir 'package.json'))) {
     Wait-AndExit 1
 }
 Push-Location $AppDir
+
+# -- Load per-repo auth (.env) ------------------------------------------------
+# Lets EAS authenticate as the Expo account THIS project belongs to
+# (subvertingcomplexity) via EXPO_TOKEN, independent of the global `eas login`
+# session your other repos use. No direnv required.
+Import-DotEnv -Path (Join-Path $AppDir '.env')
+$easTokenPlaceholder = 'PASTE_YOUR_PERSONAL_EXPO_TOKEN_HERE'
+if ($env:EXPO_TOKEN -eq $easTokenPlaceholder) {
+    Write-Warn ".env still contains the placeholder EXPO_TOKEN."
+    Write-Warn "  Paste your real personal access token into .env, or EAS will use your global login (wrong account)."
+    $env:EXPO_TOKEN = $null
+} elseif (-not [string]::IsNullOrEmpty($env:EXPO_TOKEN)) {
+    $maskLen = [Math]::Min(6, $env:EXPO_TOKEN.Length)
+    Write-Ok "EXPO_TOKEN loaded from .env ($($env:EXPO_TOKEN.Substring(0, $maskLen))...) - building as that token's account."
+}
 
 # -- Verify eas.json exists ---------------------------------------------------
 if (-not (Test-Path (Join-Path $AppDir 'eas.json'))) {
