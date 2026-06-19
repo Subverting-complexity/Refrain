@@ -13,6 +13,12 @@ interface TransportControlsProps {
   onPause: () => void;
   onSkipBack: () => void;
   onSkipForward: () => void;
+  /**
+   * Optional "stop" action: halt playback, rewind, and hand the audio session
+   * back to other apps. Rendered as a dedicated Stop control only when
+   * provided, so callers that just want play/pause/skip stay unchanged.
+   */
+  onStop?: () => void;
   style?: ViewStyle;
 }
 
@@ -22,6 +28,7 @@ export function TransportControls({
   onPause,
   onSkipBack,
   onSkipForward,
+  onStop,
   style,
 }: TransportControlsProps) {
   const { theme } = useTheme();
@@ -91,6 +98,19 @@ export function TransportControls({
           color={theme.colors.textPrimary}
         />
       </AccessiblePressable>
+
+      {onStop ? (
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel="Stop"
+          accessibilityState={{ disabled: isDisabled }}
+          onPress={onStop}
+          disabled={isDisabled}
+          style={(p) => secondaryStyle(p.pressed)}
+        >
+          <Ionicons name="stop" size={22} color={theme.colors.textPrimary} />
+        </AccessiblePressable>
+      ) : null}
     </View>
   );
 }
