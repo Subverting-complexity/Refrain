@@ -90,8 +90,16 @@ function panel(tree: ReactTestRenderer, label: string) {
   );
 }
 
+function closeButton(tree: ReactTestRenderer, title: string) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityLabel === `Close ${title}` &&
+      typeof node.props.onPress === 'function',
+  )[0];
+}
+
 describe('ControlsDrawer', () => {
-  it('renders the panel chips plus Segments when a segments handler is given', () => {
+  it('renders the launcher squares plus Segments when a segments handler is given', () => {
     const tree = renderDrawer({ onOpenSegments: jest.fn() });
     expect(chip(tree, 'Count-in settings')).toBeDefined();
     expect(chip(tree, 'Volume settings')).toBeDefined();
@@ -99,23 +107,23 @@ describe('ControlsDrawer', () => {
     expect(chip(tree, 'Open segment profiles')).toBeDefined();
   });
 
-  it('hides the Segments chip when no handler is provided', () => {
+  it('hides the Segments square when no handler is provided', () => {
     const tree = renderDrawer();
     expect(chip(tree, 'Open segment profiles')).toBeUndefined();
   });
 
-  it('expands a panel on chip tap and collapses it on a second tap', () => {
+  it('opens a settings sheet on launcher tap and closes it from the sheet', () => {
     const tree = renderDrawer();
     expect(panel(tree, 'countin-panel')).toHaveLength(0);
 
     act(() => chip(tree, 'Count-in settings').props.onPress());
     expect(panel(tree, 'countin-panel')).toHaveLength(1);
 
-    act(() => chip(tree, 'Count-in settings').props.onPress());
+    act(() => closeButton(tree, 'Count-in').props.onPress());
     expect(panel(tree, 'countin-panel')).toHaveLength(0);
   });
 
-  it('keeps only one panel open at a time (accordion)', () => {
+  it('shows only one settings sheet at a time', () => {
     const tree = renderDrawer();
 
     act(() => chip(tree, 'Count-in settings').props.onPress());
@@ -126,7 +134,7 @@ describe('ControlsDrawer', () => {
     expect(panel(tree, 'volume-panel')).toHaveLength(1);
   });
 
-  it('opens the segments sheet without expanding an inline panel', () => {
+  it('opens the segments sheet without opening a settings sheet', () => {
     const onOpenSegments = jest.fn();
     const tree = renderDrawer({ onOpenSegments });
 
