@@ -127,6 +127,18 @@ describe('audioEngine', () => {
       expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
     });
 
+    it('registers the player for lock screen controls when a track name is provided', async () => {
+      const { loadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', undefined, 'My Song');
+
+      expect(mockSetActiveForLockScreen).toHaveBeenCalledWith(
+        true,
+        { title: 'My Song', artist: 'Refrain' },
+        { showSeekForward: false, showSeekBackward: false },
+      );
+    });
+
     it('reports error status when createAudioPlayer throws', async () => {
       mockCreateAudioPlayer.mockImplementationOnce(() => {
         throw new Error('unsupported format');
@@ -343,6 +355,16 @@ describe('audioEngine', () => {
 
       expect(mockPause).not.toHaveBeenCalled();
     });
+
+    it('deactivates the audio session so other apps can resume', async () => {
+      const { loadTrack, stop } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSetIsAudioActiveAsync.mockClear();
+      await stop();
+
+      expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
+    });
   });
 
   describe('seekTo', () => {
@@ -477,6 +499,18 @@ describe('audioEngine', () => {
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'idle', positionMs: 0 }),
       );
+    });
+
+    it('clears lock screen controls and releases audio focus', async () => {
+      const { loadTrack, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSetIsAudioActiveAsync.mockClear();
+
+      await unloadTrack();
+
+      expect(mockClearLockScreenControls).toHaveBeenCalled();
+      expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
     });
 
     it('clears markers on unload', async () => {

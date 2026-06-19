@@ -116,6 +116,16 @@ describe('useAudioPlayer', () => {
     );
   });
 
+  it('forwards the track name to the engine for lock screen controls', () => {
+    renderHook('file:///test.mp3', 'track-42', 'My Song');
+
+    expect(mockLoadTrack).toHaveBeenCalledWith(
+      'file:///test.mp3',
+      'track-42',
+      'My Song',
+    );
+  });
+
   it('propagates the error status and lastError from the engine', () => {
     renderHook('file:///bad.mp3');
 
