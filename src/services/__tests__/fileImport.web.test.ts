@@ -1,6 +1,13 @@
 /**
  * @jest-environment node
  */
+import {
+  importBlob,
+  importFromUri,
+  isSupportedFilename,
+  pickAndImportFile,
+} from '../fileImport.web';
+
 const mockPutBlob = jest.fn<Promise<void>, [string, Blob]>();
 const mockGetObjectUrl = jest.fn<Promise<string | null>, [string]>();
 
@@ -18,13 +25,6 @@ jest.mock('expo-crypto', () => ({
   randomUUID: (...args: []) => mockRandomUUID(...args),
   getRandomValues: (arr: Uint8Array) => mockGetRandomValues(arr),
 }));
-
-import {
-  importBlob,
-  importFromUri,
-  isSupportedFilename,
-  pickAndImportFile,
-} from '../fileImport.web';
 
 function makeBlob(bytes = 1000): Blob {
   return { size: bytes, type: 'audio/mpeg' } as Blob;

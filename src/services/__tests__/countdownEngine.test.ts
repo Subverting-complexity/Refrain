@@ -1,5 +1,7 @@
 import { CountdownConfig, CountdownState } from '../../types';
 
+import * as countdownEngine from '../countdownEngine';
+
 const mockPlay = jest.fn();
 const mockSeekTo = jest.fn().mockResolvedValue(undefined);
 const mockRemove = jest.fn();
@@ -12,8 +14,6 @@ const mockCreateAudioPlayer = jest.fn().mockImplementation(() => ({
 jest.mock('expo-audio', () => ({
   createAudioPlayer: (...args: unknown[]) => mockCreateAudioPlayer(...args),
 }));
-
-import * as countdownEngine from '../countdownEngine';
 
 function silentConfig(
   overrides: Partial<CountdownConfig> = {},

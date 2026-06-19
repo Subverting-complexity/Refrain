@@ -1,3 +1,6 @@
+import * as SQLite from 'expo-sqlite';
+import { getDatabase, closeDatabase } from '../database';
+
 const mockGetAllSync = jest.fn();
 const mockExecSync = jest.fn();
 const mockCloseSync = jest.fn();
@@ -11,9 +14,6 @@ jest.mock('expo-sqlite', () => ({
     closeSync: mockCloseSync,
   })),
 }));
-
-import * as SQLite from 'expo-sqlite';
-import { getDatabase, closeDatabase } from '../database';
 
 const mockOpenDatabaseSync = SQLite.openDatabaseSync as jest.Mock;
 
