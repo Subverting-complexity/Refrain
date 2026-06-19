@@ -11,6 +11,7 @@ import { Platform } from 'react-native';
 import * as markerStore from './markerStore';
 import * as settingsStore from './settingsStore';
 import * as webAudioGain from './webAudioGain';
+import * as webMediaSession from './webMediaSession';
 import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
 
 export type PlaybackListener = (state: PlaybackState) => void;
@@ -329,6 +330,26 @@ async function loadTrackImpl(
       }
     }
 
+    // On web, wire the OS media controls (media overlay, hardware keys) to the
+    // transport. Native gets the equivalent from setActiveForLockScreen above;
+    // web only has navigator.mediaSession, so without this the web build has no
+    // media-key support. Best-effort and self-guarded — a no-op off-web.
+    if (Platform.OS === 'web') {
+      webMediaSession.setMetadata({ title: trackName, artist: 'Refrain' });
+      webMediaSession.setHandlers({
+        play: () => {
+          void play();
+        },
+        pause: () => {
+          void pause();
+        },
+        stop: () => {
+          void stop();
+        },
+      });
+      webMediaSession.setPlaybackState('paused');
+    }
+
     // Restore saved markers last, after the load's reset so they aren't
     // clobbered. Silent and best-effort; no-op without a track id or saved row.
     if (currentTrackId != null) {
@@ -391,11 +412,13 @@ export async function play(): Promise<void> {
     await player.seekTo(msToSec(markerA ?? 0));
   }
   player.play();
+  if (Platform.OS === 'web') webMediaSession.setPlaybackState('playing');
 }
 
 export async function pause(): Promise<void> {
   if (!player) return;
   player.pause();
+  if (Platform.OS === 'web') webMediaSession.setPlaybackState('paused');
 }
 
 export async function stop(): Promise<void> {
@@ -408,6 +431,8 @@ export async function stop(): Promise<void> {
   // a quick resume doesn't re-interrupt; stop() is a deliberate "done" action.
   if (Platform.OS !== 'web') {
     await setIsAudioActiveAsync(false);
+  } else {
+    webMediaSession.setPlaybackState('paused');
   }
 }
 
@@ -583,6 +608,11 @@ async function unloadTrackImpl(): Promise<void> {
   if (webGainActive) {
     webAudioGain.detach();
     webGainActive = false;
+  }
+  // Drop the web OS media controls so a removed track leaves no stale overlay
+  // or dangling handlers. Self-guarded — a no-op off-web.
+  if (Platform.OS === 'web') {
+    webMediaSession.clear();
   }
   if (statusSubscription) {
     statusSubscription.remove();
