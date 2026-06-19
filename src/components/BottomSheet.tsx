@@ -86,6 +86,15 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
     gap: spacing.md,
+    // Give every bottom panel a meaningful footprint instead of collapsing
+    // into a thin strip at the very bottom: a height floor so the sheet
+    // claims real screen space, and a width floor (capped + centred) so it
+    // stays usable on narrow layouts without stretching on wide ones.
+    width: '100%',
+    minWidth: 320,
+    maxWidth: 560,
+    minHeight: 240,
+    alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',
