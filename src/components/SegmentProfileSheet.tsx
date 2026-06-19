@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -7,6 +7,7 @@ import { spacing } from '../theme';
 import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { SegmentRenameDialog } from './SegmentRenameDialog';
 import { SnippetPreviewSettings } from './SnippetPreviewSettings';
 
 export interface SegmentProfileSheetProps {
@@ -44,20 +45,17 @@ export function SegmentProfileSheet({
   const { theme } = useTheme();
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  const renamingProfile = profiles.find((p) => p.id === renamingId) ?? null;
 
   const startRename = (profile: SegmentProfile) => {
     setConfirmingId(null);
-    setRenameDraft(profile.name);
     setRenamingId(profile.id);
   };
 
-  const confirmRename = () => {
-    if (renamingId) {
-      const name = renameDraft.trim();
-      if (name) onRename(renamingId, name);
-    }
+  const confirmRename = (name: string) => {
+    if (renamingId) onRename(renamingId, name);
     setRenamingId(null);
   };
 
@@ -75,12 +73,6 @@ export function SegmentProfileSheet({
     onLoadProfile(profile);
     onClose();
   };
-
-  const inputStyle = [
-    styles.input,
-    theme.typography.body,
-    { color: theme.colors.textPrimary, borderColor: theme.colors.border },
-  ];
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -142,42 +134,6 @@ export function SegmentProfileSheet({
           ) : (
             <View style={styles.list}>
               {profiles.map((profile) => {
-                if (renamingId === profile.id) {
-                  return (
-                    <View key={profile.id} style={styles.saveRow}>
-                      <TextInput
-                        accessibilityLabel="Segment name"
-                        value={renameDraft}
-                        onChangeText={setRenameDraft}
-                        style={inputStyle}
-                        autoFocus
-                      />
-                      <AccessiblePressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Confirm rename"
-                        onPress={confirmRename}
-                      >
-                        <Ionicons
-                          name="checkmark"
-                          size={22}
-                          color={theme.colors.accent}
-                        />
-                      </AccessiblePressable>
-                      <AccessiblePressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel rename"
-                        onPress={() => setRenamingId(null)}
-                      >
-                        <Ionicons
-                          name="close"
-                          size={22}
-                          color={theme.colors.textSecondary}
-                        />
-                      </AccessiblePressable>
-                    </View>
-                  );
-                }
-
                 if (confirmingId === profile.id) {
                   return (
                     <View key={profile.id} style={styles.row}>
@@ -274,6 +230,14 @@ export function SegmentProfileSheet({
           )}
         </View>
       </View>
+
+      {renamingProfile ? (
+        <SegmentRenameDialog
+          currentName={renamingProfile.name}
+          onSave={confirmRename}
+          onCancel={() => setRenamingId(null)}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -301,18 +265,6 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-  },
-  saveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
   },
   list: {
     gap: spacing.xs,
