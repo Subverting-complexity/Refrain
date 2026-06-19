@@ -79,7 +79,7 @@ export default function PlayerScreen() {
     startMonitor,
     updateMonitor,
     stopMonitor,
-  } = useAudioPlayer(uri ?? null, trackId ?? null);
+  } = useAudioPlayer(uri ?? null, trackId ?? null, filename ?? null);
 
   // Named-segment list + CRUD for this track, owned here so the player can show
   // the loaded segment's name and suggest the next one. The sheet receives the
