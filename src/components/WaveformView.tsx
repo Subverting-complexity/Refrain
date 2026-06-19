@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
+  AccessibilityInfo,
   LayoutChangeEvent,
   StyleSheet,
   Text,
@@ -523,9 +524,19 @@ export function WaveformView({
         onSeek(Math.min(durationMs, positionMs + SEEK_STEP_MS));
       } else if (actionName === 'decrement') {
         onSeek(Math.max(0, positionMs - SEEK_STEP_MS));
+      } else if (actionName === 'placeA' && onMarkerAChange) {
+        onMarkerAChange(positionMs);
+        AccessibilityInfo.announceForAccessibility(
+          `A marker placed at ${formatDuration(positionMs)}`,
+        );
+      } else if (actionName === 'placeB' && onMarkerBChange) {
+        onMarkerBChange(positionMs);
+        AccessibilityInfo.announceForAccessibility(
+          `B marker placed at ${formatDuration(positionMs)}`,
+        );
       }
     },
-    [durationMs, positionMs, onSeek],
+    [durationMs, positionMs, onSeek, onMarkerAChange, onMarkerBChange],
   );
 
   const a11yLabel = useMemo(() => {
@@ -545,7 +556,17 @@ export function WaveformView({
       ]}
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
-      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      accessibilityHint="Swipe up or down to seek. Activate for more options including placing loop markers."
+      accessibilityActions={[
+        { name: 'increment' },
+        { name: 'decrement' },
+        ...(onMarkerAChange
+          ? [{ name: 'placeA', label: 'Place A marker at current position' }]
+          : []),
+        ...(onMarkerBChange
+          ? [{ name: 'placeB', label: 'Place B marker at current position' }]
+          : []),
+      ]}
       onAccessibilityAction={handleAccessibilityAction}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >

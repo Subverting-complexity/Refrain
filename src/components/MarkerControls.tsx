@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -7,6 +7,7 @@ import { spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { MarkerTimeSheet } from './MarkerTimeSheet';
 
 export type PlaceMode = 'none' | 'A' | 'B';
 
@@ -14,12 +15,21 @@ interface MarkerControlsProps {
   status: PlaybackStatus;
   markerA: number | null;
   markerB: number | null;
+  durationMs: number;
   loopEnabled: boolean;
   placeMode: PlaceMode;
-  /** Press the A button: arm placing A (or clear both markers when A is set). */
+  /** Press the A button when A is not set: arm placing A. */
   onPressA: () => void;
-  /** Press the B button: arm placing B (or clear B when B is set). */
+  /** Press the B button when B is not set: arm placing B. */
   onPressB: () => void;
+  /** Commit an edited A position from the time sheet. */
+  onEditA?: (ms: number) => void;
+  /** Commit an edited B position from the time sheet. */
+  onEditB?: (ms: number) => void;
+  /** Remove A (and B) from the time sheet. */
+  onRemoveA?: () => void;
+  /** Remove B only from the time sheet. */
+  onRemoveB?: () => void;
   onToggleLoop: (enabled: boolean) => void;
   /**
    * Save the current A/B region. Omitted when there is no track to save to —
@@ -35,16 +45,23 @@ export function MarkerControls({
   status,
   markerA,
   markerB,
+  durationMs,
   loopEnabled,
   placeMode,
   onPressA,
   onPressB,
+  onEditA,
+  onEditB,
+  onRemoveA,
+  onRemoveB,
   onToggleLoop,
   onSave,
   onClear,
   style,
 }: MarkerControlsProps) {
   const { theme } = useTheme();
+  // null = closed; 'A' or 'B' = sheet open for that marker
+  const [sheetTarget, setSheetTarget] = useState<'A' | 'B' | null>(null);
   const isDisabled = status === 'idle' || status === 'error';
   const canLoop = markerA != null && markerB != null;
   const loopActive = canLoop && loopEnabled;
@@ -71,18 +88,19 @@ export function MarkerControls({
         : 'Set';
     const accessibilityLabel =
       value != null
-        ? `${label === 'A' ? 'Loop start' : 'Loop end'} ${formatDuration(value)}. ${
-            label === 'A' ? 'Clears both markers' : 'Clears loop end'
-          }`
+        ? `${label === 'A' ? 'Loop start' : 'Loop end'} ${formatDuration(value)}. Edit or remove`
         : arming
           ? `Cancel placing loop ${label === 'A' ? 'start' : 'end'}`
           : `Place loop ${label === 'A' ? 'start' : 'end'}`;
+    // When a marker is set, the tile press opens the time editor instead of
+    // clearing. Clearing now lives in the sheet's Remove button.
+    const handlePress = value != null ? () => setSheetTarget(label) : onPress;
     return (
       <AccessiblePressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         accessibilityState={{ disabled, selected: arming || value != null }}
-        onPress={onPress}
+        onPress={handlePress}
         disabled={disabled}
         style={(pressState) => [
           styles.tile,
@@ -198,6 +216,33 @@ export function MarkerControls({
             ? 'Tap the wave to drop A'
             : 'Tap the wave to drop B after A'}
         </Text>
+      )}
+
+      {sheetTarget === 'A' && markerA != null && onEditA && (
+        <MarkerTimeSheet
+          marker="A"
+          initialMs={markerA}
+          durationMs={durationMs}
+          onCommit={onEditA}
+          onRemove={() => {
+            setSheetTarget(null);
+            onRemoveA?.();
+          }}
+          onDismiss={() => setSheetTarget(null)}
+        />
+      )}
+      {sheetTarget === 'B' && markerB != null && onEditB && (
+        <MarkerTimeSheet
+          marker="B"
+          initialMs={markerB}
+          durationMs={durationMs}
+          onCommit={onEditB}
+          onRemove={() => {
+            setSheetTarget(null);
+            onRemoveB?.();
+          }}
+          onDismiss={() => setSheetTarget(null)}
+        />
       )}
     </View>
   );

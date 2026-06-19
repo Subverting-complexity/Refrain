@@ -1,4 +1,5 @@
 import React from 'react';
+import { AccessibilityInfo } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { WaveformView } from '../WaveformView';
@@ -762,13 +763,96 @@ describe('WaveformView', () => {
   });
 
   describe('accessibility actions', () => {
-    it('exposes increment and decrement actions', () => {
+    it('exposes increment and decrement actions when no marker callbacks are provided', () => {
       const tree = renderWaveform();
       const container = getAdjustable(tree);
       expect(container.props.accessibilityActions).toEqual([
         { name: 'increment' },
         { name: 'decrement' },
       ]);
+    });
+
+    it('adds placeA action when onMarkerAChange is provided', () => {
+      const tree = renderWaveform({ onMarkerAChange: jest.fn() });
+      const actions = getAdjustable(tree).props.accessibilityActions;
+      expect(actions).toContainEqual({
+        name: 'placeA',
+        label: 'Place A marker at current position',
+      });
+    });
+
+    it('adds placeB action when onMarkerBChange is provided', () => {
+      const tree = renderWaveform({ onMarkerBChange: jest.fn() });
+      const actions = getAdjustable(tree).props.accessibilityActions;
+      expect(actions).toContainEqual({
+        name: 'placeB',
+        label: 'Place B marker at current position',
+      });
+    });
+
+    it('places A at current position on placeA action', () => {
+      const onMarkerAChange = jest.fn();
+      const announceSpy = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => undefined);
+      const tree = renderWaveform({
+        positionMs: 5000,
+        durationMs: 20000,
+        onMarkerAChange,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeA' },
+        });
+      });
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+      expect(announceSpy).toHaveBeenCalledWith(
+        expect.stringContaining('A marker placed'),
+      );
+      announceSpy.mockRestore();
+    });
+
+    it('places B at current position on placeB action', () => {
+      const onMarkerBChange = jest.fn();
+      const announceSpy = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => undefined);
+      const tree = renderWaveform({
+        positionMs: 8000,
+        durationMs: 20000,
+        onMarkerBChange,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeB' },
+        });
+      });
+      expect(onMarkerBChange).toHaveBeenCalledWith(8000);
+      expect(announceSpy).toHaveBeenCalledWith(
+        expect.stringContaining('B marker placed'),
+      );
+      announceSpy.mockRestore();
+    });
+
+    it('does not call onMarkerAChange for placeA when callback is absent', () => {
+      const onSeek = jest.fn();
+      const tree = renderWaveform({
+        positionMs: 5000,
+        durationMs: 20000,
+        onSeek,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeA' },
+        });
+      });
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('exposes an accessibilityHint describing available actions', () => {
+      const tree = renderWaveform();
+      const hint = getAdjustable(tree).props.accessibilityHint;
+      expect(hint).toContain('loop markers');
     });
 
     it('announces progress as a percentage via accessibilityValue', () => {
