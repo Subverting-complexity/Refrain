@@ -827,6 +827,33 @@ describe('audioEngine', () => {
       );
     });
 
+    it('reflects an OS interruption (playback paused mid-track) as paused', async () => {
+      // expo-audio has no dedicated interruption event; a phone call or another
+      // app grabbing audio focus surfaces as a playbackStatusUpdate with
+      // playing:false mid-track. The engine must show that as paused (not keep
+      // a stale "playing"), so the transport stays in sync with reality.
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      await loadTrack('file:///test.mp3');
+      subscribe(listener);
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 5 }));
+      listener.mockClear();
+
+      // The OS interrupts: playback stops part-way through, not at the end.
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          currentTime: 5,
+          didJustFinish: false,
+        }),
+      );
+
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 5000 }),
+      );
+    });
+
     it('reports paused status when finished', async () => {
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
