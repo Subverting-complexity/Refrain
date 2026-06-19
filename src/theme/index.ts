@@ -96,7 +96,7 @@ const lightColors: ThemeColors = {
   textPrimary: '#1a2e28',
   textSecondary: '#4a6a60',
   accent: '#3daa80',
-  accentText: '#ffffff',
+  accentText: '#0a1612',
   border: '#cce8df',
   error: '#dc2626',
   errorText: '#ffffff',
