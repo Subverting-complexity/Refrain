@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useRef } from 'react';
 import { Alert, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -28,16 +30,15 @@ export function TrackListItem({
   style,
 }: TrackListItemProps) {
   const { theme } = useTheme();
-  const [showDelete, setShowDelete] = useState(false);
+  const swipeableRef = useRef<SwipeableMethods>(null);
 
-  function handleLongPress() {
-    if (!onDelete) return;
-    setShowDelete(true);
-  }
-
-  function handleDeletePress() {
+  function confirmDelete() {
     Alert.alert('Delete Track', `Remove "${track.filename}" from library?`, [
-      { text: 'Cancel', style: 'cancel', onPress: () => setShowDelete(false) },
+      {
+        text: 'Cancel',
+        style: 'cancel',
+        onPress: () => swipeableRef.current?.close(),
+      },
       {
         text: 'Delete',
         style: 'destructive',
@@ -46,73 +47,87 @@ export function TrackListItem({
     ]);
   }
 
+  function handleLongPress() {
+    if (!onDelete) return;
+    confirmDelete();
+  }
+
+  function renderRightActions() {
+    return (
+      <AccessiblePressable
+        accessibilityRole="button"
+        accessibilityLabel={`Delete ${track.filename}`}
+        onPress={confirmDelete}
+        style={[styles.swipeDelete, { backgroundColor: theme.colors.error }]}
+      >
+        <Ionicons
+          name="trash-outline"
+          size={20}
+          color={theme.colors.errorText}
+        />
+        <Text
+          style={[theme.typography.caption, { color: theme.colors.errorText }]}
+        >
+          Delete
+        </Text>
+      </AccessiblePressable>
+    );
+  }
+
   return (
-    <AccessiblePressable
-      accessibilityRole="button"
-      accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
-      accessibilityHint={
-        onPress && onDelete
-          ? 'Tap to play, long press to delete'
-          : onDelete
-            ? 'Long press to delete'
-            : onPress
-              ? 'Tap to play'
-              : undefined
-      }
-      onLongPress={handleLongPress}
-      onPress={() => {
-        if (showDelete) {
-          setShowDelete(false);
-        } else {
-          onPress?.(track);
-        }
-      }}
-      style={[
-        styles.container,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
-        },
-        style,
-      ]}
+    <ReanimatedSwipeable
+      ref={swipeableRef}
+      renderRightActions={onDelete ? renderRightActions : undefined}
+      containerStyle={style}
+      friction={2}
+      rightThreshold={40}
     >
-      <View
+      <AccessiblePressable
+        accessibilityRole="button"
+        accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
+        accessibilityHint={
+          onPress && onDelete
+            ? 'Tap to play, long press or swipe left to delete'
+            : onDelete
+              ? 'Long press or swipe left to delete'
+              : onPress
+                ? 'Tap to play'
+                : undefined
+        }
+        onLongPress={handleLongPress}
+        onPress={() => onPress?.(track)}
         style={[
-          styles.iconContainer,
-          { backgroundColor: theme.colors.background },
+          styles.container,
+          {
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+          },
         ]}
       >
-        <Ionicons name="musical-note" size={20} color={theme.colors.accent} />
-      </View>
-      <View style={styles.info}>
-        <Text
-          style={[theme.typography.body, styles.filename]}
-          numberOfLines={1}
-          ellipsizeMode="middle"
+        <View
+          style={[
+            styles.iconContainer,
+            { backgroundColor: theme.colors.background },
+          ]}
         >
-          {track.filename}
-        </Text>
-        <Text style={theme.typography.caption}>
-          {track.durationEstimated ? '~' : ''}
-          {formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
-          {formatFileSize(track.fileSizeBytes)}
-        </Text>
-      </View>
-      {showDelete && (
-        <AccessiblePressable
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${track.filename}`}
-          onPress={handleDeletePress}
-          style={[styles.deleteButton, { backgroundColor: theme.colors.error }]}
-        >
-          <Ionicons
-            name="trash-outline"
-            size={18}
-            color={theme.colors.errorText}
-          />
-        </AccessiblePressable>
-      )}
-    </AccessiblePressable>
+          <Ionicons name="musical-note" size={20} color={theme.colors.accent} />
+        </View>
+        <View style={styles.info}>
+          <Text
+            style={[theme.typography.body, styles.filename]}
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
+            {track.filename}
+          </Text>
+          <Text style={theme.typography.caption}>
+            {track.durationEstimated ? '~' : ''}
+            {formatDuration(track.durationMs)} · {track.format.toUpperCase()} ·{' '}
+            {formatFileSize(track.fileSizeBytes)}
+          </Text>
+        </View>
+      </AccessiblePressable>
+    </ReanimatedSwipeable>
   );
 }
 
@@ -139,10 +154,11 @@ const styles = StyleSheet.create({
   filename: {
     marginBottom: spacing.xs,
   },
-  deleteButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.sm,
-    marginLeft: spacing.sm,
+  swipeDelete: {
+    width: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginLeft: spacing.xs,
   },
 });
