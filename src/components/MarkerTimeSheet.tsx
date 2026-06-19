@@ -3,15 +3,19 @@ import { Modal, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import { formatDurationTenths } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 
-const STEP_MS = 100;
+// Fine tier: precise tenth-of-a-second nudges.
+const FINE_STEP_MS = 100;
+const FINE_ACCELERATED_STEP_MS = 500;
+// Coarse tier: whole-second jumps for covering distance quickly.
+const COARSE_STEP_MS = 1000;
+const COARSE_ACCELERATED_STEP_MS = 5000;
 const HOLD_INITIAL_DELAY_MS = 400;
 const HOLD_REPEAT_INTERVAL_MS = 100;
-const HOLD_ACCELERATED_STEP_MS = 500;
-// After this much hold time, steps jump from 100 ms to 500 ms.
+// After this much hold time, each tier jumps to its accelerated step size.
 const HOLD_ACCELERATE_AFTER_MS = 1500;
 
 export interface MarkerTimeSheetProps {
@@ -40,7 +44,7 @@ export function MarkerTimeSheet({
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const holdAccelerateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mutable step size; bumped by the acceleration timeout.
-  const stepSizeRef = useRef(STEP_MS);
+  const stepSizeRef = useRef(FINE_STEP_MS);
   // Tracks the live value so timer callbacks always read the latest without
   // relying on React state (which batches under act() in tests).
   const currentMsRef = useRef(initialMs);
@@ -53,7 +57,7 @@ export function MarkerTimeSheet({
     holdTimeoutRef.current = null;
     holdIntervalRef.current = null;
     holdAccelerateRef.current = null;
-    stepSizeRef.current = STEP_MS;
+    stepSizeRef.current = FINE_STEP_MS;
   }, []);
 
   useEffect(() => () => clearHoldTimers(), [clearHoldTimers]);
@@ -68,15 +72,15 @@ export function MarkerTimeSheet({
     onCommitRef.current = onCommit;
   }, [onCommit]);
 
-  // Apply one step: mutate the ref, update display state, notify parent.
-  // Called both immediately on pressIn and on each timer tick, so onCommit
-  // fires synchronously every time (not batched through useEffect).
-  const applyStep = useCallback((direction: 1 | -1) => {
+  // Apply one step of `amountMs`: mutate the ref, update display state, notify
+  // parent. Called both immediately on pressIn and on each timer tick, so
+  // onCommit fires synchronously every time (not batched through useEffect).
+  const applyStep = useCallback((direction: 1 | -1, amountMs: number) => {
     const next = Math.max(
       0,
       Math.min(
         durationMsRef.current,
-        currentMsRef.current + direction * stepSizeRef.current,
+        currentMsRef.current + direction * amountMs,
       ),
     );
     currentMsRef.current = next;
@@ -84,16 +88,18 @@ export function MarkerTimeSheet({
     onCommitRef.current(next);
   }, []);
 
+  // Begin a press: apply one step now, then after a hold delay repeat the step
+  // and eventually accelerate to the larger step size for the tier.
   const handlePressIn = useCallback(
-    (direction: 1 | -1) => {
-      applyStep(direction);
-      stepSizeRef.current = STEP_MS;
+    (direction: 1 | -1, baseStep: number, acceleratedStep: number) => {
+      applyStep(direction, baseStep);
+      stepSizeRef.current = baseStep;
       holdTimeoutRef.current = setTimeout(() => {
         holdIntervalRef.current = setInterval(() => {
-          applyStep(direction);
+          applyStep(direction, stepSizeRef.current);
         }, HOLD_REPEAT_INTERVAL_MS);
         holdAccelerateRef.current = setTimeout(() => {
-          stepSizeRef.current = HOLD_ACCELERATED_STEP_MS;
+          stepSizeRef.current = acceleratedStep;
         }, HOLD_ACCELERATE_AFTER_MS - HOLD_INITIAL_DELAY_MS);
       }, HOLD_INITIAL_DELAY_MS);
     },
@@ -141,7 +147,9 @@ export function MarkerTimeSheet({
             <AccessiblePressable
               accessibilityRole="button"
               accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 100 milliseconds`}
-              onPressIn={() => handlePressIn(-1)}
+              onPressIn={() =>
+                handlePressIn(-1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
+              }
               onPressOut={clearHoldTimers}
               style={(p) => [
                 styles.stepButton,
@@ -169,7 +177,9 @@ export function MarkerTimeSheet({
             <AccessiblePressable
               accessibilityRole="button"
               accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 100 milliseconds`}
-              onPressIn={() => handlePressIn(1)}
+              onPressIn={() =>
+                handlePressIn(1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
+              }
               onPressOut={clearHoldTimers}
               style={(p) => [
                 styles.stepButton,
@@ -180,6 +190,68 @@ export function MarkerTimeSheet({
               ]}
             >
               <Ionicons name="add" size={32} color={theme.colors.textPrimary} />
+            </AccessiblePressable>
+          </View>
+
+          <View style={styles.coarseRow}>
+            <AccessiblePressable
+              accessibilityRole="button"
+              accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 1 second`}
+              onPressIn={() =>
+                handlePressIn(-1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
+              }
+              onPressOut={clearHoldTimers}
+              style={(p) => [
+                styles.coarseButton,
+                {
+                  borderColor: theme.colors.border,
+                  opacity: p.pressed ? 0.6 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name="remove"
+                size={16}
+                color={theme.colors.textSecondary}
+              />
+              <Text
+                style={[
+                  theme.typography.body,
+                  { color: theme.colors.textPrimary },
+                ]}
+              >
+                1s
+              </Text>
+            </AccessiblePressable>
+
+            <AccessiblePressable
+              accessibilityRole="button"
+              accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 1 second`}
+              onPressIn={() =>
+                handlePressIn(1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
+              }
+              onPressOut={clearHoldTimers}
+              style={(p) => [
+                styles.coarseButton,
+                {
+                  borderColor: theme.colors.border,
+                  opacity: p.pressed ? 0.6 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name="add"
+                size={16}
+                color={theme.colors.textSecondary}
+              />
+              <Text
+                style={[
+                  theme.typography.body,
+                  { color: theme.colors.textPrimary },
+                ]}
+              >
+                1s
+              </Text>
             </AccessiblePressable>
           </View>
 
@@ -255,6 +327,23 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     minWidth: 116,
     textAlign: 'center',
+  },
+  coarseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xl,
+  },
+  coarseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minWidth: 88,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.lg,
+    borderRadius: MIN_TOUCH_TARGET / 2,
+    borderWidth: 1,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

@@ -154,6 +154,49 @@ describe('MarkerTimeSheet', () => {
     expect(onCommit).toHaveBeenCalledWith(5100);
   });
 
+  it('jumps by 1 second on coarse decrease press', () => {
+    const onCommit = jest.fn();
+    const tree = renderSheet({ initialMs: 5000, onCommit });
+    const coarseDecrease = findPressableByLabel(
+      tree,
+      'Decrease loop start by 1 second',
+    )[0];
+    act(() => {
+      coarseDecrease.props.onPressIn();
+    });
+    expect(onCommit).toHaveBeenCalledWith(4000);
+  });
+
+  it('jumps by 1 second on coarse increase press', () => {
+    const onCommit = jest.fn();
+    const tree = renderSheet({ initialMs: 5000, onCommit });
+    const coarseIncrease = findPressableByLabel(
+      tree,
+      'Increase loop start by 1 second',
+    )[0];
+    act(() => {
+      coarseIncrease.props.onPressIn();
+    });
+    expect(onCommit).toHaveBeenCalledWith(6000);
+  });
+
+  it('clamps the coarse step at durationMs', () => {
+    const onCommit = jest.fn();
+    const tree = renderSheet({
+      initialMs: 119500,
+      durationMs: 120000,
+      onCommit,
+    });
+    const coarseIncrease = findPressableByLabel(
+      tree,
+      'Increase loop start by 1 second',
+    )[0];
+    act(() => {
+      coarseIncrease.props.onPressIn();
+    });
+    expect(onCommit).toHaveBeenCalledWith(120000);
+  });
+
   it('clamps the value at 0 when decreasing past the start', () => {
     const onCommit = jest.fn();
     const tree = renderSheet({ initialMs: 50, onCommit });
