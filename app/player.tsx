@@ -300,6 +300,12 @@ export default function PlayerScreen() {
     setPlaceMode('none');
   }, [clearMarkers, clearLoaded]);
 
+  // Remove B from the time editor sheet — clears B only without re-arming.
+  const handleRemoveB = useCallback(() => {
+    clearMarkerB();
+    clearLoaded();
+  }, [clearMarkerB, clearLoaded]);
+
   // Pressing B: with B set, clear it and re-arm placing B; otherwise (A exists)
   // arm placing B. A no-op before A is set — the button is disabled then.
   const handlePressB = useCallback(() => {
@@ -444,10 +450,15 @@ export default function PlayerScreen() {
             status={status}
             markerA={markerA}
             markerB={markerB}
+            durationMs={durationMs}
             loopEnabled={loopEnabled}
             placeMode={placeMode}
             onPressA={handlePressA}
             onPressB={handlePressB}
+            onEditA={setMarkerA}
+            onEditB={handleSetMarkerB}
+            onRemoveA={handleClear}
+            onRemoveB={handleRemoveB}
             onToggleLoop={setLoopEnabled}
             onSave={trackId ? () => setSaveVisible(true) : undefined}
             onClear={handleClear}

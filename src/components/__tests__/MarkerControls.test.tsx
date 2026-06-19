@@ -42,6 +42,7 @@ function renderControls(
         status="paused"
         markerA={null}
         markerB={null}
+        durationMs={120000}
         loopEnabled={true}
         placeMode="none"
         onPressA={jest.fn()}
@@ -107,10 +108,10 @@ describe('MarkerControls', () => {
     expect(findText(tree, 'Tap wave').length).toBe(1);
   });
 
-  it('labels the A button to clear both markers once A is set', () => {
+  it('labels the A button to edit or remove once A is set', () => {
     const tree = renderControls({ markerA: 5000, markerB: null });
     expect(
-      findPressableByLabelFragment(tree, 'Clears both markers').length,
+      findPressableByLabelFragment(tree, 'Edit or remove').length,
     ).toBeGreaterThanOrEqual(1);
   });
 
@@ -300,6 +301,60 @@ describe('MarkerControls', () => {
     // The button's style is a press-state function; resolve it unpressed.
     const flat = StyleSheet.flatten(button.props.style({ pressed: false }));
     expect(flat.borderColor).toBe('#ffb02e');
+  });
+
+  it('opens the time editor sheet when the A tile is pressed with A set', () => {
+    const onEditA = jest.fn();
+    const tree = renderControls({ markerA: 5000, onEditA });
+    const aTile = findPressableByLabelFragment(tree, 'Loop start 0:05')[0];
+    act(() => {
+      aTile.props.onPress();
+    });
+    // Sheet should be rendered — look for the close button label
+    expect(
+      findPressableByLabel(tree, 'Close marker editor').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('opens the time editor sheet when the B tile is pressed with B set', () => {
+    const onEditB = jest.fn();
+    const tree = renderControls({ markerA: 1000, markerB: 5000, onEditB });
+    const bTile = findPressableByLabelFragment(tree, 'Loop end 0:05')[0];
+    act(() => {
+      bTile.props.onPress();
+    });
+    expect(
+      findPressableByLabel(tree, 'Close marker editor').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('still calls onPressA to arm placement when A is not set', () => {
+    const onPressA = jest.fn();
+    const tree = renderControls({ markerA: null, onPressA });
+    act(() => {
+      findPressableByLabel(tree, 'Place loop start')[0].props.onPress();
+    });
+    expect(onPressA).toHaveBeenCalled();
+  });
+
+  it('calls onRemoveA and closes the sheet when Remove is pressed for A', () => {
+    const onRemoveA = jest.fn();
+    const onEditA = jest.fn();
+    const tree = renderControls({ markerA: 5000, onEditA, onRemoveA });
+    // Open the sheet
+    act(() => {
+      findPressableByLabelFragment(tree, 'Loop start 0:05')[0].props.onPress();
+    });
+    // Press Remove
+    act(() => {
+      findPressableByLabel(
+        tree,
+        'Remove loop start and end',
+      )[0].props.onPress();
+    });
+    expect(onRemoveA).toHaveBeenCalled();
+    // Sheet should be gone
+    expect(findPressableByLabel(tree, 'Close marker editor')).toHaveLength(0);
   });
 
   it('accepts style prop override', () => {
