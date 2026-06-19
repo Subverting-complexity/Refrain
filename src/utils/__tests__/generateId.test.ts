@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import { generateId } from '../generateId';
+
 const mockRandomUUID = jest.fn<string, []>(() => 'uuid-1');
 const mockGetRandomValues = jest.fn(
   (arr: Uint8Array) => arr.fill(0xab) as Uint8Array,
@@ -10,8 +12,6 @@ jest.mock('expo-crypto', () => ({
   randomUUID: (...args: []) => mockRandomUUID(...args),
   getRandomValues: (arr: Uint8Array) => mockGetRandomValues(arr),
 }));
-
-import { generateId } from '../generateId';
 
 beforeEach(() => {
   jest.clearAllMocks();

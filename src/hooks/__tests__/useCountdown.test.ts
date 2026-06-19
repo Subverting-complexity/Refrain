@@ -1,6 +1,9 @@
 import { createElement } from 'react';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
+import { useCountdown } from '../useCountdown';
+import { CountdownConfig } from '../../types';
+
 jest.mock('expo-audio', () => ({
   createAudioPlayer: jest.fn().mockImplementation(() => ({
     play: jest.fn(),
@@ -8,9 +11,6 @@ jest.mock('expo-audio', () => ({
     remove: jest.fn(),
   })),
 }));
-
-import { useCountdown } from '../useCountdown';
-import { CountdownConfig } from '../../types';
 
 const mockPlay = jest.fn().mockResolvedValue(undefined);
 let lastResult: ReturnType<typeof useCountdown>;

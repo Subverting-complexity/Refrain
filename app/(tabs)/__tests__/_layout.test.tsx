@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 
+import TabLayout from '../_layout';
+
 let mockScreenOptions: Record<string, unknown> | undefined;
 let mockScreens: Record<string, unknown>[] = [];
 
@@ -33,8 +35,6 @@ jest.mock('@/src/hooks/useTheme', () => ({
     },
   }),
 }));
-
-import TabLayout from '../_layout';
 
 describe('TabLayout', () => {
   beforeEach(() => {
