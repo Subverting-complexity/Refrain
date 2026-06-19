@@ -589,14 +589,43 @@ async function unloadTrackImpl(): Promise<void> {
     statusSubscription = null;
   }
   if (player) {
-    if (Platform.OS !== 'web') {
-      player.clearLockScreenControls();
-      // Release audio focus so other apps can resume if playback was active or
-      // paused (stop() already does this, but unload may run without a prior stop).
-      await setIsAudioActiveAsync(false);
-    }
-    player.remove();
+    const outgoing = player;
+    // Clear the reference up front so the player is considered gone even if a
+    // teardown step below throws — nothing should keep driving a half-removed
+    // player.
     player = null;
+    // Halt playback immediately. We must not rely on remove() alone to silence
+    // audio, and the session-deactivate below can reject on a native hiccup —
+    // pausing first guarantees the track stops even if a later step fails.
+    try {
+      outgoing.pause();
+    } catch {
+      // best-effort
+    }
+    if (Platform.OS !== 'web') {
+      try {
+        outgoing.clearLockScreenControls();
+      } catch {
+        // best-effort
+      }
+    }
+    // Remove the player before the (awaitable, failable) session-deactivate so
+    // a rejected/hung setIsAudioActiveAsync can never leave the player resident
+    // and audible.
+    try {
+      outgoing.remove();
+    } catch {
+      // best-effort
+    }
+    if (Platform.OS !== 'web') {
+      // Release audio focus so other apps can resume. Best-effort: if it fails,
+      // the player is already paused and removed, so audio has stopped.
+      try {
+        await setIsAudioActiveAsync(false);
+      } catch {
+        // best-effort
+      }
+    }
   }
   markerA = null;
   markerB = null;

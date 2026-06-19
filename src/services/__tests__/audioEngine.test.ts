@@ -557,6 +557,36 @@ describe('audioEngine', () => {
       expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
     });
 
+    it('pauses the player before removing it', async () => {
+      const { loadTrack, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockPause.mockClear();
+
+      await unloadTrack();
+
+      // Audio must be silenced explicitly, not left to remove() alone.
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
+    });
+
+    it('still pauses and removes the player when releasing focus fails', async () => {
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(
+        new Error('session error'),
+      );
+      const { loadTrack, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockPause.mockClear();
+      mockRemove.mockClear();
+
+      // A failing session-deactivate must not leave the player resident and
+      // audible — the player is paused and removed regardless.
+      await expect(unloadTrack()).resolves.toBeUndefined();
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
+    });
+
     it('clears markers on unload', async () => {
       const {
         loadTrack,
