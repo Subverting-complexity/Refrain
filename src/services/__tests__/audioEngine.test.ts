@@ -228,6 +228,32 @@ describe('audioEngine', () => {
       expect(mockPlay).not.toHaveBeenCalled();
     });
 
+    it('claims the audio session so other apps stop before playing', async () => {
+      const { loadTrack, play } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      mockSetIsAudioActiveAsync.mockClear();
+
+      await play();
+
+      expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(true);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('plays even when claiming the audio session fails', async () => {
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(
+        new Error('focus denied'),
+      );
+      const { loadTrack, play } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+
+      await expect(play()).resolves.toBeUndefined();
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
     it('resets position to markerA when playing after track finished', async () => {
       const { loadTrack, play, setMarkerA } = require('../audioEngine');
 

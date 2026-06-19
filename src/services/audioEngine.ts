@@ -355,6 +355,22 @@ export async function play(): Promise<void> {
   // can't leave the rerouted output silently suspended.
   if (webGainActive) webAudioGain.resume();
 
+  // Explicitly (re)claim the audio session before playing. With
+  // interruptionMode 'doNotMix', activating the session interrupts any other
+  // app's audio (music, podcasts) — which is what the user expects when they
+  // hit play. Crucially this also re-activates after stop()/unload deactivated
+  // the session, so a play following a stop still grabs focus rather than
+  // leaving another app's audio running underneath. Best-effort and native-
+  // only: a failure here must never block playback. (On web, session focus is
+  // managed by the browser.)
+  if (Platform.OS !== 'web') {
+    try {
+      await setIsAudioActiveAsync(true);
+    } catch {
+      // best-effort: fall through to play regardless.
+    }
+  }
+
   const region = regionBounds();
   if (region) {
     // With an A/B region set, playback is confined to it: (re)start from A
