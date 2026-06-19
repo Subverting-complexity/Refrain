@@ -20,8 +20,7 @@ const mockOpenDatabaseSync = SQLite.openDatabaseSync as jest.Mock;
 const ALTER_SQL =
   'ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;';
 
-const URI_MIGRATION_SQL =
-  `UPDATE tracks SET uri = 'tracks/' || id || '.' || format WHERE uri LIKE 'file://%';`;
+const URI_MIGRATION_SQL = `UPDATE tracks SET uri = 'tracks/' || id || '.' || format WHERE uri LIKE 'file://%';`;
 
 /** Columns present on a current-schema database (durationEstimated included). */
 const FRESH_COLUMNS = [
