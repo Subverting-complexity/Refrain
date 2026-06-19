@@ -9,8 +9,8 @@ import {
   CountdownMode,
   CountdownRepeat,
 } from '../types';
-import { AccessiblePressable } from './AccessiblePressable';
 import { ChipGroup, ChipOption } from './ChipGroup';
+import { ToggleSwitch } from './ToggleSwitch';
 
 interface CountdownSettingsProps {
   config: CountdownConfig;
@@ -68,33 +68,11 @@ export function CountdownSettings({
         >
           Count-in
         </Text>
-        <AccessiblePressable
-          accessibilityRole="switch"
+        <ToggleSwitch
+          value={config.enabled}
+          onValueChange={toggleEnabled}
           accessibilityLabel={`Count-in ${config.enabled ? 'on' : 'off'}`}
-          accessibilityState={{ checked: config.enabled }}
-          onPress={toggleEnabled}
-          style={[
-            styles.toggle,
-            {
-              backgroundColor: config.enabled
-                ? theme.colors.accent
-                : theme.colors.background,
-              borderColor: theme.colors.border,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.toggleThumb,
-              {
-                backgroundColor: config.enabled
-                  ? theme.colors.accentText
-                  : theme.colors.textSecondary,
-                transform: [{ translateX: config.enabled ? 20 : 0 }],
-              },
-            ]}
-          />
-        </AccessiblePressable>
+        />
       </View>
 
       <View style={styles.body}>
@@ -153,18 +131,5 @@ const styles = StyleSheet.create({
   },
   label: {
     width: 56,
-  },
-  toggle: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  toggleThumb: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
   },
 });
