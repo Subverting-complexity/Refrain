@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityActionEvent,
   LayoutChangeEvent,
@@ -115,24 +121,34 @@ export function SeekBar({
     setDragRatio(null);
   }, [seekThrottle]);
 
-  // Route through refs so the Pan is created once (see WaveformView).
+  // Route through refs so the Pan is created once (see WaveformView). The refs
+  // hold the latest callbacks; the Pan reads them at gesture time so it never
+  // has to be rebuilt. Writes happen in an effect (not during render).
   const beginRef = useRef(beginDrag);
   const moveRef = useRef(moveDrag);
   const endRef = useRef(endDrag);
-  beginRef.current = beginDrag;
-  moveRef.current = moveDrag;
-  endRef.current = endDrag;
+  useEffect(() => {
+    beginRef.current = beginDrag;
+    moveRef.current = moveDrag;
+    endRef.current = endDrag;
+  });
 
   // Mirror WaveformView: a single Pan with `minDistance(0)` claims the touch
   // immediately so the surrounding ScrollView can't steal a scrub, and
   // `runOnJS` keeps the callbacks on the JS thread for React state/throttle.
+  // RNGH invokes these callbacks on touch (after render), never during render,
+  // so reading the latest-callback refs here is safe — the rule can't see that
+  // onBegin/onUpdate/onFinalize defer execution.
   const pan = useMemo(
     () =>
       Gesture.Pan()
         .runOnJS(true)
         .minDistance(0)
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onBegin((e) => beginRef.current(e.x))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onUpdate((e) => moveRef.current(e.x))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
     [],
   );

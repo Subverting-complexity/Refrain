@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityActionEvent,
   AccessibilityInfo,
@@ -134,16 +140,16 @@ export function WaveformView({
 
   // While dragging, this local value drives the visual of whichever element
   // (cursor or marker) is being moved, so it follows the finger every frame
-  // even though native calls are throttled. null = not dragging.
-  const [dragMs, setDragMs] = useState<number | null>(null);
+  // even though native calls are throttled. null = not dragging. The target is
+  // carried in state (snapshotted from the ref when the drag starts) so render
+  // can pick the live element without reading the ref during render.
+  const [drag, setDrag] = useState<{ ms: number; target: DragTarget } | null>(
+    null,
+  );
 
-  const isDragging = dragMs !== null;
-  const displayPositionMs =
-    isDragging && dragTarget.current === 'seek' ? dragMs : positionMs;
-  const displayMarkerA =
-    isDragging && dragTarget.current === 'markerA' ? dragMs : markerA;
-  const displayMarkerB =
-    isDragging && dragTarget.current === 'markerB' ? dragMs : markerB;
+  const displayPositionMs = drag?.target === 'seek' ? drag.ms : positionMs;
+  const displayMarkerA = drag?.target === 'markerA' ? drag.ms : markerA;
+  const displayMarkerB = drag?.target === 'markerB' ? drag.ms : markerB;
   const progress = durationMs > 0 ? displayPositionMs / durationMs : 0;
 
   // The loop is "active" (and the fill scoped to A..B) only when both markers
@@ -275,7 +281,7 @@ export function WaveformView({
       }
       const target = dragTarget.current;
       const ms = clampForTarget(target, raw);
-      setDragMs(ms);
+      setDrag({ ms, target });
 
       // Wire the rolling-monitor preview to marker gestures only (never plain
       // seeks). Start it once here, and compose its follow into the throttled
@@ -310,7 +316,7 @@ export function WaveformView({
       const raw = positionFromX(x);
       if (raw == null) return;
       const ms = clampForTarget(dragTarget.current, raw);
-      setDragMs(ms);
+      setDrag({ ms, target: dragTarget.current });
       dragThrottle.move(ms);
     },
     [positionFromX, clampForTarget, dragThrottle],
@@ -331,7 +337,7 @@ export function WaveformView({
       isPlacement.current = false;
       onPlaceComplete?.(dragTarget.current === 'markerA' ? 'A' : 'B');
     }
-    setDragMs(null);
+    setDrag(null);
   }, [dragThrottle, onPlaceComplete, onPreviewEnd]);
 
   // Route the gesture through refs to the latest callbacks so the Pan object
@@ -341,22 +347,29 @@ export function WaveformView({
   const beginRef = useRef(beginDrag);
   const moveRef = useRef(moveDrag);
   const endRef = useRef(endDrag);
-  beginRef.current = beginDrag;
-  moveRef.current = moveDrag;
-  endRef.current = endDrag;
+  useEffect(() => {
+    beginRef.current = beginDrag;
+    moveRef.current = moveDrag;
+    endRef.current = endDrag;
+  });
 
   // A single Pan drives taps and drags. `minDistance(0)` makes it claim the
   // touch the instant a finger lands on the waveform, so the surrounding
   // ScrollView can't steal a drag (the bug where markers wouldn't move).
   // `runOnJS` keeps the callbacks on the JS thread so they can touch React
-  // state and the throttle directly.
+  // state and the throttle directly. RNGH invokes these callbacks on touch
+  // (after render), never during render, so reading the latest-callback refs
+  // here is safe — the rule can't see that the handlers defer execution.
   const pan = useMemo(
     () =>
       Gesture.Pan()
         .runOnJS(true)
         .minDistance(0)
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onBegin((e) => beginRef.current(e.x, e.y))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onUpdate((e) => moveRef.current(e.x))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
     [],
   );

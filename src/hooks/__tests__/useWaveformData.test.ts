@@ -89,6 +89,42 @@ describe('useWaveformData', () => {
     expect(lastResult.peaks).toEqual([]);
   });
 
+  it('clears peaks and shows loading while a newly selected track loads', async () => {
+    const firstPeaks = [0.2, 0.8];
+    let resolveSecond!: (v: number[]) => void;
+    const secondPromise = new Promise<number[]>((r) => {
+      resolveSecond = r;
+    });
+
+    mockExtractPeaks
+      .mockResolvedValueOnce(firstPeaks)
+      .mockReturnValueOnce(secondPromise);
+
+    const tree = renderHook('file:///first.wav');
+
+    await act(async () => {
+      await mockExtractPeaks.mock.results[0].value;
+    });
+    expect(lastResult.peaks).toEqual(firstPeaks);
+    expect(lastResult.isLoading).toBe(false);
+
+    // Switching tracks must not leave the previous track's waveform on screen:
+    // peaks clear immediately and the control reads as loading until the new
+    // track's peaks arrive.
+    act(() => {
+      tree.update(createElement(TestComponent, { uri: 'file:///second.wav' }));
+    });
+    expect(lastResult.peaks).toEqual([]);
+    expect(lastResult.isLoading).toBe(true);
+
+    const secondPeaks = [0.9, 0.1];
+    await act(async () => {
+      resolveSecond(secondPeaks);
+    });
+    expect(lastResult.peaks).toEqual(secondPeaks);
+    expect(lastResult.isLoading).toBe(false);
+  });
+
   it('ignores stale results when uri changes quickly', async () => {
     let resolveFirst!: (v: number[]) => void;
     const firstPromise = new Promise<number[]>((r) => {

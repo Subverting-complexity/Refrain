@@ -11,27 +11,26 @@ interface WaveformDataState {
 const EMPTY_PEAKS: WaveformPeaks = [];
 
 export function useWaveformData(uri: string | null): WaveformDataState {
-  const [peaks, setPeaks] = useState<WaveformPeaks>(EMPTY_PEAKS);
-  const [isLoading, setIsLoading] = useState(false);
+  // The loaded result is tagged with the uri it belongs to. State is only ever
+  // written from the async extraction callbacks (never synchronously in the
+  // effect), and `peaks`/`isLoading` are derived from it below — so a missing
+  // track or an in-flight load needs no synchronous setState in the effect.
+  const [loaded, setLoaded] = useState<{
+    uri: string;
+    peaks: WaveformPeaks;
+  } | null>(null);
 
   useEffect(() => {
-    if (!uri) {
-      setPeaks(EMPTY_PEAKS);
-      return;
-    }
+    if (!uri) return;
 
     let cancelled = false;
-    setIsLoading(true);
 
     extractPeaks(uri)
       .then((result) => {
-        if (!cancelled) setPeaks(result);
+        if (!cancelled) setLoaded({ uri, peaks: result });
       })
       .catch(() => {
-        if (!cancelled) setPeaks(EMPTY_PEAKS);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setLoaded({ uri, peaks: EMPTY_PEAKS });
       });
 
     return () => {
@@ -39,5 +38,10 @@ export function useWaveformData(uri: string | null): WaveformDataState {
     };
   }, [uri]);
 
+  // Only surface peaks that belong to the current uri; otherwise we're either
+  // idle (no track) or still loading, both of which read as empty + loading.
+  const hasPeaksForUri = loaded != null && loaded.uri === uri;
+  const peaks = hasPeaksForUri ? loaded.peaks : EMPTY_PEAKS;
+  const isLoading = uri != null && !hasPeaksForUri;
   return { peaks, isLoading };
 }

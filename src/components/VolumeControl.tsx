@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityActionEvent,
   LayoutChangeEvent,
@@ -87,24 +93,33 @@ export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
     setDragRatio(null);
   }, [volumeThrottle]);
 
-  // Route through refs so the Pan is created once (see WaveformView).
+  // Route through refs so the Pan is created once (see WaveformView). The refs
+  // hold the latest callbacks; the Pan reads them at gesture time so it never
+  // has to be rebuilt. Writes happen in an effect (not during render).
   const beginRef = useRef(beginDrag);
   const moveRef = useRef(moveDrag);
   const endRef = useRef(endDrag);
-  beginRef.current = beginDrag;
-  moveRef.current = moveDrag;
-  endRef.current = endDrag;
+  useEffect(() => {
+    beginRef.current = beginDrag;
+    moveRef.current = moveDrag;
+    endRef.current = endDrag;
+  });
 
   // Same Pan setup as the other sliders: `minDistance(0)` claims the touch so
   // the surrounding ScrollView can't steal the drag, `runOnJS` keeps callbacks
-  // on the JS thread.
+  // on the JS thread. RNGH invokes these callbacks on touch (after render),
+  // never during render, so reading the latest-callback refs here is safe — the
+  // rule can't see that onBegin/onUpdate/onFinalize defer execution.
   const pan = useMemo(
     () =>
       Gesture.Pan()
         .runOnJS(true)
         .minDistance(0)
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onBegin((e) => beginRef.current(e.x))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onUpdate((e) => moveRef.current(e.x))
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
     [],
   );
