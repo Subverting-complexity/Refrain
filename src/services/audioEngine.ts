@@ -422,17 +422,33 @@ export async function pause(): Promise<void> {
 }
 
 export async function stop(): Promise<void> {
-  if (!player) return;
-  // expo-audio has no stop(); emulate by pausing and rewinding.
-  player.pause();
-  await player.seekTo(msToSec(markerA ?? 0));
+  const outgoing = player;
+  if (!outgoing) return;
+  // expo-audio has no stop(); emulate by pausing and rewinding. stop() runs
+  // unserialized relative to load/unload, so the player can be removed
+  // mid-call (e.g. tapping Stop then immediately navigating away) — pausing or
+  // seeking a released player would reject. Best-effort so that race can never
+  // surface as an unhandled rejection.
+  try {
+    outgoing.pause();
+    await outgoing.seekTo(msToSec(markerA ?? 0));
+  } catch {
+    // best-effort: the player may have been released mid-stop.
+  }
   // Deactivate the audio session so iOS/Android restores focus to other apps
   // (music, podcasts, etc.). pause() intentionally leaves the session active so
   // a quick resume doesn't re-interrupt; stop() is a deliberate "done" action.
   if (Platform.OS !== 'web') {
-    await setIsAudioActiveAsync(false);
+    try {
+      await setIsAudioActiveAsync(false);
+    } catch {
+      // best-effort: a failed deactivate must not reject; audio is paused.
+    }
   } else {
-    webMediaSession.setPlaybackState('paused');
+    // Web has no audio session to release; mirror the native "done" intent by
+    // clearing the OS overlay's active-playback state rather than leaving it
+    // showing a (resumable) paused track.
+    webMediaSession.setPlaybackState('none');
   }
 }
 

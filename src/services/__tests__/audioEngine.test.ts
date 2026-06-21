@@ -409,6 +409,28 @@ describe('audioEngine', () => {
 
       expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
     });
+
+    it('resolves even when the player is released mid-stop', async () => {
+      // stop() runs unserialized relative to load/unload, so a seek can hit a
+      // just-removed player (tap Stop then navigate away). The rejection must
+      // be swallowed, not surface as an unhandled rejection.
+      const { loadTrack, stop } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSeekTo.mockRejectedValueOnce(new Error('player released'));
+
+      await expect(stop()).resolves.toBeUndefined();
+    });
+
+    it('resolves even when deactivating the audio session fails', async () => {
+      const { loadTrack, stop } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(new Error('session'));
+
+      await expect(stop()).resolves.toBeUndefined();
+      expect(mockPause).toHaveBeenCalled();
+    });
   });
 
   describe('seekTo', () => {

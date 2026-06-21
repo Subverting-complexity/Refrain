@@ -226,6 +226,20 @@ describe('web media session wiring', () => {
     expect(session.playbackState).toBe('paused');
   });
 
+  it('clears the OS overlay playback state on web stop', async () => {
+    const session = installSession();
+    const { loadTrack, play, stop } = require('../audioEngine');
+
+    await loadTrack('blob:track', undefined, 'My Song');
+    await play();
+    expect(session.playbackState).toBe('playing');
+
+    // stop() is a deliberate "done" action: the overlay must drop to 'none'
+    // (no active playback) rather than a resumable 'paused'.
+    await stop();
+    expect(session.playbackState).toBe('none');
+  });
+
   it('clears the media session on unload', async () => {
     const session = installSession();
     const { loadTrack, unloadTrack } = require('../audioEngine');
