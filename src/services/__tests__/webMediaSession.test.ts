@@ -19,13 +19,15 @@ function installSession(
     metadata: undefined,
     playbackState: 'none',
     handlers: {},
-    setActionHandler: jest.fn((action: string, handler: () => void | null) => {
-      if (setActionHandler) {
-        setActionHandler(action, handler);
-        return;
-      }
-      session.handlers[action] = handler;
-    }),
+    setActionHandler: jest.fn(
+      (action: string, handler: (() => void) | null) => {
+        if (setActionHandler) {
+          setActionHandler(action, handler);
+          return;
+        }
+        session.handlers[action] = handler;
+      },
+    ),
   };
   (global as Record<string, unknown>).navigator = { mediaSession: session };
   (global as Record<string, unknown>).MediaMetadata = class {
