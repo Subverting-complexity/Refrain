@@ -127,6 +127,24 @@ describe('audioEngine', () => {
       expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
     });
 
+    it('serializes concurrent loads so the previous player is always removed (no orphan)', async () => {
+      const { loadTrack } = require('../audioEngine');
+
+      // Fire two loads without awaiting the first: a back-then-tap or a
+      // double-tapped track that stacks two player screens. Serialization must
+      // make the second load fully unload the first, so exactly one player is
+      // ever live — never two overlapping, un-stoppable players.
+      await Promise.all([
+        loadTrack('file:///first.mp3'),
+        loadTrack('file:///second.mp3'),
+      ]);
+
+      expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
+      // The second load removed the first player; without serialization both
+      // loads would have seen a null player and removed nothing (orphan).
+      expect(mockRemove).toHaveBeenCalledTimes(1);
+    });
+
     it('registers the player for lock screen controls when a track name is provided', async () => {
       const { loadTrack } = require('../audioEngine');
 
@@ -208,6 +226,32 @@ describe('audioEngine', () => {
       await play();
 
       expect(mockPlay).not.toHaveBeenCalled();
+    });
+
+    it('claims the audio session so other apps stop before playing', async () => {
+      const { loadTrack, play } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      mockSetIsAudioActiveAsync.mockClear();
+
+      await play();
+
+      expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(true);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('plays even when claiming the audio session fails', async () => {
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(
+        new Error('focus denied'),
+      );
+      const { loadTrack, play } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+
+      await expect(play()).resolves.toBeUndefined();
+      expect(mockPlay).toHaveBeenCalled();
     });
 
     it('resets position to markerA when playing after track finished', async () => {
@@ -365,6 +409,28 @@ describe('audioEngine', () => {
 
       expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
     });
+
+    it('resolves even when the player is released mid-stop', async () => {
+      // stop() runs unserialized relative to load/unload, so a seek can hit a
+      // just-removed player (tap Stop then navigate away). The rejection must
+      // be swallowed, not surface as an unhandled rejection.
+      const { loadTrack, stop } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSeekTo.mockRejectedValueOnce(new Error('player released'));
+
+      await expect(stop()).resolves.toBeUndefined();
+    });
+
+    it('resolves even when deactivating the audio session fails', async () => {
+      const { loadTrack, stop } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(new Error('session'));
+
+      await expect(stop()).resolves.toBeUndefined();
+      expect(mockPause).toHaveBeenCalled();
+    });
   });
 
   describe('seekTo', () => {
@@ -511,6 +577,36 @@ describe('audioEngine', () => {
 
       expect(mockClearLockScreenControls).toHaveBeenCalled();
       expect(mockSetIsAudioActiveAsync).toHaveBeenCalledWith(false);
+    });
+
+    it('pauses the player before removing it', async () => {
+      const { loadTrack, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockPause.mockClear();
+
+      await unloadTrack();
+
+      // Audio must be silenced explicitly, not left to remove() alone.
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
+    });
+
+    it('still pauses and removes the player when releasing focus fails', async () => {
+      mockSetIsAudioActiveAsync.mockRejectedValueOnce(
+        new Error('session error'),
+      );
+      const { loadTrack, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockPause.mockClear();
+      mockRemove.mockClear();
+
+      // A failing session-deactivate must not leave the player resident and
+      // audible — the player is paused and removed regardless.
+      await expect(unloadTrack()).resolves.toBeUndefined();
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
     });
 
     it('clears markers on unload', async () => {
@@ -750,6 +846,33 @@ describe('audioEngine', () => {
           positionMs: 5000,
           durationMs: 60000,
         }),
+      );
+    });
+
+    it('reflects an OS interruption (playback paused mid-track) as paused', async () => {
+      // expo-audio has no dedicated interruption event; a phone call or another
+      // app grabbing audio focus surfaces as a playbackStatusUpdate with
+      // playing:false mid-track. The engine must show that as paused (not keep
+      // a stale "playing"), so the transport stays in sync with reality.
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      await loadTrack('file:///test.mp3');
+      subscribe(listener);
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 5 }));
+      listener.mockClear();
+
+      // The OS interrupts: playback stops part-way through, not at the end.
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          currentTime: 5,
+          didJustFinish: false,
+        }),
+      );
+
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 5000 }),
       );
     });
 

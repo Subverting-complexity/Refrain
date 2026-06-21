@@ -181,6 +181,78 @@ describe('fallback to native volume', () => {
   });
 });
 
+describe('web media session wiring', () => {
+  interface FakeSession {
+    metadata: unknown;
+    playbackState: string;
+    handlers: Record<string, (() => void) | null>;
+    setActionHandler: (action: string, handler: (() => void) | null) => void;
+  }
+
+  function installSession(): FakeSession {
+    const session: FakeSession = {
+      metadata: undefined,
+      playbackState: 'none',
+      handlers: {},
+      setActionHandler: (action, handler) => {
+        session.handlers[action] = handler;
+      },
+    };
+    (global as Record<string, unknown>).navigator = { mediaSession: session };
+    (global as Record<string, unknown>).MediaMetadata = class {
+      constructor(public init: unknown) {}
+    };
+    return session;
+  }
+
+  afterEach(() => {
+    delete (global as Record<string, unknown>).navigator;
+    delete (global as Record<string, unknown>).MediaMetadata;
+  });
+
+  it('wires the OS media controls to the transport on web load', async () => {
+    const session = installSession();
+    const { loadTrack, play, pause } = require('../audioEngine');
+
+    await loadTrack('blob:track', undefined, 'My Song');
+
+    // Triggering the OS "play" control plays the engine player.
+    session.handlers.play?.();
+    expect(mockPlay).toHaveBeenCalled();
+
+    await play();
+    expect(session.playbackState).toBe('playing');
+    await pause();
+    expect(session.playbackState).toBe('paused');
+  });
+
+  it('clears the OS overlay playback state on web stop', async () => {
+    const session = installSession();
+    const { loadTrack, play, stop } = require('../audioEngine');
+
+    await loadTrack('blob:track', undefined, 'My Song');
+    await play();
+    expect(session.playbackState).toBe('playing');
+
+    // stop() is a deliberate "done" action: the overlay must drop to 'none'
+    // (no active playback) rather than a resumable 'paused'.
+    await stop();
+    expect(session.playbackState).toBe('none');
+  });
+
+  it('clears the media session on unload', async () => {
+    const session = installSession();
+    const { loadTrack, unloadTrack } = require('../audioEngine');
+
+    await loadTrack('blob:track', undefined, 'My Song');
+    await unloadTrack();
+
+    expect(session.metadata).toBeNull();
+    expect(session.playbackState).toBe('none');
+    expect(session.handlers.play).toBeNull();
+  });
+});
+
 describe('rolling monitor (web fallback)', () => {
   it('seeks once and resumes the gain context on startMonitor', async () => {
     const { loadTrack, startMonitor } = require('../audioEngine');
