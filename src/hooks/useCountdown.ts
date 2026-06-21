@@ -26,10 +26,15 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
   const [countdownState, setCountdownState] =
     useState<CountdownState>(IDLE_STATE);
   const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
+  // Keep the latest config/onPlay in refs so the stable callbacks below read
+  // current values without being rebuilt. Writes happen in an effect, not
+  // during render.
   const configRef = useRef(config);
-  configRef.current = config;
   const onPlayRef = useRef(onPlay);
-  onPlayRef.current = onPlay;
+  useEffect(() => {
+    configRef.current = config;
+    onPlayRef.current = onPlay;
+  });
 
   useEffect(() => {
     const unsub = countdownEngine.subscribe(setCountdownState);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import * as settingsStore from '../services/settingsStore';
 
@@ -24,19 +24,19 @@ function sanitize(seconds: number): number {
  * the matching millisecond delta, and a persisting setter.
  */
 export function useSkipInterval() {
-  const [skipSeconds, setSkipSeconds] = useState(DEFAULT_SKIP_SECONDS);
-
-  useEffect(() => {
+  // Hydrate the persisted amount once, in the lazy initializer, so the first
+  // render already shows the stored value (no default-then-update flash) and we
+  // avoid a synchronous setState in an effect. Reads are best-effort: a storage
+  // failure falls back to the default and never throws.
+  const [skipSeconds, setSkipSeconds] = useState(() => {
     try {
-      setSkipSeconds(
-        sanitize(
-          settingsStore.getNumber(SKIP_SETTING_KEY, DEFAULT_SKIP_SECONDS),
-        ),
+      return sanitize(
+        settingsStore.getNumber(SKIP_SETTING_KEY, DEFAULT_SKIP_SECONDS),
       );
     } catch {
-      setSkipSeconds(DEFAULT_SKIP_SECONDS);
+      return DEFAULT_SKIP_SECONDS;
     }
-  }, []);
+  });
 
   const updateSkipSeconds = useCallback((seconds: number) => {
     const next = sanitize(seconds);

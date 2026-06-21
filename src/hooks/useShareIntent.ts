@@ -15,10 +15,15 @@ export function useShareIntent({
   onTrackImported,
   onError,
 }: UseShareIntentOptions) {
+  // Keep the latest callbacks in refs so the mount-only effect below always
+  // calls current handlers without re-subscribing. Writes happen in an effect,
+  // not during render.
   const onTrackImportedRef = useRef(onTrackImported);
   const onErrorRef = useRef(onError);
-  onTrackImportedRef.current = onTrackImported;
-  onErrorRef.current = onError;
+  useEffect(() => {
+    onTrackImportedRef.current = onTrackImported;
+    onErrorRef.current = onError;
+  });
 
   useEffect(() => {
     // Share intents are a native-only concept, and expo-file-system's File

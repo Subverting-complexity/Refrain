@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -47,8 +47,9 @@ export function ToggleSwitch({
 
   // Drives both the thumb slide and the track recolor from a single 0→1 value.
   // backgroundColor interpolation rules out the native driver, which is fine
-  // for a control this small.
-  const progress = useRef(new Animated.Value(value ? 1 : 0)).current;
+  // for a control this small. The lazy initializer creates the Animated.Value
+  // once (like a ref) while keeping `progress` a plain value, not a ref.
+  const [progress] = useState(() => new Animated.Value(value ? 1 : 0));
   useEffect(() => {
     Animated.timing(progress, {
       toValue: value ? 1 : 0,
