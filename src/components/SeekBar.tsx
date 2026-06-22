@@ -1,24 +1,17 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback } from 'react';
 import {
   AccessibilityActionEvent,
-  LayoutChangeEvent,
   StyleSheet,
   Text,
   View,
   ViewStyle,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-import { useDragThrottle } from '../hooks/useDragThrottle';
+import { useSliderGesture } from '../hooks/useSliderGesture';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
+import { SliderBar } from './SliderBar';
 
 const SEEK_STEP_MS = 5000;
 
@@ -51,10 +44,6 @@ export function SeekBar({
 }: SeekBarProps) {
   const { theme } = useTheme();
 
-  // Resolve the active domain: the A/B region when a valid range is supplied,
-  // otherwise the whole track. `baseMs` is the domain's start, `spanMs` its
-  // length — both bar geometry and seeking are expressed against these so the
-  // track-wide and region-scoped cases share one code path.
   const hasRange =
     rangeStartMs != null &&
     rangeEndMs != null &&
@@ -65,93 +54,25 @@ export function SeekBar({
 
   const elapsedMs = clamp(positionMs, baseMs, baseMs + spanMs) - baseMs;
   const progress = spanMs > 0 ? elapsedMs / spanMs : 0;
-  const trackWidth = useRef(0);
 
-  // While dragging, this local ratio drives the visual so the bar stays
-  // smooth even though native seeks are throttled. null = not dragging.
-  const [dragRatio, setDragRatio] = useState<number | null>(null);
-  const seekThrottle = useDragThrottle();
-  const displayProgress = dragRatio ?? progress;
-
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    trackWidth.current = e.nativeEvent.layout.width;
-  }, []);
-
-  const ratioFromX = useCallback(
-    (x: number): number | null => {
-      if (spanMs <= 0 || trackWidth.current <= 0) return null;
-      return clamp(x / trackWidth.current, 0, 1);
-    },
-    [spanMs],
-  );
-
-  // Map a 0..1 ratio to an absolute seek position inside the active domain.
   const positionFromRatio = useCallback(
     (ratio: number): number => Math.round(baseMs + ratio * spanMs),
     [baseMs, spanMs],
   );
 
-  // Tap or drag start: update the visual and seek immediately (instant
-  // tap-to-seek is preserved — no throttling on grant).
-  const beginDrag = useCallback(
-    (x: number) => {
-      const ratio = ratioFromX(x);
-      if (ratio === null) return;
-      setDragRatio(ratio);
-      seekThrottle.begin(positionFromRatio(ratio), onSeek);
+  const handleValueChange = useCallback(
+    (ratio: number) => {
+      onSeek(positionFromRatio(ratio));
     },
-    [ratioFromX, positionFromRatio, onSeek, seekThrottle],
+    [onSeek, positionFromRatio],
   );
 
-  // Drag move: update the visual every frame, but throttle native seeks.
-  const moveDrag = useCallback(
-    (x: number) => {
-      const ratio = ratioFromX(x);
-      if (ratio === null) return;
-      setDragRatio(ratio);
-      seekThrottle.move(positionFromRatio(ratio));
-    },
-    [ratioFromX, positionFromRatio, seekThrottle],
-  );
-
-  // Drag end (or interruption): commit the final seek, then drop back to
-  // the prop-driven visual.
-  const endDrag = useCallback(() => {
-    seekThrottle.end();
-    setDragRatio(null);
-  }, [seekThrottle]);
-
-  // Route through refs so the Pan is created once (see WaveformView). The refs
-  // hold the latest callbacks; the Pan reads them at gesture time so it never
-  // has to be rebuilt. Writes happen in an effect (not during render).
-  const beginRef = useRef(beginDrag);
-  const moveRef = useRef(moveDrag);
-  const endRef = useRef(endDrag);
-  useEffect(() => {
-    beginRef.current = beginDrag;
-    moveRef.current = moveDrag;
-    endRef.current = endDrag;
+  const { pan, handleLayout, dragRatio } = useSliderGesture({
+    onValueChange: handleValueChange,
+    enabled: spanMs > 0,
   });
 
-  // Mirror WaveformView: a single Pan with `minDistance(0)` claims the touch
-  // immediately so the surrounding ScrollView can't steal a scrub, and
-  // `runOnJS` keeps the callbacks on the JS thread for React state/throttle.
-  // RNGH invokes these callbacks on touch (after render), never during render,
-  // so reading the latest-callback refs here is safe — the rule can't see that
-  // onBegin/onUpdate/onFinalize defer execution.
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .runOnJS(true)
-        .minDistance(0)
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onBegin((e) => beginRef.current(e.x))
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onUpdate((e) => moveRef.current(e.x))
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onFinalize(() => endRef.current()),
-    [],
-  );
+  const displayProgress = dragRatio ?? progress;
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -183,32 +104,14 @@ export function SeekBar({
         now: Math.round(displayProgress * 100),
       }}
     >
-      <GestureDetector gesture={pan}>
-        <View style={styles.barTouchArea} onLayout={handleLayout}>
-          <View
-            style={[styles.barTrack, { backgroundColor: theme.colors.border }]}
-          >
-            <View
-              style={[
-                styles.barFill,
-                {
-                  backgroundColor: theme.colors.accent,
-                  width: `${displayProgress * 100}%`,
-                },
-              ]}
-            />
-          </View>
-          <View
-            style={[
-              styles.thumb,
-              {
-                backgroundColor: theme.colors.accent,
-                left: `${displayProgress * 100}%`,
-              },
-            ]}
-          />
-        </View>
-      </GestureDetector>
+      <SliderBar
+        progress={displayProgress}
+        trackColor={theme.colors.border}
+        fillColor={theme.colors.accent}
+        pan={pan}
+        onLayout={handleLayout}
+        paddingVertical={spacing.xl}
+      />
       <View style={styles.timeRow}>
         <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
           {formatDuration(hasRange ? elapsedMs : positionMs)}
@@ -224,29 +127,6 @@ export function SeekBar({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-  },
-  barTouchArea: {
-    paddingVertical: spacing.xl,
-    position: 'relative',
-  },
-  barTrack: {
-    height: 4,
-    borderRadius: 2,
-  },
-  barFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 2,
-  },
-  thumb: {
-    position: 'absolute',
-    top: 18,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginLeft: -8,
   },
   timeRow: {
     flexDirection: 'row',
