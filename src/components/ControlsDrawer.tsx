@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { CountdownConfig } from '../types';
-import { AccessiblePressable } from './AccessiblePressable';
 import { BottomSheet } from './BottomSheet';
 import { CountdownSettings } from './CountdownSettings';
+import { IconSquareButton } from './IconSquareButton';
 import { SkipControls } from './SkipControls';
 import { VolumeControl } from './VolumeControl';
 
@@ -73,60 +72,31 @@ export function ControlsDrawer({
   onOpenSegments,
   style,
 }: ControlsDrawerProps) {
-  const { theme } = useTheme();
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
-
-  const renderSquare = (
-    icon: keyof typeof Ionicons.glyphMap,
-    accessibilityLabel: string,
-    active: boolean,
-    onPress: () => void,
-    accessibilityState?: { expanded?: boolean },
-  ) => (
-    <AccessiblePressable
-      key={accessibilityLabel}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={accessibilityState}
-      onPress={onPress}
-      style={(pressState) => [
-        styles.square,
-        {
-          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-          borderColor: active ? theme.colors.accent : theme.colors.border,
-          opacity: pressState.pressed ? 0.7 : 1,
-        },
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={20}
-        color={active ? theme.colors.accentText : theme.colors.textSecondary}
-      />
-    </AccessiblePressable>
-  );
 
   const openTitle = PANEL_LAUNCHERS.find((p) => p.key === openPanel)?.title;
 
   return (
     <View style={[styles.row, style]}>
-      {PANEL_LAUNCHERS.map((launcher) =>
-        renderSquare(
-          launcher.icon,
-          launcher.label,
-          openPanel === launcher.key,
-          () => setOpenPanel(launcher.key),
-          { expanded: openPanel === launcher.key },
-        ),
-      )}
-      {onOpenSegments
-        ? renderSquare(
-            'bookmarks-outline',
-            'Open segment profiles',
-            false,
-            onOpenSegments,
-          )
-        : null}
+      {PANEL_LAUNCHERS.map((launcher) => (
+        <IconSquareButton
+          key={launcher.label}
+          icon={launcher.icon}
+          accessibilityLabel={launcher.label}
+          active={openPanel === launcher.key}
+          onPress={() => setOpenPanel(launcher.key)}
+          accessibilityState={{ expanded: openPanel === launcher.key }}
+          size={48}
+        />
+      ))}
+      {onOpenSegments ? (
+        <IconSquareButton
+          icon="bookmarks-outline"
+          accessibilityLabel="Open segment profiles"
+          onPress={onOpenSegments}
+          size={48}
+        />
+      ) : null}
 
       {openPanel !== null && openTitle ? (
         <BottomSheet title={openTitle} onClose={() => setOpenPanel(null)}>
@@ -156,13 +126,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing.md,
-  },
-  square: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

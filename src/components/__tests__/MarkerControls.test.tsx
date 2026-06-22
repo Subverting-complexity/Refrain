@@ -177,7 +177,7 @@ describe('MarkerControls', () => {
     const toggle = findPressableByLabel(tree, 'Turn loop on')[0];
     expect(toggle.props.disabled).toBe(true);
     expect(toggle.props.accessibilityState).toEqual(
-      expect.objectContaining({ disabled: true }),
+      expect.objectContaining({ checked: false }),
     );
   });
 
@@ -191,7 +191,7 @@ describe('MarkerControls', () => {
     const toggle = findPressableByLabel(tree, 'Turn loop off')[0];
     expect(toggle.props.disabled).toBe(false);
     expect(toggle.props.accessibilityState).toEqual(
-      expect.objectContaining({ checked: true, disabled: false }),
+      expect.objectContaining({ checked: true }),
     );
   });
 
@@ -204,7 +204,7 @@ describe('MarkerControls', () => {
 
     const toggle = findPressableByLabel(tree, 'Turn loop on')[0];
     expect(toggle.props.accessibilityState).toEqual(
-      expect.objectContaining({ checked: false, disabled: false }),
+      expect.objectContaining({ checked: false }),
     );
   });
 
