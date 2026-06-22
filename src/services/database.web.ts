@@ -114,8 +114,21 @@ function runTransaction<T>(
       new Promise<T>((resolve, reject) => {
         const tx = db.transaction(store, mode);
         const request = run(tx.objectStore(store));
-        request.onsuccess = () => resolve(request.result);
+        // A request can report success before the transaction commits, so
+        // resolving on `request.onsuccess` would surface success even when
+        // the commit later fails (e.g. quota exceeded). Capture the result
+        // on success but only settle the promise on the transaction's own
+        // lifecycle events: resolve once the commit completes, reject on
+        // request error, transaction error, or abort. Matches the pattern
+        // in `deleteStoredProfilesByTrack`.
+        let result: T;
+        request.onsuccess = () => {
+          result = request.result;
+        };
         request.onerror = () => reject(request.error);
+        tx.oncomplete = () => resolve(result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
       }),
   );
 }

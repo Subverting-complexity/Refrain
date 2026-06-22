@@ -5,7 +5,10 @@
  * Web metadata persistence, backed by IndexedDB. Exercised against
  * `fake-indexeddb` so the real object-store logic (not a mock) is covered.
  */
-import { IDBFactory } from 'fake-indexeddb';
+// `IDBObjectStore` re-exported here is fake-indexeddb's concrete store class
+// (`FDBObjectStore`); spying on its prototype lets the abort test intercept a
+// real `put`.
+import { IDBFactory, IDBObjectStore as FDBObjectStore } from 'fake-indexeddb';
 
 import type { StoredTrack } from '../database.web';
 
@@ -75,6 +78,37 @@ describe('tracks store', () => {
     await db.deleteStoredTrack('track-1');
     expect(await db.getStoredTrack('track-1')).toBeNull();
     expect(await db.getAllStoredTracks()).toEqual([]);
+  });
+});
+
+describe('transaction lifecycle', () => {
+  it('rejects when the transaction aborts after the request succeeds', async () => {
+    const db = load();
+
+    // Simulate a commit-time failure (e.g. storage quota exceeded): the put
+    // request reports success, but the transaction then aborts before it
+    // commits. The wrapper must reject rather than resolve on the earlier
+    // request success. Spy on `put` so the very next put aborts its
+    // transaction the moment the request fires its success event.
+    const realPut = FDBObjectStore.prototype.put;
+    const putSpy = jest
+      .spyOn(FDBObjectStore.prototype, 'put')
+      .mockImplementationOnce(function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        const request = realPut.call(this, value, key);
+        const tx = this.transaction;
+        request.addEventListener('success', () => tx.abort());
+        return request;
+      });
+
+    try {
+      await expect(db.putStoredTrack(sampleTrack)).rejects.toBeDefined();
+    } finally {
+      putSpy.mockRestore();
+    }
   });
 });
 
