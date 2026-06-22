@@ -270,6 +270,7 @@ export default function PlayerScreen() {
         proceed: () => {
           bypassGuardRef.current = true;
           navigation.dispatch(event.data.action);
+          bypassGuardRef.current = false;
         },
       });
     });
