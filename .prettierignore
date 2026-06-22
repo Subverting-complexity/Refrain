@@ -1,0 +1,9 @@
+# Generated coverage reports
+coverage/
+
+# Agent/editor workspace artifacts (not application source)
+.claude/
+
+# Graphify generated knowledge-graph artifacts
+graphify-out/
+docs/GRAPH_REPORT.md
