@@ -584,6 +584,38 @@ describe('PlayerScreen unsaved-edit guard', () => {
     expect(mockDispatch).toHaveBeenCalledWith(action);
   });
 
+  it('advances the dirty baseline when the guard is resolved with Save', () => {
+    // Regression (#166): guard-save persisted the markers but never moved the
+    // in-memory baseline, so the segment re-reported as dirty against its stale
+    // snapshot and re-triggered the dialog on already-saved data.
+    mockAudioPlayerState.markerB = 8000;
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = true;
+    mockProfiles = [loadedProfile('p1', 'Verse')];
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    const preventDefault = jest.fn();
+    act(() => {
+      mockBeforeRemoveCb?.({
+        preventDefault,
+        data: { action: { type: 'GO_BACK' } },
+      });
+    });
+
+    act(() => mockGuardProps?.onSave());
+
+    // The baseline moves to the just-saved live markers, mirroring an override
+    // save — re-marking to the current A/B is what clears the dirty flag.
+    expect(mockMarkLoaded).toHaveBeenCalledWith({
+      id: 'p1',
+      markerA: 5000,
+      markerB: 8000,
+    });
+  });
+
   it('does not block back navigation when not dirty', () => {
     mockEditor.loadedId = 'p1';
     mockEditor.isDirty = false;

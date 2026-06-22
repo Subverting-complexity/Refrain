@@ -211,12 +211,26 @@ export default function PlayerScreen() {
     [applyProfile],
   );
 
-  // Guard "Save": overwrite the loaded segment, then carry on.
+  // Guard "Save": overwrite the loaded segment, then carry on. Advancing the
+  // dirty baseline via markLoaded (as handleOverride does) is what keeps the
+  // segment from re-reporting as dirty against its now-stale snapshot.
   const handleGuardSave = useCallback(() => {
-    if (loadedId) update(loadedId, { markerA, markerB, loopEnabled });
+    if (loadedId) {
+      update(loadedId, { markerA, markerB, loopEnabled });
+      markLoaded({ id: loadedId, markerA, markerB });
+    }
     if (guard) proceedGuard(guard);
     setGuard(null);
-  }, [loadedId, update, markerA, markerB, loopEnabled, guard, proceedGuard]);
+  }, [
+    loadedId,
+    update,
+    markerA,
+    markerB,
+    loopEnabled,
+    markLoaded,
+    guard,
+    proceedGuard,
+  ]);
 
   // Guard "Discard": carry on without saving the named segment. Live per-track
   // markers persist as today (#117); a load overwrites them as usual.
