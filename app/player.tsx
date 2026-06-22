@@ -190,14 +190,25 @@ export default function PlayerScreen() {
     showToast('Segment updated');
   }, [loadedId, update, markerA, markerB, loopEnabled, markLoaded, showToast]);
 
-  // Save dialog: create a new segment, then adopt it as the loaded one.
+  // Save dialog: create a new segment, then adopt it as the loaded one. The
+  // success toast waits for the write to resolve with a stored profile; a
+  // falsy result or a rejection reports an error instead of falsely claiming
+  // success, and the rejection is caught so none escapes unhandled.
   const handleSaveNew = useCallback(
     (name: string) => {
-      void save({ name, markerA, markerB, loopEnabled }).then((profile) => {
-        if (profile) markLoaded(profile);
-      });
       setSaveVisible(false);
-      showToast('Segment saved');
+      void save({ name, markerA, markerB, loopEnabled })
+        .then((profile) => {
+          if (profile) {
+            markLoaded(profile);
+            showToast('Segment saved');
+          } else {
+            showToast('Could not save segment', 'error');
+          }
+        })
+        .catch(() => {
+          showToast('Could not save segment', 'error');
+        });
     },
     [save, markerA, markerB, loopEnabled, markLoaded, showToast],
   );
