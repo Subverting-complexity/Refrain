@@ -487,8 +487,9 @@ describe('PlayerScreen segment save', () => {
     expect(button.props.disabled).toBe(true);
   });
 
-  it('creates a new segment when nothing is loaded', () => {
+  it('creates a new segment when nothing is loaded', async () => {
     mockAudioPlayerState.markerB = 8000;
+    mockSave.mockResolvedValue(loadedProfile('p9', 'Bridge'));
 
     let tree!: ReactTestRenderer;
     act(() => {
@@ -498,7 +499,9 @@ describe('PlayerScreen segment save', () => {
     act(() => getSaveButton(tree).props.onPress());
     expect(mockSaveDialogProps?.loadedName).toBeNull();
 
-    act(() => mockSaveDialogProps?.onSaveNew('Bridge'));
+    await act(async () => {
+      mockSaveDialogProps?.onSaveNew('Bridge');
+    });
 
     expect(mockSave).toHaveBeenCalledWith({
       name: 'Bridge',
@@ -506,6 +509,67 @@ describe('PlayerScreen segment save', () => {
       markerB: 8000,
       loopEnabled: true,
     });
+  });
+
+  it('shows the success toast only after the save resolves with a profile', async () => {
+    mockAudioPlayerState.markerB = 8000;
+    mockSave.mockResolvedValue(loadedProfile('p9', 'Bridge'));
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSaveButton(tree).props.onPress());
+
+    // Fire the save but do not flush its promise yet: the toast must not
+    // appear before the write resolves.
+    act(() => {
+      mockSaveDialogProps?.onSaveNew('Bridge');
+    });
+    expect(mockMarkLoaded).not.toHaveBeenCalled();
+    expect(findToastMessage(tree)).toBeUndefined();
+
+    // Flush the resolution: now the profile is adopted and success is shown.
+    await act(async () => {});
+    expect(mockMarkLoaded).toHaveBeenCalledWith(loadedProfile('p9', 'Bridge'));
+    expect(findToastMessage(tree)).toBe('Segment saved');
+  });
+
+  it('shows an error toast and does not claim success on a falsy save', async () => {
+    mockAudioPlayerState.markerB = 8000;
+    mockSave.mockResolvedValue(null);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSaveButton(tree).props.onPress());
+    await act(async () => {
+      mockSaveDialogProps?.onSaveNew('Bridge');
+    });
+
+    expect(mockMarkLoaded).not.toHaveBeenCalled();
+    expect(findToastMessage(tree)).toBe('Could not save segment');
+  });
+
+  it('handles a rejected save with an error toast and no success claim', async () => {
+    mockAudioPlayerState.markerB = 8000;
+    mockSave.mockRejectedValue(new Error('store down'));
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => getSaveButton(tree).props.onPress());
+    await act(async () => {
+      mockSaveDialogProps?.onSaveNew('Bridge');
+    });
+
+    expect(mockMarkLoaded).not.toHaveBeenCalled();
+    expect(findToastMessage(tree)).toBe('Could not save segment');
   });
 
   it('offers override when a dirty segment is loaded', () => {
