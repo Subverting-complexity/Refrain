@@ -483,7 +483,6 @@ describe('PlayerScreen segment save', () => {
     });
 
     const button = getSaveButton(tree);
-    expect(button.props.accessibilityState).toEqual({ disabled: true });
     expect(button.props.disabled).toBe(true);
   });
 

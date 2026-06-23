@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { IconSquareButton } from './IconSquareButton';
 import { MarkerTimeSheet } from './MarkerTimeSheet';
 
 export type PlaceMode = 'none' | 'A' | 'B';
@@ -123,42 +123,6 @@ export function MarkerControls({
     );
   };
 
-  const renderSquare = (
-    icon: keyof typeof Ionicons.glyphMap,
-    accessibilityLabel: string,
-    active: boolean,
-    disabled: boolean,
-    onPress: () => void,
-    extraAccessibility?: {
-      role?: 'button' | 'switch';
-      state?: Record<string, boolean>;
-      hint?: string;
-    },
-  ) => (
-    <AccessiblePressable
-      accessibilityRole={extraAccessibility?.role ?? 'button'}
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled, ...extraAccessibility?.state }}
-      accessibilityHint={extraAccessibility?.hint}
-      onPress={onPress}
-      disabled={disabled}
-      style={(pressState) => [
-        styles.square,
-        {
-          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-          borderColor: active ? theme.colors.accent : theme.colors.border,
-          opacity: disabled ? 0.4 : pressState.pressed ? 0.7 : 1,
-        },
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={20}
-        color={active ? theme.colors.accentText : theme.colors.textSecondary}
-      />
-    </AccessiblePressable>
-  );
-
   return (
     <View style={[styles.container, style]}>
       <View style={styles.row}>
@@ -175,36 +139,35 @@ export function MarkerControls({
           markerB,
           theme.colors.markerB,
           placeMode === 'B',
-          // B can't be placed before A exists; once A is set it's available.
           isDisabled || (markerA == null && markerB == null),
           onPressB,
         )}
 
-        {renderSquare(
-          'repeat',
-          loopActive ? 'Turn loop off' : 'Turn loop on',
-          loopActive,
-          loopDisabled,
-          () => onToggleLoop(!loopEnabled),
-          {
-            role: 'switch',
-            state: { checked: loopActive },
-            hint: 'Repeats playback between the A and B points',
-          },
-        )}
-        {renderSquare(
-          'save-outline',
-          'Save segment',
-          false,
-          saveDisabled,
-          () => onSave?.(),
-          {
-            hint: saveDisabled ? 'Set both loop markers first' : undefined,
-          },
-        )}
-        {renderSquare('close', 'Clear loop markers', false, clearDisabled, () =>
-          onClear?.(),
-        )}
+        <IconSquareButton
+          icon="repeat"
+          accessibilityLabel={loopActive ? 'Turn loop off' : 'Turn loop on'}
+          active={loopActive}
+          disabled={loopDisabled}
+          onPress={() => onToggleLoop(!loopEnabled)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: loopActive }}
+          accessibilityHint="Repeats playback between the A and B points"
+        />
+        <IconSquareButton
+          icon="save-outline"
+          accessibilityLabel="Save segment"
+          disabled={saveDisabled}
+          onPress={() => onSave?.()}
+          accessibilityHint={
+            saveDisabled ? 'Set both loop markers first' : undefined
+          }
+        />
+        <IconSquareButton
+          icon="close"
+          accessibilityLabel="Clear loop markers"
+          disabled={clearDisabled}
+          onPress={() => onClear?.()}
+        />
       </View>
 
       {!isDisabled && (placeMode === 'A' || placeMode === 'B') && (
@@ -273,16 +236,6 @@ const styles = StyleSheet.create({
   tileValue: {
     fontSize: 12,
     marginTop: 2,
-  },
-  // Loop / Save / Clear share one square recipe. 44pt keeps five controls on a
-  // single row down to a ~272pt content width (iPhone SE) without wrapping.
-  square: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   caption: {
     fontSize: 12,
