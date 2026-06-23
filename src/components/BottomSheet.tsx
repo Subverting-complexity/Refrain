@@ -35,7 +35,7 @@ export function BottomSheet({
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <AccessiblePressable
-          style={styles.backdrop}
+          style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           accessibilityRole="button"
           accessibilityLabel={label}
           onPress={onClose}

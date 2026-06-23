@@ -18,6 +18,7 @@ jest.mock('../../hooks/useTheme', () => ({
         accentText: '#000',
         border: '#333',
         error: '#f00',
+        overlay: 'rgba(0, 0, 0, 0.5)',
       },
       typography: { heading: {}, body: {}, caption: {} },
     },
