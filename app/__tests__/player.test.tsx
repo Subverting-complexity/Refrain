@@ -680,6 +680,49 @@ describe('PlayerScreen unsaved-edit guard', () => {
     });
   });
 
+  it('re-arms the guard after a bypassed navigation that stays on the screen', () => {
+    mockEditor.loadedId = 'p1';
+    mockEditor.isDirty = true;
+    mockProfiles = [loadedProfile('p1', 'Verse')];
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    // First back-nav: guard fires, user saves, dispatch proceeds.
+    const preventDefault1 = jest.fn();
+    const action1 = { type: 'GO_BACK' };
+    act(() => {
+      mockBeforeRemoveCb?.({
+        preventDefault: preventDefault1,
+        data: { action: action1 },
+      });
+    });
+    expect(preventDefault1).toHaveBeenCalled();
+    expect(mockGuardProps).not.toBeNull();
+
+    act(() => mockGuardProps?.onSave());
+    expect(mockDispatch).toHaveBeenCalledWith(action1);
+
+    // Simulate the screen staying mounted (navigation didn't unmount it).
+    // Reset mocks to isolate the second navigation attempt.
+    mockDispatch.mockClear();
+    mockGuardProps = null;
+
+    // Second back-nav while still dirty: the guard must fire again.
+    const preventDefault2 = jest.fn();
+    const action2 = { type: 'GO_BACK' };
+    act(() => {
+      mockBeforeRemoveCb?.({
+        preventDefault: preventDefault2,
+        data: { action: action2 },
+      });
+    });
+
+    expect(preventDefault2).toHaveBeenCalled();
+    expect(mockGuardProps).not.toBeNull();
+  });
+
   it('does not block back navigation when not dirty', () => {
     mockEditor.loadedId = 'p1';
     mockEditor.isDirty = false;
