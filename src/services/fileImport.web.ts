@@ -1,6 +1,14 @@
-import { AudioFormat, ImportErrorCode, ImportOutcome, Track } from '../types';
+import { ImportOutcome, Track } from '../types';
 import { generateId } from '../utils/generateId';
 import { getObjectUrl, putBlob } from './webBlobStore.web';
+import {
+  estimateDurationMs,
+  getExtension,
+  makeError,
+  parseFormat,
+} from './fileImport.shared';
+
+export { isSupportedFilename } from './fileImport.shared';
 
 /**
  * Web implementation of audio import. Native uses `expo-file-system`'s
@@ -19,30 +27,6 @@ const ACCEPT = 'audio/*,.mp3,.wav,.aac,.m4a';
  * `change`, short enough to recover the UI quickly.
  */
 const DISMISS_GRACE_MS = 1000;
-
-const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
-  mp3: 'mp3',
-  wav: 'wav',
-  aac: 'aac',
-  m4a: 'm4a',
-};
-
-function getExtension(filename: string): string {
-  const parts = filename.split('.');
-  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-}
-
-function parseFormat(filename: string): AudioFormat | null {
-  return EXTENSION_TO_FORMAT[getExtension(filename)] ?? null;
-}
-
-export function isSupportedFilename(filename: string): boolean {
-  return parseFormat(filename) !== null;
-}
-
-function makeError(error: ImportErrorCode, message: string): ImportOutcome {
-  return { success: false, error, message };
-}
 
 /**
  * Opens a native file picker and imports the chosen audio file. Resolves to
@@ -117,17 +101,6 @@ export async function importBlob(
   } catch {
     return makeError('copy_failed', 'Failed to save file to browser storage');
   }
-}
-
-function estimateDurationMs(bytes: number, format: AudioFormat): number {
-  const bitrateMap: Record<AudioFormat, number> = {
-    mp3: 192_000,
-    aac: 128_000,
-    m4a: 128_000,
-    wav: 1_411_000,
-  };
-  const bitsPerMs = bitrateMap[format] / 1000;
-  return Math.round((bytes * 8) / bitsPerMs);
 }
 
 /**

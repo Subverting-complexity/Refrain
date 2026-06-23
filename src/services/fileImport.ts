@@ -1,7 +1,15 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
 
-import { AudioFormat, ImportErrorCode, ImportOutcome, Track } from '../types';
+import { ImportOutcome, Track } from '../types';
+import {
+  estimateDurationMs,
+  getExtension,
+  makeError,
+  parseFormat,
+} from './fileImport.shared';
+
+export { isSupportedFilename } from './fileImport.shared';
 
 const SUPPORTED_MIME_TYPES = [
   'audio/mpeg',
@@ -11,23 +19,6 @@ const SUPPORTED_MIME_TYPES = [
   'audio/mp4',
   'audio/x-m4a',
 ];
-
-const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
-  mp3: 'mp3',
-  wav: 'wav',
-  aac: 'aac',
-  m4a: 'm4a',
-};
-
-function getExtension(filename: string): string {
-  const parts = filename.split('.');
-  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-}
-
-function parseFormat(filename: string): AudioFormat | null {
-  const ext = getExtension(filename);
-  return EXTENSION_TO_FORMAT[ext] ?? null;
-}
 
 function ensureTracksDir(): Directory {
   const dir = new Directory(Paths.document, 'tracks');
@@ -106,23 +97,4 @@ async function importFromFile(
   } catch {
     return makeError('copy_failed', 'Failed to copy file to app storage');
   }
-}
-
-function estimateDurationMs(bytes: number, format: AudioFormat): number {
-  const bitrateMap: Record<AudioFormat, number> = {
-    mp3: 192_000,
-    aac: 128_000,
-    m4a: 128_000,
-    wav: 1_411_000,
-  };
-  const bitsPerMs = bitrateMap[format] / 1000;
-  return Math.round((bytes * 8) / bitsPerMs);
-}
-
-function makeError(error: ImportErrorCode, message: string): ImportOutcome {
-  return { success: false, error, message };
-}
-
-export function isSupportedFilename(filename: string): boolean {
-  return parseFormat(filename) !== null;
 }
