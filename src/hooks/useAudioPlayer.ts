@@ -26,9 +26,11 @@ export function useAudioPlayer(
   }, []);
 
   // Hydrate the persisted volume once on mount, before the track loads, so
-  // playback starts at the user's saved level rather than the default.
+  // playback starts at the user's saved level rather than the default. The
+  // loader awaits settings hydration internally (web cold-load race, #163),
+  // so fire-and-forget here; it notifies subscribers once the value resolves.
   useEffect(() => {
-    audioEngine.loadPersistedVolume();
+    void audioEngine.loadPersistedVolume();
   }, []);
 
   useEffect(() => {

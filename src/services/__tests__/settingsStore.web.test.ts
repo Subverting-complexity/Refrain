@@ -53,6 +53,32 @@ describe('hydrateSettings', () => {
     expect(settings.getSetting('volume')).toBeNull();
     expect(settings.getNumber('volume', 0.8)).toBe(0.8);
   });
+
+  // Regression for #163: a read that lands before hydration resolves must not
+  // permanently lose the persisted value — awaiting hydration recovers it.
+  it('returns the persisted value once hydration is awaited, not the early-read default', async () => {
+    let resolveRows!: (rows: { key: string; value: string }[]) => void;
+    mockGetAllStoredSettings.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRows = resolve;
+      }),
+    );
+
+    let settings!: SettingsModule;
+    jest.isolateModules(() => {
+      settings = require('../settingsStore.web');
+    });
+
+    // Hydration still in flight: the synchronous read sees the empty cache and
+    // falls back to the caller's default.
+    expect(settings.getNumber('volume', 0.8)).toBe(0.8);
+
+    // Once the rows land and hydration is awaited, the persisted value wins.
+    resolveRows([{ key: 'volume', value: '0.3' }]);
+    await settings.hydrateSettings();
+
+    expect(settings.getNumber('volume', 0.8)).toBe(0.3);
+  });
 });
 
 describe('getSetting / getNumber', () => {

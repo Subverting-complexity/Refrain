@@ -732,10 +732,17 @@ export function setVolume(value: number): void {
 /**
  * Load the persisted volume from storage into the engine. Call once on app
  * start (before the first track loads) so playback honours the saved level.
- * Best-effort: falls back to the default on any storage error.
+ *
+ * Awaits `hydrateSettings()` first so the read never races the web store's
+ * async IndexedDB hydration — on a cold web load the cache can be empty when
+ * this runs, and a synchronous read would silently fall back to the default
+ * (#163). Hydration is a resolved no-op on native, so this stays a single
+ * cheap microtask there. Best-effort: falls back to the default on any
+ * storage error.
  */
-export function loadPersistedVolume(): void {
+export async function loadPersistedVolume(): Promise<void> {
   try {
+    await settingsStore.hydrateSettings();
     volume = clampVolume(
       settingsStore.getNumber(VOLUME_SETTING_KEY, DEFAULT_VOLUME),
     );

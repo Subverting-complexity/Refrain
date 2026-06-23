@@ -26,6 +26,16 @@ beforeEach(() => {
 });
 
 describe('settingsStore', () => {
+  describe('hydrateSettings', () => {
+    it('resolves immediately without touching the database (native no-op)', async () => {
+      const { hydrateSettings } = require('../settingsStore');
+
+      await expect(hydrateSettings()).resolves.toBeUndefined();
+      // Native reads SQLite synchronously, so there is nothing to hydrate.
+      expect(mockGetAllSync).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getSetting', () => {
     it('returns the stored value', () => {
       mockGetFirstSync.mockReturnValue({ value: 'hello' });
