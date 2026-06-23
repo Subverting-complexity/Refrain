@@ -47,10 +47,12 @@ jest.mock('expo-audio', () => ({
 
 const mockGetNumber = jest.fn<number, [string, number]>();
 const mockSetNumber = jest.fn<void, [string, number]>();
+const mockHydrateSettings = jest.fn<Promise<void>, []>();
 
 jest.mock('../settingsStore', () => ({
   getNumber: (key: string, fallback: number) => mockGetNumber(key, fallback),
   setNumber: (key: string, value: number) => mockSetNumber(key, value),
+  hydrateSettings: () => mockHydrateSettings(),
 }));
 
 interface ActiveMarkersShape {
@@ -90,6 +92,8 @@ beforeEach(() => {
   mockSeekTo.mockResolvedValue(undefined);
   // Default: no persisted volume, so the engine uses its fallback.
   mockGetNumber.mockImplementation((_key, fallback) => fallback);
+  // Default: hydration resolves immediately (warm cache / native no-op).
+  mockHydrateSettings.mockResolvedValue(undefined);
   // Default: no saved markers, so loads start with empty markers.
   mockGetActiveMarkers.mockReturnValue(null);
 });
@@ -797,7 +801,7 @@ describe('audioEngine', () => {
       );
     });
 
-    it('loadPersistedVolume hydrates from storage and notifies', () => {
+    it('loadPersistedVolume hydrates from storage and notifies', async () => {
       mockGetNumber.mockImplementation(() => 0.6);
       const {
         loadPersistedVolume,
@@ -809,7 +813,7 @@ describe('audioEngine', () => {
       subscribe(listener);
       listener.mockClear();
 
-      loadPersistedVolume();
+      await loadPersistedVolume();
 
       expect(mockGetNumber).toHaveBeenCalledWith('playback.volume', 1);
       expect(getVolume()).toBe(0.6);
@@ -818,14 +822,41 @@ describe('audioEngine', () => {
       );
     });
 
-    it('loadPersistedVolume falls back to default on storage error', () => {
+    it('loadPersistedVolume falls back to default on storage error', async () => {
       mockGetNumber.mockImplementation(() => {
         throw new Error('db error');
       });
       const { loadPersistedVolume, getVolume } = require('../audioEngine');
 
-      expect(() => loadPersistedVolume()).not.toThrow();
+      await expect(loadPersistedVolume()).resolves.toBeUndefined();
       expect(getVolume()).toBe(1);
+    });
+
+    // Regression for #163: on a cold web load the settings cache hydrates
+    // asynchronously. The engine must defer the persisted read until
+    // hydration resolves, so the saved value is never lost to an early read.
+    it('loadPersistedVolume waits for hydration before reading the persisted value', async () => {
+      let resolveHydration!: () => void;
+      mockHydrateSettings.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveHydration = resolve;
+          }),
+      );
+      mockGetNumber.mockImplementation(() => 0.4);
+      const { loadPersistedVolume, getVolume } = require('../audioEngine');
+
+      const pending = loadPersistedVolume();
+      // Hydration is still in flight: the persisted read has not happened and
+      // the engine still holds the default.
+      expect(mockGetNumber).not.toHaveBeenCalled();
+      expect(getVolume()).toBe(1);
+
+      resolveHydration();
+      await pending;
+
+      expect(mockGetNumber).toHaveBeenCalledWith('playback.volume', 1);
+      expect(getVolume()).toBe(0.4);
     });
   });
 
