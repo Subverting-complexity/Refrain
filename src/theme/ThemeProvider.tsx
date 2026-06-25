@@ -1,5 +1,16 @@
-import React, { createContext, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useColorScheme as useSystemColorScheme } from 'react-native';
+import { hydrateSettings } from '../services/settingsStore';
+import {
+  getColorMode,
+  setColorMode as persistColorMode,
+} from '../services/themeStore';
 import { ColorMode, Theme, darkTheme, lightTheme } from './index';
 
 export interface ThemeContextValue {
@@ -16,7 +27,28 @@ interface ThemeProviderProps {
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
   const systemScheme = useSystemColorScheme();
-  const [colorMode, setColorMode] = useState<ColorMode>('system');
+  // Seed from the persisted choice. Synchronous on every platform (native
+  // reads SQLite; web reads the in-memory cache).
+  const [colorMode, setColorModeState] = useState<ColorMode>(getColorMode);
+
+  // On a cold web load the cache may still be empty when the lazy seed above
+  // runs, so a persisted choice reads as the default `system` (#163). Re-read
+  // once hydration resolves to reapply it before paint settles. No-op on
+  // native, where hydration is a resolved no-op and the seed was correct.
+  useEffect(() => {
+    let cancelled = false;
+    void hydrateSettings().then(() => {
+      if (!cancelled) setColorModeState(getColorMode());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setColorMode = useCallback((mode: ColorMode) => {
+    setColorModeState(mode);
+    persistColorMode(mode);
+  }, []);
 
   const resolvedTheme = useMemo(() => {
     if (colorMode === 'system') {
@@ -31,7 +63,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       colorMode,
       setColorMode,
     }),
-    [resolvedTheme, colorMode],
+    [resolvedTheme, colorMode, setColorMode],
   );
 
   return (

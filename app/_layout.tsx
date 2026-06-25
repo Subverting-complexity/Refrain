@@ -36,6 +36,13 @@ function RootLayoutNav() {
             presentation: 'card',
           }}
         />
+        <Stack.Screen
+          name="settings"
+          options={{
+            title: 'Settings',
+            presentation: 'card',
+          }}
+        />
       </Stack>
     </View>
   );

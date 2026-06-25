@@ -1,9 +1,11 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 
+import { IconSquareButton } from '@/src/components/IconSquareButton';
 import { useTheme } from '@/src/hooks/useTheme';
 
 export default function TabLayout() {
   const { theme } = useTheme();
+  const router = useRouter();
 
   return (
     <Tabs
@@ -20,6 +22,13 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Library',
+          headerRight: () => (
+            <IconSquareButton
+              icon="settings-outline"
+              accessibilityLabel="Settings"
+              onPress={() => router.push('/settings')}
+            />
+          ),
         }}
       />
     </Tabs>

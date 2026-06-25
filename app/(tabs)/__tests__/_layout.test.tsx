@@ -5,6 +5,7 @@ import TabLayout from '../_layout';
 
 let mockScreenOptions: Record<string, unknown> | undefined;
 let mockScreens: Record<string, unknown>[] = [];
+const mockPush = jest.fn();
 
 jest.mock('expo-router', () => {
   const ReactLocal = require('react');
@@ -25,7 +26,7 @@ jest.mock('expo-router', () => {
     return null;
   }
   Tabs.Screen = TabsScreen;
-  return { Tabs };
+  return { Tabs, useRouter: () => ({ push: mockPush }) };
 });
 
 jest.mock('@/src/hooks/useTheme', () => ({
@@ -40,6 +41,7 @@ describe('TabLayout', () => {
   beforeEach(() => {
     mockScreenOptions = undefined;
     mockScreens.length = 0;
+    mockPush.mockClear();
     act(() => {
       create(<TabLayout />);
     });
@@ -53,5 +55,16 @@ describe('TabLayout', () => {
     expect(mockScreens).toHaveLength(1);
     expect(mockScreens[0].name).toBe('index');
     expect((mockScreens[0].options as { title: string }).title).toBe('Library');
+  });
+
+  it('navigates to the Settings screen from the header button', () => {
+    const options = mockScreens[0].options as {
+      headerRight: () => React.ReactElement<{ onPress: () => void }>;
+    };
+    const button = options.headerRight();
+    act(() => {
+      button.props.onPress();
+    });
+    expect(mockPush).toHaveBeenCalledWith('/settings');
   });
 });
