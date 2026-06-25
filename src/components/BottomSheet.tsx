@@ -18,9 +18,9 @@ interface BottomSheetProps {
 
 /**
  * Shared bottom-sheet surface: a slide-up modal with a dimmable backdrop and a
- * titled header with a close button. The count-in, volume, and skip settings
- * each render their body inside one of these so every launcher in the player's
- * control row behaves the same way (the segment list uses its own sheet).
+ * titled header with a close button. The count-in, volume, and skip settings,
+ * the marker-time editor, and the segment list each render their body inside
+ * one of these so every bottom sheet in the player behaves the same way.
  */
 export function BottomSheet({
   title,
