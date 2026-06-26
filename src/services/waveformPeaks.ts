@@ -276,8 +276,12 @@ function deriveCompressedPeaks(
 }
 
 function normalizePeaks(peaks: number[]): WaveformPeaks {
-  const max = Math.max(...peaks);
-  if (max === 0) return peaks.map(() => 0.1);
+  // Reduce rather than `Math.max(...peaks)`: the spread passes every element
+  // as a call argument, which overflows the engine's argument limit for a
+  // large bucketCount. `!(max > 0)` also catches the -Infinity an empty array
+  // reduces to (and any NaN), where `max === 0` alone would let it through.
+  const max = peaks.reduce((m, p) => (p > m ? p : m), -Infinity);
+  if (!(max > 0)) return peaks.map(() => 0.1);
   return peaks.map((p) => Math.max(0.05, p / max));
 }
 

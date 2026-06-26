@@ -154,6 +154,36 @@ describe('computePeaks', () => {
     expect(peaks).toHaveLength(200);
   });
 
+  it('returns an empty array for a zero bucket count (empty peaks)', () => {
+    const samples = Array.from({ length: 400 }, (_, i) =>
+      Math.sin((i / 400) * Math.PI * 2),
+    );
+    const peaks = computePeaks(readerFor(createWavBuffer(samples)), 0);
+    expect(peaks).toEqual([]);
+  });
+
+  it('does not overflow the argument limit for a large bucket count', () => {
+    const samples = Array.from({ length: 2000 }, (_, i) =>
+      Math.sin((i / 2000) * Math.PI * 2),
+    );
+    const largeBucketCount = 200_000;
+
+    let peaks: number[] = [];
+    expect(() => {
+      peaks = computePeaks(
+        readerFor(createWavBuffer(samples)),
+        largeBucketCount,
+      );
+    }).not.toThrow();
+
+    expect(peaks).toHaveLength(largeBucketCount);
+    peaks.forEach((p) => {
+      expect(Number.isFinite(p)).toBe(true);
+      expect(p).toBeGreaterThanOrEqual(0.05);
+      expect(p).toBeLessThanOrEqual(1);
+    });
+  });
+
   it('produces identical peaks for the same bytes (web/native parity)', () => {
     const samples = Array.from({ length: 400 }, (_, i) =>
       Math.sin((i / 400) * Math.PI * 2),
