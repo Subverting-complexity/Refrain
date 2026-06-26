@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -7,6 +7,7 @@ import { spacing } from '../theme';
 import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { BottomSheet } from './BottomSheet';
 import { SegmentRenameDialog } from './SegmentRenameDialog';
 import { SnippetPreviewSettings } from './SnippetPreviewSettings';
 
@@ -75,162 +76,132 @@ export function SegmentProfileSheet({
   };
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <AccessiblePressable
-          style={styles.backdrop}
-          accessibilityRole="button"
-          accessibilityLabel="Close segment profiles"
-          onPress={onClose}
-        />
+    <BottomSheet
+      title="Segments"
+      onClose={onClose}
+      closeLabel="Close segment profiles"
+    >
+      <SnippetPreviewSettings
+        enabled={snippetPreviewEnabled}
+        onChange={onSnippetPreviewChange}
+      />
+      <View
+        style={[styles.divider, { backgroundColor: theme.colors.border }]}
+      />
 
-        <View style={[styles.sheet, { backgroundColor: theme.colors.surface }]}>
-          <View style={styles.header}>
-            <Text
-              style={[
-                theme.typography.heading,
-                { color: theme.colors.textPrimary },
-              ]}
-            >
-              Segments
-            </Text>
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel="Close segment profiles"
-              onPress={onClose}
-            >
-              <Ionicons
-                name="close"
-                size={24}
-                color={theme.colors.textSecondary}
-              />
-            </AccessiblePressable>
-          </View>
-
-          <SnippetPreviewSettings
-            enabled={snippetPreviewEnabled}
-            onChange={onSnippetPreviewChange}
+      {profiles.length === 0 ? (
+        <View style={styles.empty}>
+          <Ionicons
+            name="bookmark-outline"
+            size={40}
+            color={theme.colors.textSecondary}
           />
-          <View
-            style={[styles.divider, { backgroundColor: theme.colors.border }]}
-          />
-
-          {profiles.length === 0 ? (
-            <View style={styles.empty}>
-              <Ionicons
-                name="bookmark-outline"
-                size={40}
-                color={theme.colors.textSecondary}
-              />
-              <Text
-                style={[
-                  theme.typography.body,
-                  { color: theme.colors.textSecondary },
-                ]}
-              >
-                No saved segments yet
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.list}>
-              {profiles.map((profile) => {
-                if (confirmingId === profile.id) {
-                  return (
-                    <View key={profile.id} style={styles.row}>
-                      <Text
-                        style={[
-                          theme.typography.body,
-                          styles.rowName,
-                          { color: theme.colors.textPrimary },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        Delete “{profile.name}”?
-                      </Text>
-                      <AccessiblePressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Confirm delete ${profile.name}`}
-                        onPress={confirmDelete}
-                      >
-                        <Ionicons
-                          name="trash"
-                          size={20}
-                          color={theme.colors.error}
-                        />
-                      </AccessiblePressable>
-                      <AccessiblePressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel delete"
-                        onPress={() => setConfirmingId(null)}
-                      >
-                        <Ionicons
-                          name="close"
-                          size={22}
-                          color={theme.colors.textSecondary}
-                        />
-                      </AccessiblePressable>
-                    </View>
-                  );
-                }
-
-                return (
-                  <View key={profile.id} style={styles.row}>
-                    <AccessiblePressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Load segment ${profile.name}`}
-                      onPress={() => loadProfile(profile)}
-                      style={styles.loadArea}
-                    >
-                      <Text
-                        style={[
-                          theme.typography.body,
-                          { color: theme.colors.textPrimary },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {profile.name}
-                      </Text>
-                      <Text
-                        style={[
-                          theme.typography.caption,
-                          { color: theme.colors.textSecondary },
-                        ]}
-                      >
-                        {formatDuration(profile.markerA ?? 0)} –{' '}
-                        {formatDuration(profile.markerB ?? 0)}
-                        {profile.loopEnabled ? ' · Loop' : ''}
-                      </Text>
-                    </AccessiblePressable>
-                    <AccessiblePressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Rename ${profile.name}`}
-                      onPress={() => startRename(profile)}
-                    >
-                      <Ionicons
-                        name="pencil"
-                        size={20}
-                        color={theme.colors.textSecondary}
-                      />
-                    </AccessiblePressable>
-                    <AccessiblePressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${profile.name}`}
-                      onPress={() => startDelete(profile)}
-                    >
-                      <Ionicons
-                        name="trash-outline"
-                        size={20}
-                        color={theme.colors.textSecondary}
-                      />
-                    </AccessiblePressable>
-                  </View>
-                );
-              })}
-            </View>
-          )}
+          <Text
+            style={[
+              theme.typography.body,
+              { color: theme.colors.textSecondary },
+            ]}
+          >
+            No saved segments yet
+          </Text>
         </View>
-      </View>
+      ) : (
+        <View style={styles.list}>
+          {profiles.map((profile) => {
+            if (confirmingId === profile.id) {
+              return (
+                <View key={profile.id} style={styles.row}>
+                  <Text
+                    style={[
+                      theme.typography.body,
+                      styles.rowName,
+                      { color: theme.colors.textPrimary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    Delete “{profile.name}”?
+                  </Text>
+                  <AccessiblePressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Confirm delete ${profile.name}`}
+                    onPress={confirmDelete}
+                  >
+                    <Ionicons
+                      name="trash"
+                      size={20}
+                      color={theme.colors.error}
+                    />
+                  </AccessiblePressable>
+                  <AccessiblePressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel delete"
+                    onPress={() => setConfirmingId(null)}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={22}
+                      color={theme.colors.textSecondary}
+                    />
+                  </AccessiblePressable>
+                </View>
+              );
+            }
 
+            return (
+              <View key={profile.id} style={styles.row}>
+                <AccessiblePressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Load segment ${profile.name}`}
+                  onPress={() => loadProfile(profile)}
+                  style={styles.loadArea}
+                >
+                  <Text
+                    style={[
+                      theme.typography.body,
+                      { color: theme.colors.textPrimary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {profile.name}
+                  </Text>
+                  <Text
+                    style={[
+                      theme.typography.caption,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                  >
+                    {formatDuration(profile.markerA ?? 0)} –{' '}
+                    {formatDuration(profile.markerB ?? 0)}
+                    {profile.loopEnabled ? ' · Loop' : ''}
+                  </Text>
+                </AccessiblePressable>
+                <AccessiblePressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rename ${profile.name}`}
+                  onPress={() => startRename(profile)}
+                >
+                  <Ionicons
+                    name="pencil"
+                    size={20}
+                    color={theme.colors.textSecondary}
+                  />
+                </AccessiblePressable>
+                <AccessiblePressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${profile.name}`}
+                  onPress={() => startDelete(profile)}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={20}
+                    color={theme.colors.textSecondary}
+                  />
+                </AccessiblePressable>
+              </View>
+            );
+          })}
+        </View>
+      )}
       {renamingProfile ? (
         <SegmentRenameDialog
           currentName={renamingProfile.name}
@@ -238,31 +209,11 @@ export function SegmentProfileSheet({
           onCancel={() => setRenamingId(null)}
         />
       ) : null}
-    </Modal>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-  },
-  sheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   divider: {
     height: StyleSheet.hairlineWidth,
   },

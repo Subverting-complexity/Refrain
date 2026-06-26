@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import { formatDurationTenths } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { BottomSheet } from './BottomSheet';
 
 // Fine tier: precise tenth-of-a-second nudges.
 const FINE_STEP_MS = 100;
@@ -111,200 +112,143 @@ export function MarkerTimeSheet({
     marker === 'A' ? 'Remove loop start and end' : 'Remove loop end';
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onDismiss}>
-      <View style={styles.overlay}>
-        <AccessiblePressable
-          style={styles.backdrop}
-          accessibilityRole="button"
-          accessibilityLabel="Close marker editor"
-          onPress={onDismiss}
-        />
-
-        <View style={[styles.sheet, { backgroundColor: theme.colors.surface }]}>
-          <View style={styles.header}>
-            <Text
-              style={[
-                theme.typography.heading,
-                { color: theme.colors.textPrimary },
-              ]}
-            >
-              {markerLabel}
-            </Text>
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel="Close marker editor"
-              onPress={onDismiss}
-            >
-              <Ionicons
-                name="close"
-                size={24}
-                color={theme.colors.textSecondary}
-              />
-            </AccessiblePressable>
-          </View>
-
-          <View style={styles.stepper}>
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 100 milliseconds`}
-              onPressIn={() =>
-                handlePressIn(-1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
-              }
-              onPressOut={clearHoldTimers}
-              style={(p) => [
-                styles.stepButton,
-                {
-                  borderColor: theme.colors.border,
-                  opacity: p.pressed ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Ionicons
-                name="remove"
-                size={32}
-                color={theme.colors.textPrimary}
-              />
-            </AccessiblePressable>
-
-            <Text
-              style={[styles.timeDisplay, { color: theme.colors.textPrimary }]}
-              accessibilityLiveRegion="polite"
-              accessibilityLabel={`${markerLabel}: ${formatDurationTenths(currentMs)}`}
-            >
-              {formatDurationTenths(currentMs)}
-            </Text>
-
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 100 milliseconds`}
-              onPressIn={() =>
-                handlePressIn(1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
-              }
-              onPressOut={clearHoldTimers}
-              style={(p) => [
-                styles.stepButton,
-                {
-                  borderColor: theme.colors.border,
-                  opacity: p.pressed ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Ionicons name="add" size={32} color={theme.colors.textPrimary} />
-            </AccessiblePressable>
-          </View>
-
-          <View style={styles.coarseRow}>
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 1 second`}
-              onPressIn={() =>
-                handlePressIn(-1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
-              }
-              onPressOut={clearHoldTimers}
-              style={(p) => [
-                styles.coarseButton,
-                {
-                  borderColor: theme.colors.border,
-                  opacity: p.pressed ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Ionicons
-                name="remove"
-                size={16}
-                color={theme.colors.textSecondary}
-              />
-              <Text
-                style={[
-                  theme.typography.body,
-                  { color: theme.colors.textPrimary },
-                ]}
-              >
-                1s
-              </Text>
-            </AccessiblePressable>
-
-            <AccessiblePressable
-              accessibilityRole="button"
-              accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 1 second`}
-              onPressIn={() =>
-                handlePressIn(1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
-              }
-              onPressOut={clearHoldTimers}
-              style={(p) => [
-                styles.coarseButton,
-                {
-                  borderColor: theme.colors.border,
-                  opacity: p.pressed ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Ionicons
-                name="add"
-                size={16}
-                color={theme.colors.textSecondary}
-              />
-              <Text
-                style={[
-                  theme.typography.body,
-                  { color: theme.colors.textPrimary },
-                ]}
-              >
-                1s
-              </Text>
-            </AccessiblePressable>
-          </View>
-
-          <View
-            style={[styles.divider, { backgroundColor: theme.colors.border }]}
-          />
-
+    <BottomSheet
+      title={markerLabel}
+      onClose={onDismiss}
+      closeLabel="Close marker editor"
+    >
+      <View style={styles.body}>
+        <View style={styles.stepper}>
           <AccessiblePressable
             accessibilityRole="button"
-            accessibilityLabel={removeLabel}
-            onPress={onRemove}
+            accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 100 milliseconds`}
+            onPressIn={() =>
+              handlePressIn(-1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
+            }
+            onPressOut={clearHoldTimers}
             style={(p) => [
-              styles.removeButton,
-              { opacity: p.pressed ? 0.7 : 1 },
+              styles.stepButton,
+              {
+                borderColor: theme.colors.border,
+                opacity: p.pressed ? 0.6 : 1,
+              },
             ]}
           >
             <Ionicons
-              name="trash-outline"
-              size={18}
-              color={theme.colors.error}
+              name="remove"
+              size={32}
+              color={theme.colors.textPrimary}
+            />
+          </AccessiblePressable>
+
+          <Text
+            style={[styles.timeDisplay, { color: theme.colors.textPrimary }]}
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={`${markerLabel}: ${formatDurationTenths(currentMs)}`}
+          >
+            {formatDurationTenths(currentMs)}
+          </Text>
+
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 100 milliseconds`}
+            onPressIn={() =>
+              handlePressIn(1, FINE_STEP_MS, FINE_ACCELERATED_STEP_MS)
+            }
+            onPressOut={clearHoldTimers}
+            style={(p) => [
+              styles.stepButton,
+              {
+                borderColor: theme.colors.border,
+                opacity: p.pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Ionicons name="add" size={32} color={theme.colors.textPrimary} />
+          </AccessiblePressable>
+        </View>
+
+        <View style={styles.coarseRow}>
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`Decrease ${markerLabel.toLowerCase()} by 1 second`}
+            onPressIn={() =>
+              handlePressIn(-1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
+            }
+            onPressOut={clearHoldTimers}
+            style={(p) => [
+              styles.coarseButton,
+              {
+                borderColor: theme.colors.border,
+                opacity: p.pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Ionicons
+              name="remove"
+              size={16}
+              color={theme.colors.textSecondary}
             />
             <Text
-              style={[theme.typography.body, { color: theme.colors.error }]}
+              style={[
+                theme.typography.body,
+                { color: theme.colors.textPrimary },
+              ]}
             >
-              {removeLabel}
+              1s
+            </Text>
+          </AccessiblePressable>
+
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`Increase ${markerLabel.toLowerCase()} by 1 second`}
+            onPressIn={() =>
+              handlePressIn(1, COARSE_STEP_MS, COARSE_ACCELERATED_STEP_MS)
+            }
+            onPressOut={clearHoldTimers}
+            style={(p) => [
+              styles.coarseButton,
+              {
+                borderColor: theme.colors.border,
+                opacity: p.pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Ionicons name="add" size={16} color={theme.colors.textSecondary} />
+            <Text
+              style={[
+                theme.typography.body,
+                { color: theme.colors.textPrimary },
+              ]}
+            >
+              1s
             </Text>
           </AccessiblePressable>
         </View>
+
+        <View
+          style={[styles.divider, { backgroundColor: theme.colors.border }]}
+        />
+
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel={removeLabel}
+          onPress={onRemove}
+          style={(p) => [styles.removeButton, { opacity: p.pressed ? 0.7 : 1 }]}
+        >
+          <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
+          <Text style={[theme.typography.body, { color: theme.colors.error }]}>
+            {removeLabel}
+          </Text>
+        </AccessiblePressable>
       </View>
-    </Modal>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-  },
-  sheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
+  body: {
     gap: spacing.lg,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   stepper: {
     flexDirection: 'row',

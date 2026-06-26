@@ -12,6 +12,7 @@ jest.mock('../../hooks/useTheme', () => ({
         textSecondary: '#8ba89e',
         border: '#2a4a4e',
         error: '#ff5d77',
+        overlay: 'rgba(0, 0, 0, 0.5)',
       },
       typography: {
         heading: { fontSize: 18, fontWeight: '600' },
