@@ -3,6 +3,7 @@ import { AccessibilityInfo } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import PlayerScreen from '../player';
+import { updateTrackDuration } from '@/src/services/trackStore';
 
 const mockSetMarkerB = jest.fn<boolean, [number]>();
 
@@ -121,12 +122,15 @@ jest.mock('@/src/hooks/useTheme', () => ({
 let mockBeforeRemoveCb: ((event: unknown) => void) | null = null;
 const mockDispatch = jest.fn();
 const mockSetOptions = jest.fn();
+// Mutable so a test can change the active trackId between renders without
+// remounting, simulating expo-router reusing the component instance (#168).
+const mockParams = {
+  uri: 'file:///test.mp3',
+  filename: 'test.mp3',
+  trackId: 't1',
+};
 jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({
-    uri: 'file:///test.mp3',
-    filename: 'test.mp3',
-    trackId: 't1',
-  }),
+  useLocalSearchParams: () => mockParams,
   useNavigation: () => ({
     addListener: (event: string, cb: (e: unknown) => void) => {
       if (event === 'beforeRemove') mockBeforeRemoveCb = cb;
@@ -267,6 +271,7 @@ beforeEach(() => {
   mockSaveDialogProps = null;
   mockGuardProps = null;
   mockBeforeRemoveCb = null;
+  mockParams.trackId = 't1';
   mockSave.mockResolvedValue(null);
 });
 
@@ -740,5 +745,41 @@ describe('PlayerScreen unsaved-edit guard', () => {
 
     expect(preventDefault).not.toHaveBeenCalled();
     expect(mockGuardProps).toBeNull();
+  });
+});
+
+describe('PlayerScreen duration persistence', () => {
+  const mockUpdateTrackDuration = updateTrackDuration as jest.MockedFunction<
+    typeof updateTrackDuration
+  >;
+
+  it('persists the measured duration once on mount', () => {
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    // durationMs is 10000 in the mocked engine state.
+    expect(mockUpdateTrackDuration).toHaveBeenCalledTimes(1);
+    expect(mockUpdateTrackDuration).toHaveBeenCalledWith('t1', 10000);
+  });
+
+  it('persists the new track when trackId changes without a remount (#168)', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    expect(mockUpdateTrackDuration).toHaveBeenCalledWith('t1', 10000);
+
+    // expo-router reuses the instance for a different track: the param changes
+    // and the screen re-renders without remounting. The persist guard must
+    // reset so the second track's duration is not silently dropped.
+    mockParams.trackId = 't2';
+    act(() => {
+      tree.update(<PlayerScreen />);
+    });
+
+    expect(mockUpdateTrackDuration).toHaveBeenCalledWith('t2', 10000);
+    expect(mockUpdateTrackDuration).toHaveBeenCalledTimes(2);
   });
 });

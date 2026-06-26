@@ -159,6 +159,13 @@ export default function PlayerScreen() {
   );
 
   const durationPersisted = useRef(false);
+  // Reset the persist guard when the track changes so a reused component
+  // instance persists the new track's measured duration instead of dropping
+  // it. Declared before the persist effect so, on a trackId change, the reset
+  // runs first and the new track persists in the same commit (#168).
+  useEffect(() => {
+    durationPersisted.current = false;
+  }, [trackId]);
   useEffect(() => {
     if (trackId && durationMs > 0 && !durationPersisted.current) {
       // Optimistically guard against re-entry; clear the flag on failure so
