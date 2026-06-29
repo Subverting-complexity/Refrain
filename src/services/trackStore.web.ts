@@ -52,7 +52,9 @@ function toStored(track: Track): StoredTrack {
 }
 
 export async function loadTracks(): Promise<Track[]> {
-  void cleanupOrphanFiles();
+  void cleanupOrphanFiles().catch((e: unknown) => {
+    console.warn('orphan cleanup failed', e);
+  });
   const rows = await getAllStoredTracks();
   // Newest first — IndexedDB getAll returns keys in ascending order.
   rows.sort((a, b) => b.importedAt - a.importedAt);

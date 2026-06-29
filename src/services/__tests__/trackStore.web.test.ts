@@ -100,6 +100,12 @@ describe('loadTracks', () => {
     expect(tracks[0].uri).toBe('idb://track-1');
   });
 
+  it('does not reject when orphan cleanup throws', async () => {
+    mockGetAllStoredTracks.mockResolvedValue([storedRow()]);
+    mockGetStoredTrackIds.mockRejectedValue(new Error('idb broken'));
+    await expect(loadTracks()).resolves.toBeDefined();
+  });
+
   it('returns tracks newest first', async () => {
     mockGetAllStoredTracks.mockResolvedValue([
       storedRow({ id: 'old', importedAt: 1 }),

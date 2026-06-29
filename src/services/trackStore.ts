@@ -24,10 +24,12 @@ let migrated = false;
 
 async function migrateFromJson(): Promise<void> {
   if (migrated) return;
-  migrated = true;
 
   const jsonFile = new File(Paths.document, 'tracks.json');
-  if (!jsonFile.exists) return;
+  if (!jsonFile.exists) {
+    migrated = true;
+    return;
+  }
 
   try {
     const tracks: Track[] = JSON.parse(await jsonFile.text());
@@ -46,9 +48,11 @@ async function migrateFromJson(): Promise<void> {
         track.importedAt,
       );
     }
+    migrated = true;
     jsonFile.delete();
   } catch {
-    // Corrupt JSON — skip migration, old file cleaned up on next launch
+    // Corrupt JSON or partial DB failure — leave migrated false so the
+    // next loadTracks() call retries within this session.
   }
 }
 
