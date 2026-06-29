@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 
 import { importFromUri, isSupportedFilename } from '../services/fileImport';
 import { Track } from '../types';
 import { extractFilename } from '../utils/extractFilename';
+import { useLatestRef } from './useLatestRef';
 
 interface UseShareIntentOptions {
   onTrackImported: (track: Track) => void;
@@ -15,15 +16,8 @@ export function useShareIntent({
   onTrackImported,
   onError,
 }: UseShareIntentOptions) {
-  // Keep the latest callbacks in refs so the mount-only effect below always
-  // calls current handlers without re-subscribing. Writes happen in an effect,
-  // not during render.
-  const onTrackImportedRef = useRef(onTrackImported);
-  const onErrorRef = useRef(onError);
-  useEffect(() => {
-    onTrackImportedRef.current = onTrackImported;
-    onErrorRef.current = onError;
-  });
+  const onTrackImportedRef = useLatestRef(onTrackImported);
+  const onErrorRef = useLatestRef(onError);
 
   useEffect(() => {
     // Share intents are a native-only concept, and expo-file-system's File
