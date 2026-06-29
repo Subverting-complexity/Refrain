@@ -1,5 +1,4 @@
 import { ActiveMarkers, SegmentProfile, SegmentProfileInput } from '../types';
-import { generateId } from '../utils/generateId';
 import {
   deleteStoredMarkers,
   deleteStoredProfile,
@@ -11,6 +10,7 @@ import {
   putStoredProfile,
   StoredProfile,
 } from './database.web';
+import { buildProfile, compareProfiles } from './markerStoreHelpers';
 
 /**
  * Web implementation of the per-track marker store. Records live in the
@@ -66,9 +66,7 @@ function toProfile(stored: StoredProfile): SegmentProfile {
  */
 export async function listProfiles(trackId: string): Promise<SegmentProfile[]> {
   const rows = await getStoredProfilesByTrack(trackId);
-  return rows
-    .map(toProfile)
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  return rows.map(toProfile).sort(compareProfiles);
 }
 
 /** Saves a new segment profile for a track and returns the stored record. */
@@ -76,15 +74,7 @@ export async function saveProfile(
   trackId: string,
   input: SegmentProfileInput,
 ): Promise<SegmentProfile> {
-  const profile: SegmentProfile = {
-    id: generateId(),
-    trackId,
-    name: input.name,
-    markerA: input.markerA,
-    markerB: input.markerB,
-    loopEnabled: input.loopEnabled,
-    createdAt: Date.now(),
-  };
+  const profile = buildProfile(trackId, input);
   await putStoredProfile(profile);
   return profile;
 }
