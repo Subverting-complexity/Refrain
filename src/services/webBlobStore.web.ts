@@ -52,7 +52,9 @@ function runTransaction<T>(
 /** Persist (or overwrite) the audio blob for a track id. */
 export function putBlob(id: string, blob: Blob): Promise<void> {
   return runTransaction('readwrite', (store) => store.put(blob, id)).then(
-    () => undefined,
+    () => {
+      revokeObjectUrl(id);
+    },
   );
 }
 

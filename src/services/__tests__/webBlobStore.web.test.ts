@@ -111,6 +111,20 @@ describe('getObjectUrl', () => {
     expect(created).toEqual([]);
   });
 
+  it('invalidates the cached URL when a blob is re-put under the same id', async () => {
+    const store = load();
+    await store.putBlob('id-1', makeBlob('first'));
+    const oldUrl = await store.getObjectUrl('id-1');
+    expect(oldUrl).toBe('blob:mock/0');
+
+    await store.putBlob('id-1', makeBlob('second'));
+    expect(revoked).toEqual([oldUrl]);
+
+    const newUrl = await store.getObjectUrl('id-1');
+    expect(newUrl).not.toBe(oldUrl);
+    expect(created).toHaveLength(2);
+  });
+
   it('caches the URL and reuses it on subsequent calls', async () => {
     const store = load();
     await store.putBlob('id-1', makeBlob());
