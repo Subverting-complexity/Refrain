@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
 
-import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
+import { SegmentNameField } from './SegmentNameField';
 
 export interface SegmentSaveDialogProps {
   /**
@@ -35,8 +33,6 @@ export function SegmentSaveDialog({
   onSaveNew,
   onCancel,
 }: SegmentSaveDialogProps) {
-  const { theme } = useTheme();
-  // Skip the choice step when there is no loaded segment to override.
   const [naming, setNaming] = useState(loadedName == null);
   const [draftName, setDraftName] = useState(suggestedName);
 
@@ -46,11 +42,11 @@ export function SegmentSaveDialog({
     return (
       <CenteredDialog
         title="Save segment"
-        message={`“${loadedName}” has unsaved marker changes.`}
+        message={`"${loadedName}" has unsaved marker changes.`}
         onDismiss={onCancel}
       >
         <DialogButton
-          label={`Override “${loadedName}”`}
+          label={`Override "${loadedName}"`}
           accessibilityLabel="Override loaded segment"
           variant="primary"
           onPress={onOverride}
@@ -67,18 +63,10 @@ export function SegmentSaveDialog({
 
   return (
     <CenteredDialog title="Save as new segment" onDismiss={onCancel}>
-      <TextInput
+      <SegmentNameField
         accessibilityLabel="New segment name"
         value={draftName}
         onChangeText={setDraftName}
-        placeholder="Segment name"
-        placeholderTextColor={theme.colors.textSecondary}
-        style={[
-          styles.input,
-          theme.typography.body,
-          { color: theme.colors.textPrimary, borderColor: theme.colors.border },
-        ]}
-        autoFocus
       />
       <DialogButton
         label="Save"
@@ -90,12 +78,3 @@ export function SegmentSaveDialog({
     </CenteredDialog>
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-});
