@@ -103,6 +103,40 @@ describe('migration from JSON', () => {
   });
 });
 
+describe('migration retry on failure', () => {
+  it('retries migration within the session when the insert loop throws', async () => {
+    jest.resetModules();
+
+    mockJsonExists = true;
+    const tracks = [
+      { ...sampleTrack, id: 'a' },
+      { ...sampleTrack, id: 'b' },
+    ];
+    mockText.mockResolvedValue(JSON.stringify(tracks));
+    mockGetAllSync.mockReturnValue([]);
+
+    // First insert succeeds, second throws
+    mockRunSync
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {
+        throw new Error('DB full');
+      });
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks();
+
+    // Migration failed mid-loop — json file should NOT be deleted
+    expect(mockDelete).not.toHaveBeenCalled();
+
+    // Second call should retry migration (migrated stayed false)
+    mockRunSync.mockImplementation(() => {});
+    await loadTracks();
+
+    // Now both inserts succeeded on retry, and the json file is deleted
+    expect(mockDelete).toHaveBeenCalled();
+  });
+});
+
 describe('loadTracks', () => {
   it('returns tracks from the database with boolean durationEstimated', async () => {
     jest.resetModules();
