@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { IconSquareButton } from './IconSquareButton';
 import { MarkerTimeSheet } from './MarkerTimeSheet';
+
+const MARKER_TILE_MIN_WIDTH = 50;
+const MARKER_TILE_HEIGHT = 52;
 
 export type PlaceMode = 'none' | 'A' | 'B';
 
@@ -222,9 +225,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tile: {
-    minWidth: 50,
-    height: 52,
-    borderRadius: 12,
+    minWidth: MARKER_TILE_MIN_WIDTH,
+    height: MARKER_TILE_HEIGHT,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',

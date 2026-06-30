@@ -6,6 +6,9 @@ import { spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
 import { CHIP_HIT_SLOP, chipStyles, pillColors } from './chipStyles';
 
+const CHIP_MIN_WIDTH = 40;
+const CHIP_MIN_HEIGHT = 30;
+
 export interface ChipOption<T> {
   label: string;
   value: T;
@@ -82,8 +85,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   chip: {
-    minWidth: 40,
-    minHeight: 30,
+    minWidth: CHIP_MIN_WIDTH,
+    minHeight: CHIP_MIN_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
   },

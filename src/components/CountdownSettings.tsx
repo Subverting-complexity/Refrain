@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import {
   CountdownConfig,
   CountdownDuration,
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   body: {
     gap: spacing.sm,
