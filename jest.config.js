@@ -1,6 +1,9 @@
 /** @type {import('jest').Config} */
 module.exports = {
   preset: 'jest-expo',
+  // Neutralizes JS-driven Animated.timing so no animation frame outlives a
+  // test and crashes the worker after teardown (see jest.setup.js, issue #212).
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
   // Never pick up test files inside local git worktrees under .claude/ — they
   // are stale repo copies and would run duplicate/outdated suites. A clean CI
