@@ -67,7 +67,9 @@ describe('useEngineSubscription', () => {
     });
 
     expect(captured).toBe(99);
-    renderer?.unmount();
+    act(() => {
+      renderer?.unmount();
+    });
   });
 
   it('calls the unsubscribe function on unmount', () => {

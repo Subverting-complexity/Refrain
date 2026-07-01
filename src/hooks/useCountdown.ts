@@ -57,7 +57,7 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     await countdownEngine.start(cfg, () => {
       void onPlayRef.current();
     });
-  }, []);
+  }, [configRef, onPlayRef]);
 
   const cancelCountdown = useCallback(() => {
     countdownEngine.cancel();

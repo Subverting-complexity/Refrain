@@ -50,5 +50,5 @@ export function useShareIntent({
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [onTrackImportedRef, onErrorRef]);
 }

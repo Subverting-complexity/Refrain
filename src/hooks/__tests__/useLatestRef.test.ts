@@ -66,7 +66,9 @@ describe('useLatestRef', () => {
     });
 
     expect(captured?.current).toBe(42);
-    renderer?.unmount();
+    act(() => {
+      renderer?.unmount();
+    });
   });
 
   it('returns the same ref object across renders', () => {
@@ -89,6 +91,8 @@ describe('useLatestRef', () => {
 
     expect(refs.length).toBeGreaterThanOrEqual(2);
     expect(refs[0]).toBe(refs[refs.length - 1]);
-    renderer?.unmount();
+    act(() => {
+      renderer?.unmount();
+    });
   });
 });
