@@ -1,6 +1,6 @@
 import { ActiveMarkers, SegmentProfile, SegmentProfileInput } from '../types';
-import { generateId } from '../utils/generateId';
 import { getDatabase } from './database';
+import { buildProfile } from './markerStoreHelpers';
 
 /**
  * Per-track A/B marker persistence, backed by the SQLite `track_markers`
@@ -106,15 +106,7 @@ export function saveProfile(
   input: SegmentProfileInput,
 ): SegmentProfile {
   const db = getDatabase();
-  const profile: SegmentProfile = {
-    id: generateId(),
-    trackId,
-    name: input.name,
-    markerA: input.markerA,
-    markerB: input.markerB,
-    loopEnabled: input.loopEnabled,
-    createdAt: Date.now(),
-  };
+  const profile = buildProfile(trackId, input);
   db.runSync(
     `INSERT INTO marker_profiles
        (id, trackId, name, markerA, markerB, loopEnabled, createdAt)
