@@ -66,10 +66,11 @@ findings.
 
 ## Auto-Merge on Approval
 
-| Setting                 | Value  |
-| ----------------------- | ------ |
-| auto-merge-on-approval  | `true` |
-| require-ci-before-merge | `true` |
+| Setting                      | Value  |
+| ---------------------------- | ------ |
+| auto-merge-on-approval       | `true` |
+| require-ci-before-merge      | `true` |
+| bypass-ci-on-billing-failure | `true` |
 
 - **auto-merge-on-approval** `true` — once the code-review skill approves
   a PR and posts its review comment, it squash-merges the PR
@@ -81,6 +82,17 @@ findings.
   approved PR that has no checks or a red/pending check, rather than
   merging it. The gating CI check is the `Quality Gate` job in
   `.github/workflows/ci.yml`.
+- **bypass-ci-on-billing-failure** `true` — an escape hatch for when the
+  `Quality Gate` job cannot start because of a GitHub account
+  billing/payment problem (the check reports "The job was not started
+  because recent account payments have failed or your spending limit
+  needs to be increased"). When this is the **only** reason CI is not
+  green, the code-review skill treats the billing block as a
+  non-code failure and allows an approved PR to merge rather than pausing
+  it indefinitely. Genuine code failures still gate: a red check caused by
+  a real test, lint, type, or format error keeps the PR paused regardless
+  of this flag. Set this back to `false` once billing is resolved so the
+  normal green-CI requirement is fully restored.
 
 > To switch to GitHub-enforced merge gating (and drop the
 > `require-ci-before-merge` fallback), the repo must go public or move to
