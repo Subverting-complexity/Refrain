@@ -1,7 +1,7 @@
 import { StyleSheet, TextInput } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 
 export interface SegmentNameFieldProps {
   value: string;
@@ -36,7 +36,7 @@ export function SegmentNameField({
 const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
