@@ -1,27 +1,13 @@
 import { useCallback, useState } from 'react';
 
-import * as settingsStore from '../services/settingsStore';
-
-const SKIP_SETTING_KEY = 'playback.skipSeconds';
-const DEFAULT_SKIP_SECONDS = 5;
-
-/** Selectable skip amounts (seconds) for the transport skip buttons. */
-export const SKIP_PRESETS = [1, 3, 5, 10, 15, 30] as const;
-
-function sanitize(seconds: number): number {
-  if (!Number.isFinite(seconds) || seconds <= 0) return DEFAULT_SKIP_SECONDS;
-  // Snap to a known preset so a corrupted/foreign stored value can't produce
-  // an off-list amount the chips can't represent.
-  return SKIP_PRESETS.includes(seconds as (typeof SKIP_PRESETS)[number])
-    ? seconds
-    : DEFAULT_SKIP_SECONDS;
-}
+import * as skipIntervalStore from '../services/skipIntervalStore';
 
 /**
  * Manages the configurable skip-back/forward amount, persisted across reloads
- * and tracks via the shared settings store (best-effort — a storage failure
+ * and tracks via the skip-interval service (best-effort — a storage failure
  * falls back to the default and never throws). Returns the amount in seconds,
- * the matching millisecond delta, and a persisting setter.
+ * the matching millisecond delta, and a persisting setter. All validation and
+ * persistence lives in the service; this hook is only the React state wiring.
  */
 export function useSkipInterval() {
   // Hydrate the persisted amount once, in the lazy initializer, so the first
@@ -30,19 +16,17 @@ export function useSkipInterval() {
   // failure falls back to the default and never throws.
   const [skipSeconds, setSkipSeconds] = useState(() => {
     try {
-      return sanitize(
-        settingsStore.getNumber(SKIP_SETTING_KEY, DEFAULT_SKIP_SECONDS),
-      );
+      return skipIntervalStore.getSkipSeconds();
     } catch {
-      return DEFAULT_SKIP_SECONDS;
+      return skipIntervalStore.DEFAULT_SKIP_SECONDS;
     }
   });
 
   const updateSkipSeconds = useCallback((seconds: number) => {
-    const next = sanitize(seconds);
+    const next = skipIntervalStore.sanitize(seconds);
     setSkipSeconds(next);
     try {
-      settingsStore.setNumber(SKIP_SETTING_KEY, next);
+      skipIntervalStore.setSkipSeconds(next);
     } catch {
       // Persistence is best-effort: a failed write must not break playback.
     }

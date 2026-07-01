@@ -1,14 +1,17 @@
 import { createElement } from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
-import { SKIP_PRESETS, useSkipInterval } from '../useSkipInterval';
+import { useSkipInterval } from '../useSkipInterval';
 
-const mockGetNumber = jest.fn<number, [string, number]>();
-const mockSetNumber = jest.fn<void, [string, number]>();
+const mockGetSkipSeconds = jest.fn<number, []>();
+const mockSetSkipSeconds = jest.fn<number, [number]>();
+const mockSanitize = jest.fn<number, [number]>();
 
-jest.mock('../../services/settingsStore', () => ({
-  getNumber: (key: string, fallback: number) => mockGetNumber(key, fallback),
-  setNumber: (key: string, value: number) => mockSetNumber(key, value),
+jest.mock('../../services/skipIntervalStore', () => ({
+  DEFAULT_SKIP_SECONDS: 5,
+  getSkipSeconds: () => mockGetSkipSeconds(),
+  setSkipSeconds: (seconds: number) => mockSetSkipSeconds(seconds),
+  sanitize: (seconds: number) => mockSanitize(seconds),
 }));
 
 let lastResult: ReturnType<typeof useSkipInterval>;
@@ -28,7 +31,10 @@ function renderTestHook(): ReactTestRenderer {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockGetNumber.mockImplementation((_key, fallback) => fallback);
+  mockGetSkipSeconds.mockReturnValue(5);
+  // The service normalizes; the hook forwards the result, so pass through.
+  mockSanitize.mockImplementation((seconds) => seconds);
+  mockSetSkipSeconds.mockImplementation((seconds) => seconds);
 });
 
 describe('useSkipInterval', () => {
@@ -38,31 +44,26 @@ describe('useSkipInterval', () => {
     expect(lastResult.skipMs).toBe(5000);
   });
 
-  it('hydrates a persisted preset on mount', () => {
-    mockGetNumber.mockReturnValue(10);
+  it('hydrates the persisted amount from the service on mount', () => {
+    mockGetSkipSeconds.mockReturnValue(10);
     renderTestHook();
     expect(lastResult.skipSeconds).toBe(10);
     expect(lastResult.skipMs).toBe(10000);
   });
 
-  it('falls back to the default for a non-preset stored value', () => {
-    mockGetNumber.mockReturnValue(7);
-    renderTestHook();
-    expect(lastResult.skipSeconds).toBe(5);
-  });
-
-  it('persists and updates when a new amount is set', () => {
+  it('normalizes and persists via the service when a new amount is set', () => {
     renderTestHook();
     act(() => {
       lastResult.setSkipSeconds(15);
     });
+    expect(mockSanitize).toHaveBeenCalledWith(15);
     expect(lastResult.skipSeconds).toBe(15);
     expect(lastResult.skipMs).toBe(15000);
-    expect(mockSetNumber).toHaveBeenCalledWith('playback.skipSeconds', 15);
+    expect(mockSetSkipSeconds).toHaveBeenCalledWith(15);
   });
 
-  it('falls back to the default when reading from storage throws', () => {
-    mockGetNumber.mockImplementation(() => {
+  it('falls back to the default when the service read throws', () => {
+    mockGetSkipSeconds.mockImplementation(() => {
       throw new Error('db unavailable');
     });
     renderTestHook();
@@ -70,7 +71,7 @@ describe('useSkipInterval', () => {
   });
 
   it('does not throw when persisting fails', () => {
-    mockSetNumber.mockImplementation(() => {
+    mockSetSkipSeconds.mockImplementation(() => {
       throw new Error('write failed');
     });
     renderTestHook();
@@ -80,9 +81,5 @@ describe('useSkipInterval', () => {
       });
     }).not.toThrow();
     expect(lastResult.skipSeconds).toBe(10);
-  });
-
-  it('exposes the selectable presets', () => {
-    expect(SKIP_PRESETS).toEqual([1, 3, 5, 10, 15, 30]);
   });
 });
