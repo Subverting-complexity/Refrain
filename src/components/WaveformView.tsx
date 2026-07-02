@@ -18,7 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
 import { formatDuration } from '../utils/formatTime';
 
@@ -610,7 +610,7 @@ export function WaveformView({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    borderRadius: 14,
+    borderRadius: radii.lg,
     overflow: 'hidden',
   },
   touchArea: {

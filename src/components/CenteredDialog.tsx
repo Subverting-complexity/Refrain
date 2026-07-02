@@ -2,8 +2,10 @@ import { ReactNode } from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+
+const DIALOG_MAX_WIDTH = 420;
 
 export interface CenteredDialogProps {
   /** Heading shown at the top of the card. */
@@ -76,8 +78,8 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 420,
-    borderRadius: 16,
+    maxWidth: DIALOG_MAX_WIDTH,
+    borderRadius: radii.lg,
     padding: spacing.xl,
     gap: spacing.md,
   },

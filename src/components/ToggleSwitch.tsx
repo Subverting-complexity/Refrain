@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    // A soft lift so the knob reads as floating above the track.
+    // Platform-standard shadow base — always black regardless of theme.
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.18,
