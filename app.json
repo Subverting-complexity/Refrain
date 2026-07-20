@@ -89,6 +89,20 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": "SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO \"public.audio\").@count == 1).@count == 1",
+          "androidIntentFilters": [
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/aac"
+          ]
+        }
       ]
     ],
     "experiments": {

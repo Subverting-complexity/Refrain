@@ -29,6 +29,28 @@ jest.mock('../../hooks/useTheme', () => ({
   }),
 }));
 
+// The ToggleSwitch inside this component starts a 160ms Animated.timing on
+// mount. Fake timers keep its frames off the real event loop, and the
+// afterEach below unmounts and flushes so no timer survives the suite —
+// otherwise a late frame fires after Jest tears down the environment and
+// crashes the worker.
+let trees: ReactTestRenderer[] = [];
+
+beforeEach(() => {
+  jest.useFakeTimers();
+});
+
+afterEach(() => {
+  act(() => {
+    trees.forEach((tree) => tree.unmount());
+  });
+  trees = [];
+  act(() => {
+    jest.runOnlyPendingTimers();
+  });
+  jest.useRealTimers();
+});
+
 function render(enabled: boolean, onChange: jest.Mock): ReactTestRenderer {
   let tree!: ReactTestRenderer;
   act(() => {
@@ -36,6 +58,7 @@ function render(enabled: boolean, onChange: jest.Mock): ReactTestRenderer {
       <SnippetPreviewSettings enabled={enabled} onChange={onChange} />,
     );
   });
+  trees.push(tree);
   return tree;
 }
 
@@ -100,6 +123,7 @@ describe('SnippetPreviewSettings', () => {
         />,
       );
     });
+    trees.push(tree);
 
     const styled = tree.root.findAll(
       (node) =>

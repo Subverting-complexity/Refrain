@@ -57,9 +57,9 @@ export function ToggleSwitch({
       useNativeDriver: false,
     });
     animation.start();
-    // Stop on unmount (or re-toggle) so no timing frame fires after the
-    // component is gone — a leaked frame is invisible in the app but crashes
-    // Jest workers when it lands after test teardown.
+    // Without this stop, an in-flight animation keeps a frame scheduled after
+    // unmount — in Jest that frame fires after the environment is torn down
+    // and crashes the worker.
     return () => animation.stop();
   }, [value, progress]);
 

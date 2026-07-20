@@ -15,6 +15,37 @@ jest.mock('expo-linking', () => ({
     mockAddEventListener(event, cb),
 }));
 
+interface MockShareFile {
+  path: string;
+  fileName: string;
+  mimeType: string;
+  size: number | null;
+}
+
+interface MockShareState {
+  hasShareIntent: boolean;
+  files: MockShareFile[] | null;
+  error: string | null;
+}
+
+let mockShareState: MockShareState;
+const mockResetShareIntent = jest.fn();
+
+jest.mock('expo-share-intent', () => ({
+  useShareIntent: () => ({
+    isReady: true,
+    hasShareIntent: mockShareState.hasShareIntent,
+    shareIntent: {
+      files: mockShareState.files,
+      text: null,
+      webUrl: null,
+      type: mockShareState.files ? 'file' : null,
+    },
+    resetShareIntent: mockResetShareIntent,
+    error: mockShareState.error,
+  }),
+}));
+
 const mockImportFromUri = jest.fn();
 const mockIsSupportedFilename = jest.fn<boolean, [string]>();
 
@@ -60,16 +91,39 @@ async function flushMicrotasks() {
   });
 }
 
+async function rerenderHook(tree: ReactTestRenderer): Promise<void> {
+  await act(async () => {
+    tree.update(createElement(TestComponent));
+  });
+}
+
+function shareFile(overrides: Partial<MockShareFile> = {}): MockShareFile {
+  return {
+    path: 'file:///shared/song.mp3',
+    fileName: 'song.mp3',
+    mimeType: 'audio/mpeg',
+    size: 1_000_000,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetInitialURL.mockResolvedValue(null);
   mockAddEventListener.mockReturnValue({ remove: mockRemove });
   mockIsSupportedFilename.mockReturnValue(true);
   mockImportFromUri.mockResolvedValue({ success: true, track });
+  // The web test below flips Platform.OS; reset it so suite order can't leak.
   Platform.OS = 'ios';
+  mockShareState = { hasShareIntent: false, files: null, error: null };
+  // Mirror the real library: resetting consumes the pending intent so the
+  // next render reports no share.
+  mockResetShareIntent.mockImplementation(() => {
+    mockShareState = { ...mockShareState, hasShareIntent: false, files: null };
+  });
 });
 
-describe('useShareIntent', () => {
+describe('useShareIntent (expo-linking URL flow)', () => {
   it('imports a shared file URL from the initial launch URL', async () => {
     mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
 
@@ -110,6 +164,17 @@ describe('useShareIntent', () => {
 
     expect(mockImportFromUri).not.toHaveBeenCalled();
     expect(onTrackImported).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('silently ignores the share-extension dataUrl redirect link', async () => {
+    mockGetInitialURL.mockResolvedValue(
+      'refrain://dataUrl=refrainShareKey#text',
+    );
+
+    await renderHook();
+
+    expect(mockImportFromUri).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -190,5 +255,166 @@ describe('useShareIntent', () => {
     });
 
     expect(mockRemove).toHaveBeenCalled();
+  });
+});
+
+describe('useShareIntent (system share sheet flow)', () => {
+  it('imports a file delivered via the share sheet', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'file:///shared/song.mp3',
+      'song.mp3',
+    );
+    expect(onTrackImported).toHaveBeenCalledWith(track);
+    expect(mockResetShareIntent).toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('consumes the intent before importing (double-import guard)', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockResetShareIntent.mock.invocationCallOrder[0]).toBeLessThan(
+      mockImportFromUri.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not re-import the same intent on re-render', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    const tree = await renderHook();
+    await rerenderHook(tree);
+    await rerenderHook(tree);
+
+    expect(mockImportFromUri).toHaveBeenCalledTimes(1);
+    expect(onTrackImported).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports an intent that arrives after mount', async () => {
+    const tree = await renderHook();
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile({ path: 'content://media/42/song.m4a' })],
+      error: null,
+    };
+    await rerenderHook(tree);
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'content://media/42/song.m4a',
+      'song.mp3',
+    );
+    expect(onTrackImported).toHaveBeenCalledWith(track);
+  });
+
+  it('imports every file of a multi-file share', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [
+        shareFile(),
+        shareFile({ path: 'file:///shared/other.wav', fileName: 'other.wav' }),
+      ],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockImportFromUri).toHaveBeenCalledTimes(2);
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'file:///shared/other.wav',
+      'other.wav',
+    );
+    expect(onTrackImported).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the path-derived filename when fileName is empty', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [
+        shareFile({ path: 'content://media/123/song.m4a', fileName: '' }),
+      ],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'content://media/123/song.m4a',
+      'song.m4a',
+    );
+  });
+
+  it('reports an unsupported shared file and still consumes the intent', async () => {
+    mockIsSupportedFilename.mockReturnValue(false);
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile({ fileName: 'notes.txt' })],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('Unsupported audio format');
+    expect(mockResetShareIntent).toHaveBeenCalled();
+  });
+
+  it('reports a failed share-sheet import', async () => {
+    mockImportFromUri.mockResolvedValue({
+      success: false,
+      error: 'copy-failed',
+      message: 'Could not copy file',
+    });
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(onTrackImported).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('Could not copy file');
+  });
+
+  it('ignores a share intent without files (e.g. shared text)', async () => {
+    mockShareState = { hasShareIntent: true, files: null, error: null };
+
+    await renderHook();
+
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+    expect(onTrackImported).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(mockResetShareIntent).toHaveBeenCalled();
+  });
+
+  it('surfaces a native share-intent error', async () => {
+    mockShareState = {
+      hasShareIntent: false,
+      files: null,
+      error: 'Native share processing failed',
+    };
+
+    await renderHook();
+
+    expect(onError).toHaveBeenCalledWith('Native share processing failed');
+    expect(mockImportFromUri).not.toHaveBeenCalled();
   });
 });
