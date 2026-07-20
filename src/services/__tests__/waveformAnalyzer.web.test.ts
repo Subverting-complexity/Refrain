@@ -49,6 +49,7 @@ beforeEach(() => {
 
 function respondWith(buffer: ArrayBuffer): void {
   mockFetch.mockResolvedValue({
+    ok: true,
     arrayBuffer: () => Promise.resolve(buffer),
   } as Response);
 }
@@ -103,6 +104,18 @@ describe('extractPeaks (web)', () => {
 
     await expect(extractPeaks('blob:obj/missing')).rejects.toThrow(
       'blob revoked',
+    );
+  });
+
+  it('throws on a non-OK response instead of parsing the error body', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(16)),
+    } as Response);
+
+    await expect(extractPeaks('blob:obj/gone')).rejects.toThrow(
+      'Failed to fetch audio for waveform: 404',
     );
   });
 });

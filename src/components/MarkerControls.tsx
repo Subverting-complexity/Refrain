@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -120,7 +120,11 @@ export function MarkerControls({
       >
         <Text style={[styles.tileLabel, { color }]}>{label}</Text>
         <Text
-          style={[styles.tileValue, { color: theme.colors.textPrimary }]}
+          style={[
+            theme.typography.caption,
+            styles.tileValue,
+            { color: theme.colors.textPrimary },
+          ]}
           numberOfLines={1}
         >
           {sub}
@@ -182,7 +186,11 @@ export function MarkerControls({
 
       {!isDisabled && (placeMode === 'A' || placeMode === 'B') && (
         <Text
-          style={[styles.caption, { color: theme.colors.textSecondary }]}
+          style={[
+            theme.typography.caption,
+            styles.caption,
+            { color: theme.colors.textSecondary },
+          ]}
           accessibilityLiveRegion="polite"
         >
           {placeMode === 'A'
@@ -239,16 +247,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // The tile letter is intentionally bespoke (13/700): it is a badge, not
+  // body copy, sized between caption and bodySmall so the tile stays compact.
   tileLabel: {
     fontSize: 13,
     fontWeight: '700',
   },
+  // Type comes from theme.typography.caption at the usage site; these hold
+  // only the layout deltas.
   tileValue: {
-    fontSize: 12,
-    marginTop: 2,
+    marginTop: spacing.xs / 2,
   },
   caption: {
-    fontSize: 12,
     textAlign: 'center',
     marginTop: spacing.md,
   },

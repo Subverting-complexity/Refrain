@@ -155,20 +155,3 @@ describe('revokeObjectUrl', () => {
     expect(revoked).toEqual([]);
   });
 });
-
-describe('revokeAllObjectUrls', () => {
-  it('revokes every cached URL', async () => {
-    const store = load();
-    await store.putBlob('a', makeBlob());
-    await store.putBlob('b', makeBlob());
-    await store.getObjectUrl('a');
-    await store.getObjectUrl('b');
-
-    store.revokeAllObjectUrls();
-    expect(revoked).toHaveLength(2);
-
-    // Cache cleared: next resolves create new URLs.
-    await store.getObjectUrl('a');
-    expect(created).toHaveLength(3);
-  });
-});

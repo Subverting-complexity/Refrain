@@ -1,4 +1,3 @@
-import React from 'react';
 import { Pressable, PressableProps, StyleSheet } from 'react-native';
 import { MIN_TOUCH_TARGET } from '../theme';
 

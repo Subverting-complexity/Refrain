@@ -4,14 +4,12 @@ import { spacing, Theme } from '../theme';
 
 // Slim pills read as ~30pt tall; pad the touch area back out to the 44pt
 // minimum vertically (and a little horizontally) without inflating the visual.
-// Shared by ChipGroup and ControlsDrawer so the two stay in lockstep.
 export const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 2, right: 2 } as const;
 
 // The shared pill recipe — compact rounded outline with small bold label —
-// used by both the single-select ChipGroup and the panel-toggle chips in
-// ControlsDrawer. They are different controls and keep their own layout
-// (min size, row vs centred), but this visual base lives in one place so the
-// dimensions, rounded shape, and label type can't drift apart.
+// used by the single-select ChipGroup. Kept as its own module so any future
+// pill-style control shares one visual base instead of re-deriving the
+// dimensions, rounded shape, and label type.
 export const chipStyles = StyleSheet.create({
   pill: {
     paddingHorizontal: spacing.md,

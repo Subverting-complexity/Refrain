@@ -14,9 +14,9 @@ interface SnippetPreviewSettingsProps {
 }
 
 /**
- * Inline toggle card for the snippet preview, sitting alongside the count-in
- * settings on the player. When on, dragging an A/B marker auditions a short
- * rolling snippet around it; when off, dragging just moves the marker.
+ * Inline toggle card for the snippet preview, rendered inside the segment
+ * profile sheet. When on, dragging an A/B marker auditions a short rolling
+ * snippet around it; when off, dragging just moves the marker.
  */
 export function SnippetPreviewSettings({
   enabled,

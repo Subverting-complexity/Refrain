@@ -51,11 +51,16 @@ export function ToggleSwitch({
   // once (like a ref) while keeping `progress` a plain value, not a ref.
   const [progress] = useState(() => new Animated.Value(value ? 1 : 0));
   useEffect(() => {
-    Animated.timing(progress, {
+    const animation = Animated.timing(progress, {
       toValue: value ? 1 : 0,
       duration: 160,
       useNativeDriver: false,
-    }).start();
+    });
+    animation.start();
+    // Stop on unmount (or re-toggle) so no timing frame fires after the
+    // component is gone — a leaked frame is invisible in the app but crashes
+    // Jest workers when it lands after test teardown.
+    return () => animation.stop();
   }, [value, progress]);
 
   const trackColor = progress.interpolate({
