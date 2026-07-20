@@ -167,9 +167,12 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   // The monitor window, when active, overrides the A/B region: the preview
   // loops its own window and always rewinds (it ignores the loop toggle and
   // any per-loop count-in handler), so a marker drag previews cleanly without
-  // touching the user's loop settings.
+  // touching the user's loop settings. With no complete A/B region, an armed
+  // loop still repeats — the whole track, or A to the end when only A is set —
+  // so looping works whether or not markers are placed.
   const monitor = monitorBounds();
-  const region = monitor ?? regionBounds();
+  const region =
+    monitor ?? regionBounds() ?? trackLoopBounds(newState.durationMs);
   if (
     status.isLoaded &&
     (status.playing || status.didJustFinish) &&
@@ -462,6 +465,18 @@ function regionBounds(): { a: number; b: number } | null {
   if (markerA == null || markerB == null) return null;
   if (markerA >= markerB) return null;
   return { a: markerA, b: markerB };
+}
+
+/**
+ * Fallback loop bounds when no complete A/B region exists: with the loop
+ * armed, the track loops end-to-start — from A when only A is set, else from
+ * the beginning — so the loop toggle works whether or not markers are placed.
+ * Null when the loop is off or the duration is not yet known (a zero-duration
+ * "region" would trap the playhead at 0).
+ */
+function trackLoopBounds(durationMs: number): { a: number; b: number } | null {
+  if (!loopEnabled || durationMs <= 0) return null;
+  return { a: markerA ?? 0, b: durationMs };
 }
 
 /**

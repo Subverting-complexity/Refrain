@@ -49,6 +49,8 @@ export function SegmentRenameDialog({
           { color: theme.colors.textPrimary, borderColor: theme.colors.border },
         ]}
         autoFocus
+        returnKeyType="done"
+        onSubmitEditing={confirm}
       />
       <DialogButton
         label="Save"

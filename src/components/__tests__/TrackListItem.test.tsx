@@ -1,5 +1,4 @@
 import React from 'react';
-import { Alert } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { TrackListItem } from '../TrackListItem';
@@ -113,10 +112,26 @@ describe('TrackListItem', () => {
     expect(pressable.props.accessibilityLabel).not.toContain('~');
   });
 
+  // The confirm dialog's action buttons, once the dialog is open. Empty
+  // arrays mean the dialog is not shown.
+  function findConfirmButton(tree: ReactTestRenderer) {
+    return tree.root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Confirm delete song.mp3' &&
+        typeof node.props.onPress === 'function',
+    );
+  }
+  function findCancelButton(tree: ReactTestRenderer) {
+    return tree.root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Cancel delete' &&
+        typeof node.props.onPress === 'function',
+    );
+  }
+
   describe('long press', () => {
-    it('shows a confirmation alert when long-pressed with onDelete provided', () => {
+    it('shows the confirmation dialog when long-pressed with onDelete provided', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const pressable = tree.root.findByProps({
@@ -127,18 +142,11 @@ describe('TrackListItem', () => {
         pressable.props.onLongPress();
       });
 
-      expect(alertSpy).toHaveBeenCalledWith(
-        'Delete Track',
-        'Remove "song.mp3" from library?',
-        expect.arrayContaining([
-          expect.objectContaining({ text: 'Cancel', style: 'cancel' }),
-          expect.objectContaining({ text: 'Delete', style: 'destructive' }),
-        ]),
-      );
+      expect(findConfirmButton(tree).length).toBeGreaterThanOrEqual(1);
+      expect(findCancelButton(tree).length).toBeGreaterThanOrEqual(1);
     });
 
-    it('does not show an alert when long-pressed without onDelete', () => {
-      const alertSpy = jest.spyOn(Alert, 'alert');
+    it('does not show the dialog when long-pressed without onDelete', () => {
       const tree = renderItem(baseTrack);
 
       const pressable = tree.root.findByProps({
@@ -149,12 +157,11 @@ describe('TrackListItem', () => {
         pressable.props.onLongPress();
       });
 
-      expect(alertSpy).not.toHaveBeenCalled();
+      expect(findConfirmButton(tree)).toHaveLength(0);
     });
 
     it('calls onDelete with the track id when the Delete button is confirmed', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const pressable = tree.root.findByProps({
@@ -164,23 +171,17 @@ describe('TrackListItem', () => {
       act(() => {
         pressable.props.onLongPress();
       });
-
-      const buttons = alertSpy.mock.calls[0][2] as {
-        text: string;
-        onPress?: () => void;
-      }[];
-      const deleteBtn = buttons.find((b) => b.text === 'Delete');
-
       act(() => {
-        deleteBtn?.onPress?.();
+        findConfirmButton(tree)[0].props.onPress();
       });
 
       expect(onDelete).toHaveBeenCalledWith('track-1');
+      // Confirming dismisses the dialog.
+      expect(findConfirmButton(tree)).toHaveLength(0);
     });
 
     it('does not call onDelete when Cancel is tapped', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const pressable = tree.root.findByProps({
@@ -190,18 +191,12 @@ describe('TrackListItem', () => {
       act(() => {
         pressable.props.onLongPress();
       });
-
-      const buttons = alertSpy.mock.calls[0][2] as {
-        text: string;
-        onPress?: () => void;
-      }[];
-      const cancelBtn = buttons.find((b) => b.text === 'Cancel');
-
       act(() => {
-        cancelBtn?.onPress?.();
+        findCancelButton(tree)[0].props.onPress();
       });
 
       expect(onDelete).not.toHaveBeenCalled();
+      expect(findConfirmButton(tree)).toHaveLength(0);
     });
   });
 
@@ -217,9 +212,8 @@ describe('TrackListItem', () => {
       expect(deleteBtn).toBeDefined();
     });
 
-    it('shows a confirmation alert when the swipe delete button is pressed', () => {
+    it('shows the confirmation dialog when the swipe delete button is pressed', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const deleteBtn = tree.root.findByProps({
@@ -230,18 +224,11 @@ describe('TrackListItem', () => {
         deleteBtn.props.onPress();
       });
 
-      expect(alertSpy).toHaveBeenCalledWith(
-        'Delete Track',
-        'Remove "song.mp3" from library?',
-        expect.arrayContaining([
-          expect.objectContaining({ text: 'Delete', style: 'destructive' }),
-        ]),
-      );
+      expect(findConfirmButton(tree).length).toBeGreaterThanOrEqual(1);
     });
 
     it('calls onDelete with the track id after confirming via swipe', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const deleteBtn = tree.root.findByProps({
@@ -251,15 +238,8 @@ describe('TrackListItem', () => {
       act(() => {
         deleteBtn.props.onPress();
       });
-
-      const buttons = alertSpy.mock.calls[0][2] as {
-        text: string;
-        onPress?: () => void;
-      }[];
-      const confirmBtn = buttons.find((b) => b.text === 'Delete');
-
       act(() => {
-        confirmBtn?.onPress?.();
+        findConfirmButton(tree)[0].props.onPress();
       });
 
       expect(onDelete).toHaveBeenCalledWith('track-1');
@@ -267,7 +247,6 @@ describe('TrackListItem', () => {
 
     it('does not call onDelete when swipe-delete Cancel is tapped', () => {
       const onDelete = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert');
       const tree = renderItem(baseTrack, { onDelete });
 
       const deleteBtn = tree.root.findByProps({
@@ -277,15 +256,8 @@ describe('TrackListItem', () => {
       act(() => {
         deleteBtn.props.onPress();
       });
-
-      const buttons = alertSpy.mock.calls[0][2] as {
-        text: string;
-        onPress?: () => void;
-      }[];
-      const cancelBtn = buttons.find((b) => b.text === 'Cancel');
-
       act(() => {
-        cancelBtn?.onPress?.();
+        findCancelButton(tree)[0].props.onPress();
       });
 
       expect(onDelete).not.toHaveBeenCalled();

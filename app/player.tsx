@@ -31,11 +31,14 @@ import { useToast } from '@/src/hooks/useToast';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
-import { spacing } from '@/src/theme';
+import { radii, spacing } from '@/src/theme';
 import { SegmentProfile } from '@/src/types';
 import { nextSegmentName } from '@/src/utils/nextSegmentName';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
+
+// Square placeholder shown while the waveform has no peaks to draw yet.
+const ARTWORK_PLACEHOLDER_SIZE = 240;
 
 /** A pending action blocked by unsaved segment edits. */
 type SegmentGuard =
@@ -601,9 +604,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   artworkPlaceholder: {
-    width: 240,
-    height: 240,
-    borderRadius: 16,
+    width: ARTWORK_PLACEHOLDER_SIZE,
+    height: ARTWORK_PLACEHOLDER_SIZE,
+    borderRadius: radii.lg,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -32,6 +32,12 @@ export function useShareIntent({
     if (Platform.OS === 'web') return;
 
     async function handleUrl(url: string) {
+      // Only file/content URLs carry a shared audio file. The app's own deep
+      // links (refrain://, exp:// in dev clients) arrive through the same
+      // Linking events; ignore them silently instead of surfacing a spurious
+      // "Unsupported audio format" error on every deep-link launch.
+      if (!/^(file|content):/i.test(url)) return;
+
       const filename = extractFilename(url);
 
       if (!isSupportedFilename(filename)) {

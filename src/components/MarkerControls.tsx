@@ -66,12 +66,15 @@ export function MarkerControls({
   // null = closed; 'A' or 'B' = sheet open for that marker
   const [sheetTarget, setSheetTarget] = useState<'A' | 'B' | null>(null);
   const isDisabled = status === 'idle' || status === 'error';
-  const canLoop = markerA != null && markerB != null;
-  const loopActive = canLoop && loopEnabled;
-  const loopDisabled = isDisabled || !canLoop;
+  const hasRegion = markerA != null && markerB != null;
+  // The loop is armable with or without markers: a full A/B region loops
+  // between the markers, A alone loops from A to the end, and no markers
+  // loops the whole track. So the toggle only needs a loaded track.
+  const loopActive = !isDisabled && loopEnabled;
+  const loopDisabled = isDisabled;
   // Save needs a complete region and somewhere to save it; Clear needs at
   // least a start marker to wipe.
-  const saveDisabled = isDisabled || !canLoop || !onSave;
+  const saveDisabled = isDisabled || !hasRegion || !onSave;
   const clearDisabled = isDisabled || markerA == null || !onClear;
 
   const renderButton = (
@@ -154,7 +157,11 @@ export function MarkerControls({
           onPress={() => onToggleLoop(!loopEnabled)}
           accessibilityRole="switch"
           accessibilityState={{ checked: loopActive }}
-          accessibilityHint="Repeats playback between the A and B points"
+          accessibilityHint={
+            hasRegion
+              ? 'Repeats playback between the A and B points'
+              : 'Repeats the whole track, or from A when only A is set'
+          }
         />
         <IconSquareButton
           icon="save-outline"

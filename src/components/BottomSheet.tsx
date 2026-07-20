@@ -1,5 +1,12 @@
 import { ReactNode } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -37,7 +44,12 @@ export function BottomSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      {/* iOS lifts the sheet above the on-screen keyboard when a sheet body
+          holds a text field; Android resizes the window itself. */}
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <AccessiblePressable
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           accessibilityRole="button"
@@ -70,7 +82,7 @@ export function BottomSheet({
 
           {children}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
