@@ -171,8 +171,20 @@ describe('MarkerControls', () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it('disables the loop toggle until both markers are set', () => {
+  it('keeps the loop toggle enabled without a complete region', () => {
+    // Looping no longer needs both markers: no markers loops the whole
+    // track, A alone loops from A to the end.
     const tree = renderControls({ markerA: 1000, markerB: null });
+
+    const toggle = findPressableByLabel(tree, 'Turn loop off')[0];
+    expect(toggle.props.disabled).toBe(false);
+    expect(toggle.props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: true }),
+    );
+  });
+
+  it('disables the loop toggle while no track is loaded', () => {
+    const tree = renderControls({ status: 'idle' });
 
     const toggle = findPressableByLabel(tree, 'Turn loop on')[0];
     expect(toggle.props.disabled).toBe(true);

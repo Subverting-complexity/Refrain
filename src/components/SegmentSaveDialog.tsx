@@ -79,6 +79,8 @@ export function SegmentSaveDialog({
           { color: theme.colors.textPrimary, borderColor: theme.colors.border },
         ]}
         autoFocus
+        returnKeyType="done"
+        onSubmitEditing={confirmNew}
       />
       <DialogButton
         label="Save"

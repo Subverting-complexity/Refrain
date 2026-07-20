@@ -259,14 +259,23 @@ describe('audioEngine', () => {
     });
 
     it('resets position to markerA when playing after track finished', async () => {
-      const { loadTrack, play, setMarkerA } = require('../audioEngine');
+      const {
+        loadTrack,
+        play,
+        setMarkerA,
+        setLoopEnabled,
+      } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       statusCallback?.(makeLoadedStatus());
       setMarkerA(10000);
+      // Disarm the loop so the finish parks at the end (an armed loop would
+      // rewind on its own); this exercises play()'s own restart path.
+      setLoopEnabled(false);
       statusCallback?.(
         makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
+      mockSeekTo.mockClear();
       await play();
 
       // markerA is 10000ms -> 10s at the expo-audio boundary.
@@ -275,12 +284,14 @@ describe('audioEngine', () => {
     });
 
     it('resets position to 0 when playing after track finished with no markers', async () => {
-      const { loadTrack, play } = require('../audioEngine');
+      const { loadTrack, play, setLoopEnabled } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
+      setLoopEnabled(false);
       statusCallback?.(
         makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
+      mockSeekTo.mockClear();
       await play();
 
       expect(mockSeekTo).toHaveBeenCalledWith(0);
@@ -907,11 +918,18 @@ describe('audioEngine', () => {
       );
     });
 
-    it('reports paused status when finished', async () => {
-      const { loadTrack, subscribe } = require('../audioEngine');
+    it('reports paused status when finished with the loop disarmed', async () => {
+      const {
+        loadTrack,
+        setLoopEnabled,
+        subscribe,
+      } = require('../audioEngine');
       const listener = jest.fn();
 
       await loadTrack('file:///test.mp3');
+      // The loop defaults to armed (a finish would rewind and keep playing);
+      // disarm it so the natural end parks the playhead at the end.
+      setLoopEnabled(false);
       subscribe(listener);
       listener.mockClear();
 
@@ -1192,7 +1210,7 @@ describe('audioEngine', () => {
       expect(mockSeekTo).not.toHaveBeenCalled();
     });
 
-    it('does not loop back when only markerA is set', async () => {
+    it('does not loop back mid-track when only markerA is set', async () => {
       const { loadTrack, setMarkerA } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
@@ -1200,9 +1218,125 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       mockSeekTo.mockClear();
 
+      // Without B the loop region runs to the end of the track, so playback
+      // mid-track carries on undisturbed.
       statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 50 }));
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('loops the whole track on natural finish with no markers set', async () => {
+      const { loadTrack, subscribe } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      // The loop defaults to armed, so the finish rewinds to the start and
+      // keeps playing — looping needs no A/B markers.
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'playing', positionMs: 0 }),
+      );
+    });
+
+    it('loops from markerA on natural finish when only A is set', async () => {
+      const { loadTrack, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('does not loop the whole track when the loop is disarmed', async () => {
+      const {
+        loadTrack,
+        setLoopEnabled,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setLoopEnabled(false);
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 60000 }),
+      );
+    });
+
+    it('invokes the per-loop count-in handler on a whole-track rewind', async () => {
+      const {
+        loadTrack,
+        setLoopRestartHandler,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      // Rewinds to the start, pauses there, and hands off to the count-in —
+      // same contract as an A/B loop restart.
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 0 }),
+      );
     });
 
     it('stops at B (without rewinding) when looping is disabled', async () => {
