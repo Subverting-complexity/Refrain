@@ -1,4 +1,3 @@
-import React from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 

@@ -161,7 +161,7 @@ describe('CountdownSettings', () => {
   it('switches the count-in repeat scope', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    const everyLoopChip = findByLabel(tree.root, 'Count in Every loop')[0];
+    const everyLoopChip = findByLabel(tree.root, 'Repeat Every loop')[0];
     act(() => {
       everyLoopChip.props.onPress();
     });

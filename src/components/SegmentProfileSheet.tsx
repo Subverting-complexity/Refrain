@@ -8,6 +8,8 @@ import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { BottomSheet } from './BottomSheet';
+import { CenteredDialog } from './CenteredDialog';
+import { DialogButton } from './DialogButton';
 import { SegmentRenameDialog } from './SegmentRenameDialog';
 import { SnippetPreviewSettings } from './SnippetPreviewSettings';
 
@@ -49,6 +51,7 @@ export function SegmentProfileSheet({
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const renamingProfile = profiles.find((p) => p.id === renamingId) ?? null;
+  const confirmingProfile = profiles.find((p) => p.id === confirmingId) ?? null;
 
   const startRename = (profile: SegmentProfile) => {
     setConfirmingId(null);
@@ -108,45 +111,6 @@ export function SegmentProfileSheet({
       ) : (
         <View style={styles.list}>
           {profiles.map((profile) => {
-            if (confirmingId === profile.id) {
-              return (
-                <View key={profile.id} style={styles.row}>
-                  <Text
-                    style={[
-                      theme.typography.body,
-                      styles.rowName,
-                      { color: theme.colors.textPrimary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    Delete “{profile.name}”?
-                  </Text>
-                  <AccessiblePressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Confirm delete ${profile.name}`}
-                    onPress={confirmDelete}
-                  >
-                    <Ionicons
-                      name="trash"
-                      size={20}
-                      color={theme.colors.error}
-                    />
-                  </AccessiblePressable>
-                  <AccessiblePressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Cancel delete"
-                    onPress={() => setConfirmingId(null)}
-                  >
-                    <Ionicons
-                      name="close"
-                      size={22}
-                      color={theme.colors.textSecondary}
-                    />
-                  </AccessiblePressable>
-                </View>
-              );
-            }
-
             return (
               <View key={profile.id} style={styles.row}>
                 <AccessiblePressable
@@ -209,6 +173,29 @@ export function SegmentProfileSheet({
           onCancel={() => setRenamingId(null)}
         />
       ) : null}
+      {/* Same confirm affordance as track deletion (TrackListItem): the
+          app-wide CenteredDialog, not an inline row swap, so destructive
+          confirmation looks and behaves identically everywhere. */}
+      {confirmingProfile ? (
+        <CenteredDialog
+          title="Delete segment?"
+          message={`Remove “${confirmingProfile.name}” from this track?`}
+          onDismiss={() => setConfirmingId(null)}
+        >
+          <DialogButton
+            label="Delete"
+            accessibilityLabel={`Confirm delete ${confirmingProfile.name}`}
+            variant="danger"
+            onPress={confirmDelete}
+          />
+          <DialogButton
+            label="Cancel"
+            accessibilityLabel="Cancel delete"
+            variant="default"
+            onPress={() => setConfirmingId(null)}
+          />
+        </CenteredDialog>
+      ) : null}
     </BottomSheet>
   );
 }
@@ -230,9 +217,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'center',
     paddingVertical: spacing.xs,
-  },
-  rowName: {
-    flex: 1,
   },
   empty: {
     alignItems: 'center',

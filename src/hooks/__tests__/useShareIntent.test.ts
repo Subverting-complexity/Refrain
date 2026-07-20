@@ -1,4 +1,5 @@
-import { createElement } from 'react';
+import { createElement, StrictMode } from 'react';
+import { Platform } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { useShareIntent } from '../useShareIntent';
@@ -81,6 +82,15 @@ async function renderHook(): Promise<ReactTestRenderer> {
   return tree;
 }
 
+// Lets the getInitialURL promise and the chained importFromUri promise settle.
+async function flushMicrotasks() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 async function rerenderHook(tree: ReactTestRenderer): Promise<void> {
   await act(async () => {
     tree.update(createElement(TestComponent));
@@ -103,6 +113,8 @@ beforeEach(() => {
   mockAddEventListener.mockReturnValue({ remove: mockRemove });
   mockIsSupportedFilename.mockReturnValue(true);
   mockImportFromUri.mockResolvedValue({ success: true, track });
+  // The web test below flips Platform.OS; reset it so suite order can't leak.
+  Platform.OS = 'ios';
   mockShareState = { hasShareIntent: false, files: null, error: null };
   // Mirror the real library: resetting consumes the pending intent so the
   // next render reports no share.
@@ -188,6 +200,51 @@ describe('useShareIntent (expo-linking URL flow)', () => {
 
     expect(onTrackImported).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith('Could not copy file');
+  });
+
+  it('imports a given initial URL once even when the mount effect runs twice', async () => {
+    mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
+
+    // StrictMode double-invokes the mount effect in dev (mount → cleanup →
+    // mount), reproducing the duplicate-import path the guard defends against.
+    await act(async () => {
+      create(createElement(StrictMode, null, createElement(TestComponent)));
+    });
+    await flushMicrotasks();
+
+    // The effect ran more than once, so the shared link was resolved twice...
+    expect(mockGetInitialURL.mock.calls.length).toBeGreaterThan(1);
+    // ...but the guard let it import only once.
+    expect(mockImportFromUri).toHaveBeenCalledTimes(1);
+    expect(onTrackImported).toHaveBeenCalledTimes(1);
+  });
+
+  it('still imports each foreground share that arrives via the url event', async () => {
+    await renderHook();
+
+    const listener = mockAddEventListener.mock.calls[0][1];
+    await act(async () => {
+      listener({ url: 'file:///shared/first.mp3' });
+    });
+    await flushMicrotasks();
+    await act(async () => {
+      listener({ url: 'file:///shared/second.mp3' });
+    });
+    await flushMicrotasks();
+
+    expect(mockImportFromUri).toHaveBeenCalledTimes(2);
+    expect(onTrackImported).toHaveBeenCalledTimes(2);
+  });
+
+  it('does nothing on web', async () => {
+    Platform.OS = 'web';
+    mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
+
+    await renderHook();
+    await flushMicrotasks();
+
+    expect(mockGetInitialURL).not.toHaveBeenCalled();
+    expect(mockImportFromUri).not.toHaveBeenCalled();
   });
 
   it('removes the url listener on unmount', async () => {

@@ -21,6 +21,12 @@ export async function extractPeaks(
   bucketCount: number = DEFAULT_BUCKET_COUNT,
 ): Promise<WaveformPeaks> {
   const response = await fetch(uri);
+  // A non-OK response (404 page, error body) would otherwise flow its bytes
+  // into the peak parser and render a garbage waveform. Throw instead so the
+  // caller takes the same empty-peaks fallback as the native path.
+  if (!response.ok) {
+    throw new Error(`Failed to fetch audio for waveform: ${response.status}`);
+  }
   const buffer = await response.arrayBuffer();
   const reader = createBufferReader(new Uint8Array(buffer));
   return computePeaks(reader, bucketCount);

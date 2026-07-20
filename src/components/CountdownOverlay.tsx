@@ -1,4 +1,3 @@
-import React from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -49,16 +48,21 @@ export function CountdownOverlay({
   );
 
   if (onCancel) {
+    // The alert live region stays a sibling of the cancel target rather than
+    // its child: nesting an assertive live region inside a button makes some
+    // screen readers interleave the count announcements with the button's
+    // label. The pressable overlays the announcer and covers the same area.
     return (
-      <AccessiblePressable
-        style={[styles.container, style]}
-        onPress={onCancel}
-        accessibilityRole="button"
-        accessibilityLabel="Cancel count-in"
-        accessibilityHint="Stops the count-in and returns to the track without playing"
-      >
+      <View style={[styles.container, style]}>
         {content}
-      </AccessiblePressable>
+        <AccessiblePressable
+          style={styles.cancelTarget}
+          onPress={onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel count-in"
+          accessibilityHint="Stops the count-in and returns to the track without playing"
+        />
+      </View>
     );
   }
 
@@ -76,6 +80,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  // Invisible full-bleed press target layered over the announcer so a tap
+  // anywhere cancels, while the live region stays outside the button.
+  cancelTarget: {
+    ...StyleSheet.absoluteFill,
   },
   backdrop: {
     ...StyleSheet.absoluteFill,

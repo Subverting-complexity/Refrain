@@ -43,8 +43,22 @@ function runTransaction<T>(
       new Promise<T>((resolve, reject) => {
         const tx = db.transaction(STORE, mode);
         const request = run(tx.objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
+        // A request can report success before the transaction commits, so
+        // resolving on `request.onsuccess` would surface success even when the
+        // commit later fails — for the large audio blobs stored here, a
+        // quota-exceeded abort at commit time is the likeliest failure, and it
+        // would leave the track's metadata written but its audio missing.
+        // Capture the result on success, but only resolve once the transaction
+        // actually commits (mirrors database.web.ts).
+        let result: T;
+        request.onsuccess = () => {
+          result = request.result;
+        };
         request.onerror = () => reject(request.error);
+        tx.oncomplete = () => resolve(result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () =>
+          reject(tx.error ?? new Error('IndexedDB transaction aborted'));
       }),
   );
 }
@@ -107,12 +121,4 @@ export function revokeObjectUrl(id: string): void {
     URL.revokeObjectURL(url);
     objectUrls.delete(id);
   }
-}
-
-/** Revoke and forget every cached object URL (e.g. on teardown). */
-export function revokeAllObjectUrls(): void {
-  for (const url of objectUrls.values()) {
-    URL.revokeObjectURL(url);
-  }
-  objectUrls.clear();
 }

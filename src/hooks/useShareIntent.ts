@@ -26,6 +26,13 @@ export function useShareIntent({
     onErrorRef.current = onError;
   });
 
+  // Records the initial URL once it has been handled. The mount effect runs
+  // twice under StrictMode (dev), and getInitialURL can resolve in a race in
+  // production, either of which could import the same shared file twice. This
+  // ref survives effect re-runs (it belongs to the component, not the effect),
+  // so a given initial URL is imported at most once.
+  const handledInitialUrlRef = useRef<string | null>(null);
+
   // System share sheet (Android ACTION_SEND, iOS share-extension target).
   // Safe to call unconditionally on every platform: expo-share-intent loads
   // its native module optionally and defaults `disabled` to true on web, so
@@ -106,7 +113,14 @@ export function useShareIntent({
     }
 
     Linking.getInitialURL().then((url) => {
-      if (url) handleUrl(url);
+      // Check-and-set synchronously so the second effect run's resolution
+      // (StrictMode or a production race) sees the URL already claimed and
+      // skips it. Subsequent foreground shares arrive via the 'url' event
+      // below, which is intentionally not guarded.
+      if (url && handledInitialUrlRef.current !== url) {
+        handledInitialUrlRef.current = url;
+        handleUrl(url);
+      }
     });
 
     const subscription = Linking.addEventListener('url', (event) => {

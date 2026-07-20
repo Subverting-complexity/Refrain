@@ -17,5 +17,10 @@ export function buildProfile(
 }
 
 export function compareProfiles(a: SegmentProfile, b: SegmentProfile): number {
-  return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+  // Tie-break equal timestamps by binary id comparison (not localeCompare) so
+  // the web sort order matches the native SQL `ORDER BY createdAt ASC, id ASC`
+  // (SQLite compares ids with binary collation).
+  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
 }

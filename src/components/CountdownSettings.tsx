@@ -1,4 +1,3 @@
-import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -103,7 +102,7 @@ export function CountdownSettings({
             options={REPEAT_OPTIONS}
             value={config.repeat}
             onChange={(repeat) => onConfigChange({ ...config, repeat })}
-            accessibilityLabelPrefix="Count in"
+            accessibilityLabelPrefix="Repeat"
           />
         </View>
       </View>
