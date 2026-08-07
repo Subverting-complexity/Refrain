@@ -1,0 +1,24 @@
+# Google Play Data Safety — canonical answers for Refrain
+#
+# Refrain collects and shares NO user data. Everything runs on-device with no
+# network requests, no accounts, and no analytics/ads/crash SDKs.
+#
+# IMPORTANT: Google's official Data Safety CSV has an exact, versioned column
+# schema that must come from YOUR console. Before importing:
+#   Play Console -> App content -> Data safety -> Export to CSV
+# That export gives the current header row. Fill the "Response value" column
+# using the answers below, then re-import (or POST via the applications.
+# dataSafety API). Importing OVERWRITES existing answers.
+#
+# The three top-level answers that resolve the whole form for Refrain:
+question,answer
+Does your app collect or share any of the required user data types?,No
+Is all of the user data collected by your app encrypted in transit?,Not applicable (no data collected)
+Does your app provide a way for users to request that their data is deleted?,Not applicable (no data collected)
+#
+# Because the first answer is "No", every per-data-type row (Location, Personal
+# info, Financial info, Messages, Photos/Videos, Audio files, Files/docs,
+# Contacts, App activity, Device IDs, etc.) is answered:
+#   Collected = FALSE, Shared = FALSE
+# Note: audio you import is read locally for playback only; it never leaves the
+# device, so it is NOT "collected" in the Data Safety sense.

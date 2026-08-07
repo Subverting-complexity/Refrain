@@ -1,0 +1,5 @@
+No account or login is required.
+
+To exercise every feature, import any local audio file (MP3, WAV, AAC, or M4A) from the device using the "Import Audio" button on the Library screen, open it, and set A/B markers on the waveform.
+
+All processing is on-device. The app makes no network requests and collects no data.

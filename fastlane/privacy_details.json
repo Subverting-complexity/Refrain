@@ -1,0 +1,10 @@
+{
+  "privacy_types": [
+    {
+      "privacy_type": "DATA_NOT_COLLECTED",
+      "identifier": "DATA_NOT_COLLECTED",
+      "purposes": [],
+      "data_protections": []
+    }
+  ]
+}
