@@ -1,0 +1,3 @@
+Refrain 1.0 — the first release.
+
+Import audio, set A–B loops right on the waveform, save reusable segments, skip precisely, use a count-in timer and bookmarks, and practice on repeat. Everything runs on your device — no account, no tracking.

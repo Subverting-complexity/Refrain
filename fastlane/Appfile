@@ -1,0 +1,16 @@
+# Refrain — fastlane Appfile
+# App identity is shared across platforms (same reverse-DNS id).
+
+app_identifier("com.subvertingcomplexity.refrain")
+
+for_platform :ios do
+  apple_id(ENV["APPLE_ID"] || "adrienne.bosch7@icloud.com")
+  team_id("JTUZQBUGVY") # Apple Developer team (from eas.json submit config)
+  # itc_team_id("...")  # Set only if your App Store Connect team id differs.
+end
+
+for_platform :android do
+  # Play service-account JSON. Path or env var; never commit the key itself.
+  json_key_file(ENV["SUPPLY_JSON_KEY"] || "pc-api-key.json")
+  package_name("com.subvertingcomplexity.refrain")
+end

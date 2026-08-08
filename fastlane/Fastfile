@@ -1,0 +1,81 @@
+# Refrain — fastlane lanes
+#
+# This project builds and submits its BINARIES with EAS (see eas.json). These
+# lanes handle the part EAS does not: the store *listing* — metadata, keywords,
+# screenshots, and the privacy/data-safety declarations. That is why every lane
+# skips the binary upload.
+#
+# Prerequisites (see fastlane/PUBLISHING.md for the full checklist):
+#   iOS      ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_CONTENT  (App Store Connect API key)
+#   Android  SUPPLY_JSON_KEY -> path to the Play service-account JSON
+#
+# Usage:
+#   bundle exec fastlane ios listing                 # push metadata + screenshots + privacy label
+#   bundle exec fastlane ios listing submit:true     # also submit the current build for review
+#   bundle exec fastlane android listing             # push Play listing metadata + screenshots
+#   bundle exec fastlane ios refresh_privacy_template # capture exact Apple privacy enums once
+
+APP_ID = "com.subvertingcomplexity.refrain"
+
+# ---------------------------------------------------------------------------
+platform :ios do
+  desc "Upload App Store listing: metadata, screenshots, and privacy nutrition label"
+  lane :listing do |options|
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_CONTENT"), # raw .p8 contents, incl. BEGIN/END lines
+    )
+
+    # Privacy "nutrition label". Refrain collects nothing -> DATA_NOT_COLLECTED.
+    upload_app_privacy_details_to_app_store(
+      api_key: api_key,
+      app_identifier: APP_ID,
+      json_path: "fastlane/privacy_details.json",
+    )
+
+    deliver(
+      api_key: api_key,
+      app_identifier: APP_ID,
+      skip_binary_upload: true,          # binary comes from EAS
+      skip_app_version_update: false,
+      submit_for_review: options[:submit] == true,
+      automatic_release: false,
+      force: true,                       # no interactive HTML preview
+      run_precheck_before_submit: true,
+      precheck_include_in_app_purchases: false,
+      overwrite_screenshots: true,
+    )
+  end
+
+  desc "One-time: fill the privacy questionnaire in App Store Connect, then run this to capture the exact enum JSON as a reusable template"
+  lane :refresh_privacy_template do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_CONTENT"),
+    )
+    download_app_privacy_details_from_app_store(
+      api_key: api_key,
+      app_identifier: APP_ID,
+      output_json_path: "fastlane/privacy_details.json",
+    )
+  end
+end
+
+# ---------------------------------------------------------------------------
+platform :android do
+  desc "Upload Google Play listing: metadata, screenshots, and feature graphic"
+  lane :listing do
+    upload_to_play_store(
+      package_name: APP_ID,
+      json_key: ENV["SUPPLY_JSON_KEY"] || "pc-api-key.json",
+      metadata_path: "fastlane/metadata/android",
+      track: "production",
+      skip_upload_aab: true,             # binary comes from EAS
+      skip_upload_apk: true,
+      skip_upload_changelogs: false,
+      validate_only: false,
+    )
+  end
+end
