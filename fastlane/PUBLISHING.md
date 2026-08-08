@@ -24,16 +24,16 @@ fastlane/
 
 ## What's automated vs. console-only
 
-| Area | Automated here | You do once in the console |
-| --- | --- | --- |
-| Listing text, keywords, notes | ✅ deliver / supply | — |
-| Screenshots + feature graphic | ✅ deliver / supply | — |
-| Privacy label (Apple) | ✅ `privacy_details.json` | (first time) fill once, then `refresh_privacy_template` |
-| Data Safety (Google) | ⚠️ answers in `data_safety.csv` | Export CSV for exact headers → import, or answer 3 questions in UI |
-| Build upload + submit | ✅ EAS (`eas submit`) | — |
-| Pricing & availability | ❌ | App Store Connect / Play Console |
-| Bank, tax, agreements | ❌ | one-time account setup |
-| Content rating (IARC) / age rating | ❌ | Play Console questionnaire; Apple age rating in ASC |
+| Area                               | Automated here                  | You do once in the console                                         |
+| ---------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
+| Listing text, keywords, notes      | ✅ deliver / supply             | —                                                                  |
+| Screenshots + feature graphic      | ✅ deliver / supply             | —                                                                  |
+| Privacy label (Apple)              | ✅ `privacy_details.json`       | (first time) fill once, then `refresh_privacy_template`            |
+| Data Safety (Google)               | ⚠️ answers in `data_safety.csv` | Export CSV for exact headers → import, or answer 3 questions in UI |
+| Build upload + submit              | ✅ EAS (`eas submit`)           | —                                                                  |
+| Pricing & availability             | ❌                              | App Store Connect / Play Console                                   |
+| Bank, tax, agreements              | ❌                              | one-time account setup                                             |
+| Content rating (IARC) / age rating | ❌                              | Play Console questionnaire; Apple age rating in ASC                |
 
 ## Before you run anything — fill these in
 
