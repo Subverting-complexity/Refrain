@@ -5,6 +5,7 @@ import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
+import { markerBounds } from '../utils/markerBounds';
 import { AccessiblePressable } from './AccessiblePressable';
 import { IconSquareButton } from './IconSquareButton';
 import { MarkerTimeSheet } from './MarkerTimeSheet';
@@ -204,6 +205,7 @@ export function MarkerControls({
           marker="A"
           initialMs={markerA}
           durationMs={durationMs}
+          {...markerBounds('A', markerA, markerB, durationMs)}
           onCommit={onEditA}
           onRemove={() => {
             setSheetTarget(null);
@@ -217,6 +219,7 @@ export function MarkerControls({
           marker="B"
           initialMs={markerB}
           durationMs={durationMs}
+          {...markerBounds('B', markerA, markerB, durationMs)}
           onCommit={onEditB}
           onRemove={() => {
             setSheetTarget(null);
