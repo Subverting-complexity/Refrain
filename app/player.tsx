@@ -66,7 +66,6 @@ export default function PlayerScreen() {
     volume,
     play,
     pause,
-    stop,
     seekTo,
     skipBy,
     setMarkerA,
@@ -386,14 +385,6 @@ export default function PlayerScreen() {
     }
   };
 
-  // Stop: cancel any pending count-in, then halt playback, rewind, and release
-  // the audio session back to other apps. Gives the user an explicit "done"
-  // action rather than relying on leaving the screen to stop the track.
-  const handleStop = () => {
-    if (isCounting) cancelCountdown();
-    void stop();
-  };
-
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
@@ -529,7 +520,6 @@ export default function PlayerScreen() {
               onPause={isCounting ? cancelCountdown : pause}
               onSkipBack={() => skipBy(-skipMs)}
               onSkipForward={() => skipBy(skipMs)}
-              onStop={handleStop}
               style={styles.transport}
             />
           </View>
