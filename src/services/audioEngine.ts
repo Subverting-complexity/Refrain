@@ -13,6 +13,8 @@ import * as settingsStore from './settingsStore';
 import * as webAudioGain from './webAudioGain';
 import * as webMediaSession from './webMediaSession';
 import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
+import { errorMessage } from '../utils/errorMessage';
+import { settle } from '../utils/settle';
 
 export type PlaybackListener = (state: PlaybackState) => void;
 
@@ -106,16 +108,30 @@ function idleState(): PlaybackState {
 
 let currentState: PlaybackState = idleState();
 
-function notify(state: PlaybackState): void {
-  for (const cb of listeners) {
+/**
+ * Deliver a state to one listener without letting its failure out. Most
+ * notifications originate inside expo-audio's native `playbackStatusUpdate`
+ * callback, and the initial replay happens inside a subscriber's `useEffect` —
+ * neither is a place a consumer's throw should surface.
+ */
+function emit(cb: PlaybackListener, state: PlaybackState): void {
+  try {
     cb(state);
+  } catch {
+    // A subscriber's failure is its own; playback carries on.
   }
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === 'string' && err) return err;
-  return 'Unknown error';
+function notify(state: PlaybackState): void {
+  // Iterate a snapshot, and isolate each listener, so one that throws (a
+  // consumer setting state after unmount, a caller bug) can neither cut the
+  // fan-out short — leaving later subscribers stuck on a stale transport — nor
+  // escape into the native event emitter. The snapshot also makes subscribing
+  // or unsubscribing from inside a callback safe: either takes effect on the
+  // next notify rather than mutating the set mid-pass.
+  for (const cb of [...listeners]) {
+    emit(cb, state);
+  }
 }
 
 function parseStatus(status: AudioStatus): PlaybackState {
@@ -771,23 +787,19 @@ export async function loadPersistedVolume(): Promise<void> {
 /**
  * Write the current marker set for the loaded track to the store. Best-effort
  * and platform-agnostic: the native store is synchronous and the web store
- * returns a promise, so the result is wrapped in `Promise.resolve` and its
- * rejection swallowed — a failed persist must never surface as a playback
- * error. No-op when no track id is associated with the load.
+ * returns a promise, so the call goes through `settle` and its rejection is
+ * swallowed — a failed persist must never surface as a playback error. No-op
+ * when no track id is associated with the load.
  */
 function writeActiveMarkers(): void {
   const trackId = currentTrackId;
   if (trackId == null) return;
   const snapshot: ActiveMarkers = { markerA, markerB, loopEnabled };
-  try {
-    void Promise.resolve(markerStore.setActiveMarkers(trackId, snapshot)).catch(
-      () => {
-        // Persistence is best-effort; swallow async (web) write failures.
-      },
-    );
-  } catch {
-    // Swallow synchronous (native) write failures too.
-  }
+  void settle(() => markerStore.setActiveMarkers(trackId, snapshot)).catch(
+    () => {
+      // Persistence is best-effort; swallow write failures on both platforms.
+    },
+  );
 }
 
 /**
@@ -827,7 +839,7 @@ function flushMarkerSave(): void {
  */
 async function restoreActiveMarkers(trackId: string): Promise<void> {
   try {
-    const saved = await Promise.resolve(markerStore.getActiveMarkers(trackId));
+    const saved = await settle(() => markerStore.getActiveMarkers(trackId));
     if (!saved) return;
     markerA = saved.markerA;
     markerB = saved.markerB;
@@ -895,7 +907,10 @@ export function setLoopEnabled(enabled: boolean): void {
 
 export function subscribe(cb: PlaybackListener): () => void {
   listeners.add(cb);
-  cb(currentState);
+  // Replay the current state through the same isolation as a broadcast: this
+  // runs inside the subscriber's mount effect, where a throw would fail the
+  // component rather than just its own state sync.
+  emit(cb, currentState);
   return () => {
     listeners.delete(cb);
   };

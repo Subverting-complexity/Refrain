@@ -5,6 +5,7 @@ import { useShareIntent as useExpoShareIntent } from 'expo-share-intent';
 
 import { importFromUri, isSupportedFilename } from '../services/fileImport';
 import { Track } from '../types';
+import { errorMessage } from '../utils/errorMessage';
 import { extractFilename } from '../utils/extractFilename';
 
 interface UseShareIntentOptions {
@@ -54,7 +55,7 @@ export function useShareIntent({
     // Linking URL is delivered (and handled) exactly once.
     resetShareIntent();
 
-    (async () => {
+    void (async () => {
       for (const file of files) {
         const filename = file.fileName || extractFilename(file.path);
 
@@ -63,14 +64,24 @@ export function useShareIntent({
           continue;
         }
 
-        const result = await importFromUri(file.path, filename);
-        if (result.success) {
-          onTrackImportedRef.current(result.track);
-        } else {
-          onErrorRef.current?.(result.message);
+        // `importFromUri` resolves to an outcome for the failures it expects,
+        // but it can still throw outright — the native path constructs an
+        // expo-file-system `File` and reads `.exists` before its own try, so a
+        // malformed shared path escapes. Catch per file so one bad share is
+        // reported through onError instead of becoming an unhandled rejection,
+        // and so it does not abort the files queued behind it.
+        try {
+          const result = await importFromUri(file.path, filename);
+          if (result.success) {
+            onTrackImportedRef.current(result.track);
+          } else {
+            onErrorRef.current?.(result.message);
+          }
+        } catch (error) {
+          onErrorRef.current?.(errorMessage(error));
         }
       }
-    })();
+    })().catch(() => undefined);
   }, [hasShareIntent, shareIntent, resetShareIntent]);
 
   useEffect(() => {
@@ -104,27 +115,40 @@ export function useShareIntent({
         return;
       }
 
-      const result = await importFromUri(url, filename);
-      if (result.success) {
-        onTrackImportedRef.current(result.track);
-      } else {
-        onErrorRef.current?.(result.message);
+      // Same reasoning as the share-intent path above: importFromUri can throw
+      // on a malformed file/content URI, and both call sites below are
+      // fire-and-forget, so an escaping rejection would go unhandled instead of
+      // reaching the caller's onError.
+      try {
+        const result = await importFromUri(url, filename);
+        if (result.success) {
+          onTrackImportedRef.current(result.track);
+        } else {
+          onErrorRef.current?.(result.message);
+        }
+      } catch (error) {
+        onErrorRef.current?.(errorMessage(error));
       }
     }
 
-    Linking.getInitialURL().then((url) => {
-      // Check-and-set synchronously so the second effect run's resolution
-      // (StrictMode or a production race) sees the URL already claimed and
-      // skips it. Subsequent foreground shares arrive via the 'url' event
-      // below, which is intentionally not guarded.
-      if (url && handledInitialUrlRef.current !== url) {
-        handledInitialUrlRef.current = url;
-        handleUrl(url);
-      }
-    });
+    Linking.getInitialURL()
+      .then((url) => {
+        // Check-and-set synchronously so the second effect run's resolution
+        // (StrictMode or a production race) sees the URL already claimed and
+        // skips it. Subsequent foreground shares arrive via the 'url' event
+        // below, which is intentionally not guarded.
+        if (url && handledInitialUrlRef.current !== url) {
+          handledInitialUrlRef.current = url;
+          void handleUrl(url);
+        }
+      })
+      .catch(() => {
+        // No initial URL is recoverable — the app simply launched without a
+        // share. Nothing to report.
+      });
 
     const subscription = Linking.addEventListener('url', (event) => {
-      handleUrl(event.url);
+      void handleUrl(event.url);
     });
 
     return () => subscription.remove();

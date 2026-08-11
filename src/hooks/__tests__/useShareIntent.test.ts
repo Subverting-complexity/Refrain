@@ -418,3 +418,100 @@ describe('useShareIntent (system share sheet flow)', () => {
     expect(mockImportFromUri).not.toHaveBeenCalled();
   });
 });
+
+// `importFromUri` resolves to an outcome for the failures it anticipates, but
+// the native path builds an expo-file-system `File` and reads `.exists` before
+// its own try/catch, so a malformed shared path throws outright. Every call
+// site here is fire-and-forget, so an escaping rejection would be unhandled
+// rather than reported through onError.
+describe('useShareIntent (import throws rather than resolving)', () => {
+  it('reports a throwing share-sheet import through onError', async () => {
+    mockImportFromUri.mockRejectedValue(new Error('Invalid file URI'));
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderHook();
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalledWith('Invalid file URI');
+    expect(onTrackImported).not.toHaveBeenCalled();
+  });
+
+  it('keeps importing the remaining files after one throws', async () => {
+    mockImportFromUri
+      .mockRejectedValueOnce(new Error('Invalid file URI'))
+      .mockResolvedValueOnce({ success: true, track });
+    mockShareState = {
+      hasShareIntent: true,
+      files: [
+        shareFile({ path: 'file:///shared/bad.mp3', fileName: 'bad.mp3' }),
+        shareFile({ path: 'file:///shared/good.mp3', fileName: 'good.mp3' }),
+      ],
+      error: null,
+    };
+
+    await renderHook();
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalledWith('Invalid file URI');
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'file:///shared/good.mp3',
+      'good.mp3',
+    );
+    expect(onTrackImported).toHaveBeenCalledWith(track);
+  });
+
+  it('reports a throwing initial-URL import through onError', async () => {
+    mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
+    mockImportFromUri.mockRejectedValue(new Error('Invalid file URI'));
+
+    await renderHook();
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalledWith('Invalid file URI');
+    expect(onTrackImported).not.toHaveBeenCalled();
+  });
+
+  it('reports a throwing url-event import through onError', async () => {
+    mockImportFromUri.mockRejectedValue(new Error('Invalid file URI'));
+
+    await renderHook();
+    const listener = mockAddEventListener.mock.calls[0][1];
+    await act(async () => {
+      listener({ url: 'content://downloads/song.mp3' });
+    });
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalledWith('Invalid file URI');
+    expect(onTrackImported).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic message for a non-Error throw', async () => {
+    mockImportFromUri.mockRejectedValue({ code: 'EUNKNOWN' });
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderHook();
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalledWith('Unknown error');
+  });
+
+  it('survives getInitialURL itself rejecting', async () => {
+    mockGetInitialURL.mockRejectedValue(new Error('Linking unavailable'));
+
+    await renderHook();
+    await flushMicrotasks();
+
+    // Nothing was shared, so there is nothing to report — but the rejection
+    // must not escape as an unhandled promise rejection either.
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+});

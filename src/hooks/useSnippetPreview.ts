@@ -33,7 +33,14 @@ export function useSnippetPreview() {
 
   const setSnippetPreviewEnabled = useCallback((enabled: boolean) => {
     setEnabled(enabled);
-    persistSnippetPreviewEnabled(enabled);
+    try {
+      persistSnippetPreviewEnabled(enabled);
+    } catch {
+      // Persistence is best-effort: a failed write must not break playback.
+      // Matches useSkipInterval, which guards the identical settingsStore
+      // write — unguarded, a storage throw here escapes into the toggle's
+      // press handler (#186). The in-memory state above is already updated.
+    }
   }, []);
 
   return { snippetPreviewEnabled, setSnippetPreviewEnabled };

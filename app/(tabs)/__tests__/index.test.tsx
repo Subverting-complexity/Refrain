@@ -44,10 +44,11 @@ jest.mock('@/src/hooks/useTheme', () => ({
 jest.mock('expo-router', () => {
   const ReactLocal = require('react');
   return {
-    useFocusEffect: (cb: () => void) => {
-      ReactLocal.useEffect(() => {
-        cb();
-      }, [cb]);
+    // Return the callback's result so its cleanup runs on blur/unmount, as
+    // the real useFocusEffect does — the screen relies on it to cancel an
+    // in-flight library load.
+    useFocusEffect: (cb: () => void | (() => void)) => {
+      ReactLocal.useEffect(cb, [cb]);
     },
     useRouter: () => ({ push: jest.fn() }),
   };
@@ -141,6 +142,28 @@ describe('LibraryScreen load/refresh failure announcements', () => {
 
     expect(announceSpy).not.toHaveBeenCalledWith('Failed to load library');
     act(() => renderer.unmount());
+  });
+
+  it('does not report a load failure that lands after the screen has blurred', async () => {
+    // The focus effect cancels on blur: refocusing starts a fresh load, so a
+    // slow earlier one settling afterwards must neither clobber the newer
+    // list nor announce into whatever screen the user is now on.
+    let rejectLoad!: (error: Error) => void;
+    mockLoadTracks.mockReturnValueOnce(
+      new Promise<Track[]>((_resolve, reject) => {
+        rejectLoad = reject;
+      }),
+    );
+
+    const renderer = await renderScreen();
+    act(() => renderer.unmount());
+
+    await act(async () => {
+      rejectLoad(new Error('db read failed'));
+      await Promise.resolve();
+    });
+
+    expect(announceSpy).not.toHaveBeenCalledWith('Failed to load library');
   });
 
   it('announces a failure when pull-to-refresh rejects', async () => {

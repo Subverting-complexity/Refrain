@@ -8,6 +8,7 @@ import {
   updateProfile,
 } from '../services/markerStore';
 import { SegmentProfile, SegmentProfileInput } from '../types';
+import { settle } from '../utils/settle';
 
 /** The region fields overwritten when saving edited markers back. */
 export type SegmentRegion = Pick<
@@ -37,7 +38,7 @@ export interface UseSegmentProfiles {
 /**
  * Owns the saved segment-profile list and its CRUD for one track, hiding the
  * native/web split in `markerStore`: native is synchronous, web returns
- * Promises, so every call is wrapped in `Promise.resolve` and the result is
+ * Promises, so every call goes through {@link settle} and the result is
  * applied once it settles. All writes refresh the list. Persistence is
  * best-effort — a failed read or write leaves the last good list in place
  * rather than throwing into the UI.
@@ -62,13 +63,9 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
       apply([]);
       return;
     }
-    try {
-      void Promise.resolve(listProfiles(trackId))
-        .then(apply)
-        .catch(() => apply([]));
-    } catch {
-      apply([]);
-    }
+    void settle(() => listProfiles(trackId))
+      .then(apply)
+      .catch(() => apply([]));
   }, [trackId, apply]);
 
   useEffect(() => {
@@ -79,7 +76,7 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     async (input: SegmentProfileInput): Promise<SegmentProfile | null> => {
       if (!trackId) return null;
       try {
-        const profile = await Promise.resolve(saveProfile(trackId, input));
+        const profile = await settle(() => saveProfile(trackId, input));
         refresh();
         return profile;
       } catch {
@@ -91,39 +88,27 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
 
   const update = useCallback(
     (profileId: string, region: SegmentRegion) => {
-      try {
-        void Promise.resolve(updateProfile(profileId, region))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
+      void settle(() => updateProfile(profileId, region))
+        .then(refresh)
+        .catch(() => {});
     },
     [refresh],
   );
 
   const rename = useCallback(
     (profileId: string, name: string) => {
-      try {
-        void Promise.resolve(renameProfile(profileId, name))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
+      void settle(() => renameProfile(profileId, name))
+        .then(refresh)
+        .catch(() => {});
     },
     [refresh],
   );
 
   const remove = useCallback(
     (profileId: string) => {
-      try {
-        void Promise.resolve(deleteProfile(profileId))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
+      void settle(() => deleteProfile(profileId))
+        .then(refresh)
+        .catch(() => {});
     },
     [refresh],
   );
