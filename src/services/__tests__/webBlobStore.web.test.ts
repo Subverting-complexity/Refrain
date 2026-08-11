@@ -133,6 +133,37 @@ describe('getObjectUrl', () => {
     expect(first).toBe(second);
     expect(created).toHaveLength(1);
   });
+
+  it('creates one URL for concurrent calls on the same id', async () => {
+    const store = load();
+    await store.putBlob('id-1', makeBlob());
+
+    // Two overlapping library loads (navigate away and straight back) both
+    // resolve the same track. Without in-flight de-duplication each creates
+    // its own URL and the first is dropped from the cache un-revoked,
+    // pinning the audio blob in memory for the rest of the session.
+    const [a, b] = await Promise.all([
+      store.getObjectUrl('id-1'),
+      store.getObjectUrl('id-1'),
+    ]);
+
+    expect(a).toBe(b);
+    expect(created).toHaveLength(1);
+    expect(revoked).toEqual([]);
+  });
+
+  it('does not cache a URL for a read that was revoked mid-flight', async () => {
+    const store = load();
+    await store.putBlob('id-1', makeBlob());
+
+    const inFlight = store.getObjectUrl('id-1');
+    // The track is deleted while the blob read is still pending.
+    store.revokeObjectUrl('id-1');
+    expect(await inFlight).toBeNull();
+
+    // Whatever URL that read produced was released, not cached.
+    expect(revoked).toEqual(created);
+  });
 });
 
 describe('revokeObjectUrl', () => {

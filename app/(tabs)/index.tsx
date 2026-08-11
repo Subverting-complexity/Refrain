@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -34,45 +34,70 @@ export default function LibraryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { toast, showToast, hideToast } = useToast();
 
+  // Every library read is stamped with a token and applied only while that
+  // token is still current. `loadTracks` is fully asynchronous on web
+  // (IndexedDB, plus a blob-URL resolve per track), so a read can easily land
+  // after the list has moved on. A blur-scoped flag covers refocusing, but not
+  // the two cases where the list changes *during* a single focus:
+  //
+  //   - an import or delete made while a read is in flight — the read predates
+  //     the change, so applying it drops the new track (or resurrects the
+  //     deleted one) until the next refresh;
+  //   - pull-to-refresh overlapping the focus read, where whichever resolves
+  //     last wins regardless of which started last.
+  //
+  // Bumping the token on every read and every mutation makes any superseded
+  // read a no-op, which also subsumes the blur/unmount case.
+  const loadToken = useRef(0);
+  const invalidateLoads = useCallback(() => {
+    loadToken.current += 1;
+    return loadToken.current;
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      // Ignore a load that resolves after the screen has blurred: refocusing
-      // starts a fresh load, and a slow earlier one landing afterwards would
-      // clobber the newer list (and any import made in between) with its
-      // stale snapshot.
-      let cancelled = false;
+      const token = invalidateLoads();
       loadTracks()
         .then((loaded) => {
-          if (!cancelled) setTracks(loaded);
+          if (loadToken.current !== token) return;
+          setTracks(loaded);
         })
         .catch(() => {
-          if (!cancelled) showToast('Failed to load library', 'error');
+          if (loadToken.current !== token) return;
+          showToast('Failed to load library', 'error');
         });
       return () => {
-        cancelled = true;
+        loadToken.current += 1;
       };
-    }, [showToast]),
+    }, [showToast, invalidateLoads]),
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    const token = invalidateLoads();
     try {
       const loaded = await loadTracks();
+      if (loadToken.current !== token) return;
       setTracks(loaded);
       // Announced rather than toasted: the RefreshControl spinner is the
       // sighted user's confirmation, so a banner here would be redundant.
       AccessibilityInfo.announceForAccessibility('Library refreshed');
     } catch {
+      if (loadToken.current !== token) return;
       showToast('Failed to refresh library', 'error');
     } finally {
       setRefreshing(false);
     }
-  }, [showToast]);
+  }, [showToast, invalidateLoads]);
 
   const addTrack = useCallback(
     async (track: Track): Promise<boolean> => {
       try {
         await insertTrack(track);
+        // Retire any in-flight read before the optimistic insert, so a read
+        // that started before this track existed cannot resolve afterwards
+        // and drop it from the list.
+        invalidateLoads();
         setTracks((prev) => [track, ...prev]);
         return true;
       } catch (error) {
@@ -84,20 +109,23 @@ export default function LibraryScreen() {
         return false;
       }
     },
-    [showToast],
+    [showToast, invalidateLoads],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
       try {
         await deleteTrack(id);
+        // As in addTrack: retire in-flight reads so a stale one cannot
+        // resurrect the deleted track.
+        invalidateLoads();
         setTracks((prev) => prev.filter((t) => t.id !== id));
         showToast('Track deleted', 'success');
       } catch {
         showToast('Failed to delete track', 'error');
       }
     },
-    [showToast],
+    [showToast, invalidateLoads],
   );
 
   const handleShareImport = useCallback(
