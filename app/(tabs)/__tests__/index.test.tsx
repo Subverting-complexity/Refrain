@@ -41,6 +41,7 @@ jest.mock('@/src/hooks/useTheme', () => ({
   }),
 }));
 
+const mockPush = jest.fn();
 jest.mock('expo-router', () => {
   const ReactLocal = require('react');
   return {
@@ -50,7 +51,7 @@ jest.mock('expo-router', () => {
     useFocusEffect: (cb: () => void | (() => void)) => {
       ReactLocal.useEffect(cb, [cb]);
     },
-    useRouter: () => ({ push: jest.fn() }),
+    useRouter: () => ({ push: mockPush }),
   };
 });
 
@@ -74,13 +75,16 @@ jest.mock('@/src/components/TrackListItem', () => {
   return {
     TrackListItem: ({
       track,
+      onPress,
       onDelete,
     }: {
       track: { id: string };
+      onPress: (track: unknown) => void;
       onDelete: (id: string) => void;
     }) =>
       ReactLocal.createElement(View, {
         testID: 'track-item',
+        onPress: () => onPress(track),
         onDelete: () => onDelete(track.id),
       }),
   };
@@ -398,6 +402,43 @@ describe('LibraryScreen visible toast feedback', () => {
     });
 
     expect(toastLabels(renderer)).toContain('Track deleted');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('LibraryScreen navigation', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // The uri is deliberately left out of the route: on web it is a `blob:`
+  // object URL that dies with the document, so a route carrying one broke on
+  // reload. The player re-resolves it from the track id instead.
+  it('navigates to the player by track id, without the volatile uri', async () => {
+    mockLoadTracks.mockResolvedValueOnce([sampleTrack]);
+    const renderer = await renderScreen();
+
+    const trackItem = renderer.root.findByProps({ testID: 'track-item' });
+    await act(async () => {
+      trackItem.props.onPress();
+    });
+
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/player',
+      params: { filename: 'song.mp3', trackId: 'track-1' },
+    });
+    const [{ params }] = mockPush.mock.calls[0] as [
+      { params: Record<string, unknown> },
+    ];
+    expect(params).not.toHaveProperty('uri');
+
     act(() => renderer.unmount());
   });
 });

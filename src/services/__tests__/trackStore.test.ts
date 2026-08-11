@@ -205,6 +205,37 @@ describe('loadTracks', () => {
   });
 });
 
+describe('getTrack', () => {
+  it('returns the track for an id with its uri resolved to an absolute path', async () => {
+    jest.resetModules();
+
+    mockGetFirstSync.mockReturnValue({
+      ...sampleTrack,
+      uri: 'tracks/track-1.mp3',
+      durationEstimated: 1,
+    });
+
+    const { getTrack } = require('../trackStore');
+    const track = await getTrack('track-1');
+
+    expect(track).toEqual(sampleTrack);
+    expect(track.uri).toBe('file:///data/tracks/track-1.mp3');
+    expect(mockGetFirstSync).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE id = ?'),
+      'track-1',
+    );
+  });
+
+  it('returns null when the id is not in the library', async () => {
+    jest.resetModules();
+
+    mockGetFirstSync.mockReturnValue(undefined);
+
+    const { getTrack } = require('../trackStore');
+    await expect(getTrack('missing')).resolves.toBeNull();
+  });
+});
+
 describe('insertTrack', () => {
   it('inserts a track into the database with a relative URI and durationEstimated as integer', () => {
     jest.resetModules();

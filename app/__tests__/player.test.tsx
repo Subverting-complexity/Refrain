@@ -60,8 +60,14 @@ jest.mock('react-native-gesture-handler', () => {
   };
 });
 
+// Captures what the screen actually hands the engine, so a test can assert it
+// loads the store-resolved uri rather than the one sitting in the route.
+let mockUseAudioPlayerArgs: unknown[] = [];
 jest.mock('@/src/hooks/useAudioPlayer', () => ({
-  useAudioPlayer: () => mockAudioPlayerState,
+  useAudioPlayer: (...args: unknown[]) => {
+    mockUseAudioPlayerArgs = args;
+    return mockAudioPlayerState;
+  },
 }));
 
 jest.mock('@/src/hooks/useSnippetPreview', () => ({
@@ -71,8 +77,13 @@ jest.mock('@/src/hooks/useSnippetPreview', () => ({
   }),
 }));
 
+let mockWaveformPeaks: number[] = [0.4, 0.6, 0.8, 0.5, 0.3];
+let mockWaveformLoading = false;
 jest.mock('@/src/hooks/useWaveformData', () => ({
-  useWaveformData: () => ({ peaks: [0.4, 0.6, 0.8, 0.5, 0.3] }),
+  useWaveformData: () => ({
+    peaks: mockWaveformPeaks,
+    isLoading: mockWaveformLoading,
+  }),
 }));
 
 jest.mock('@/src/hooks/useSkipInterval', () => ({
@@ -206,8 +217,12 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
+// The player re-resolves its playable uri from the track id on mount, so the
+// store mock has to answer `getTrack` as well as the duration write.
+const mockGetTrack = jest.fn();
 jest.mock('@/src/services/trackStore', () => ({
   updateTrackDuration: jest.fn(),
+  getTrack: (id: string) => mockGetTrack(id),
 }));
 
 // Stub the non-essential children so the test focuses on marker feedback.
@@ -271,13 +286,33 @@ beforeEach(() => {
   mockGuardProps = null;
   mockBeforeRemoveCb = null;
   mockParams.trackId = 't1';
+  mockParams.uri = 'file:///test.mp3';
+  mockUseAudioPlayerArgs = [];
+  mockWaveformPeaks = [0.4, 0.6, 0.8, 0.5, 0.3];
+  mockWaveformLoading = false;
   mockSave.mockResolvedValue(null);
+  mockGetTrack.mockResolvedValue({
+    id: 't1',
+    filename: 'test.mp3',
+    uri: 'file:///test.mp3',
+    format: 'mp3',
+    durationMs: 10000,
+    durationEstimated: false,
+    fileSizeBytes: 100,
+    importedAt: 1,
+  });
 });
 
-afterEach(() => {
+afterEach(async () => {
   act(() => {
     jest.runAllTimers();
   });
+  // Trees mounted by a test are left mounted, and the screen's track-source
+  // lookup settles on a microtask. Flush those here so a previous test's
+  // pending resolution re-renders its own tree inside its own teardown,
+  // instead of landing mid-way through the next test and clobbering the
+  // module-level props captured by the child mocks.
+  await act(async () => {});
   jest.useRealTimers();
 });
 
@@ -780,5 +815,98 @@ describe('PlayerScreen duration persistence', () => {
 
     expect(mockUpdateTrackDuration).toHaveBeenCalledWith('t2', 10000);
     expect(mockUpdateTrackDuration).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A uri captured at navigation time goes stale: on web `Track.uri` is a
+// `blob:` object URL that dies with the document, so reloading the player
+// route left it pointing at nothing and playback failed with a bare media
+// error. The screen re-resolves from the track id instead.
+describe('PlayerScreen track source', () => {
+  const resolved = {
+    id: 't1',
+    filename: 'resolved.mp3',
+    uri: 'blob:freshly-minted',
+    format: 'mp3',
+    durationMs: 10000,
+    durationEstimated: false,
+    fileSizeBytes: 100,
+    importedAt: 1,
+  };
+
+  it('loads the uri resolved from the store, not the one in the route', async () => {
+    mockGetTrack.mockResolvedValue(resolved);
+
+    await act(async () => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockGetTrack).toHaveBeenCalledWith('t1');
+    expect(mockUseAudioPlayerArgs).toEqual([
+      'blob:freshly-minted',
+      't1',
+      'resolved.mp3',
+    ]);
+  });
+
+  it('titles the header from the resolved filename', async () => {
+    mockGetTrack.mockResolvedValue(resolved);
+
+    await act(async () => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockSetOptions).toHaveBeenLastCalledWith({ title: 'resolved.mp3' });
+  });
+
+  it('tells the user when the track is gone from the library', async () => {
+    mockGetTrack.mockResolvedValue(null);
+    mockParams.uri = '';
+
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<PlayerScreen />);
+    });
+
+    const json = JSON.stringify(tree.toJSON());
+    expect(json).toContain('This track is no longer in your library');
+    // The generic playback-error banner must not also fire — one clear
+    // explanation, not two competing ones.
+    expect(json).not.toContain('Unable to load this track');
+  });
+
+  it('falls back to a uri supplied by the route when the id is unknown', async () => {
+    mockGetTrack.mockResolvedValue(null);
+
+    await act(async () => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockUseAudioPlayerArgs[0]).toBe('file:///test.mp3');
+  });
+
+  it('shows a loading affordance while the store lookup is in flight', async () => {
+    let settle!: (value: unknown) => void;
+    mockGetTrack.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    mockWaveformPeaks = [];
+
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<PlayerScreen />);
+    });
+
+    expect(
+      tree.root.findAll(
+        (node) => node.props.accessibilityLabel === 'Loading waveform',
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+
+    await act(async () => {
+      settle(null);
+    });
   });
 });

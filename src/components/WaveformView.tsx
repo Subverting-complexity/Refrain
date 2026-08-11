@@ -431,8 +431,8 @@ export function WaveformView({
       elements.push(
         <View
           key="ab-region"
-          pointerEvents="none"
           style={[
+            styles.noPointerEvents,
             styles.markerRegion,
             {
               left: `${leftPct}%`,
@@ -456,8 +456,8 @@ export function WaveformView({
       elements.push(
         <View
           key={`${key}-line`}
-          pointerEvents="none"
           style={[
+            styles.noPointerEvents,
             isStart ? styles.markerLineStart : styles.markerLineEnd,
             { left: `${leftPct}%`, backgroundColor: color },
           ]}
@@ -470,8 +470,8 @@ export function WaveformView({
       elements.push(
         <View
           key={`${key}-dot`}
-          pointerEvents="none"
           style={[
+            styles.noPointerEvents,
             isStart ? styles.markerDotStart : styles.markerDotEnd,
             { left: `${leftPct}%`, backgroundColor: color },
           ]}
@@ -480,8 +480,8 @@ export function WaveformView({
       elements.push(
         <View
           key={`${key}-handle`}
-          pointerEvents="none"
           style={[
+            styles.noPointerEvents,
             styles.markerHandle,
             isStart ? styles.markerHandleStart : styles.markerHandleEnd,
             { left: `${leftPct}%`, backgroundColor: color },
@@ -587,8 +587,8 @@ export function WaveformView({
             {markerElements}
 
             <View
-              pointerEvents="none"
               style={[
+                styles.noPointerEvents,
                 styles.cursor,
                 {
                   left: `${progress * 100}%`,
@@ -604,6 +604,12 @@ export function WaveformView({
 }
 
 const styles = StyleSheet.create({
+  // The decorative overlays (region tint, marker lines/dots/flags, cursor) must
+  // not swallow touches meant for the pan gesture. Carried as a style rather
+  // than the `pointerEvents` prop, which React Native Web has deprecated.
+  noPointerEvents: {
+    pointerEvents: 'none',
+  },
   container: {
     width: '100%',
     borderRadius: radii.lg,

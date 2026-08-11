@@ -31,7 +31,7 @@ export function Toast({
   const iconName = isError ? 'alert-circle' : 'checkmark-circle';
 
   return (
-    <View style={[styles.container, style]} pointerEvents="box-none">
+    <View style={[styles.container, style]}>
       <AccessiblePressable
         accessibilityRole="alert"
         accessibilityLabel={message}
@@ -74,6 +74,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
     zIndex: 20,
+    // The toast overlays the whole screen, so only the banner itself may take
+    // touches — the empty area above it must stay transparent to the controls
+    // underneath. Carried as a style rather than the `pointerEvents` prop,
+    // which React Native Web has deprecated.
+    pointerEvents: 'box-none',
   },
   banner: {
     flexDirection: 'row',
