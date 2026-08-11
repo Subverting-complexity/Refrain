@@ -1,7 +1,7 @@
 import { StyleSheet, Text } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
 
 export type DialogButtonVariant = 'primary' | 'default' | 'danger';
@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
+    borderRadius: radii.sm,
     paddingVertical: spacing.md,
   },
 });

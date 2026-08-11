@@ -51,11 +51,16 @@ export function ToggleSwitch({
   // once (like a ref) while keeping `progress` a plain value, not a ref.
   const [progress] = useState(() => new Animated.Value(value ? 1 : 0));
   useEffect(() => {
-    Animated.timing(progress, {
+    const animation = Animated.timing(progress, {
       toValue: value ? 1 : 0,
       duration: 160,
       useNativeDriver: false,
-    }).start();
+    });
+    animation.start();
+    // Without this stop, an in-flight animation keeps a frame scheduled after
+    // unmount — in Jest that frame fires after the environment is torn down
+    // and crashes the worker.
+    return () => animation.stop();
   }, [value, progress]);
 
   const trackColor = progress.interpolate({
@@ -105,7 +110,7 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    // A soft lift so the knob reads as floating above the track.
+    // Platform-standard shadow base — always black regardless of theme.
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.18,

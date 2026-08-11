@@ -1,40 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
-
-import { hydrateSettings } from '../services/settingsStore';
 import {
   getSnippetPreviewEnabled,
   setSnippetPreviewEnabled as persistSnippetPreviewEnabled,
 } from '../services/snippetPreviewStore';
+import { usePersistedSetting } from './usePersistedSetting';
+
+const SNIPPET_PREVIEW_SETTING = {
+  read: getSnippetPreviewEnabled,
+  write: persistSnippetPreviewEnabled,
+  // Mirrors the store's default so a storage failure lands on the same value an
+  // unset preference would.
+  fallback: true,
+};
 
 /**
- * React state for the snippet-preview preference, seeded once from the
- * persisted value (synchronous on every platform: native reads SQLite, web
- * reads the in-memory cache). Updating it both re-renders consumers and
- * persists the new value through the store.
+ * React state for the snippet-preview preference: while a marker is dragged,
+ * the engine plays a short rolling window around it. Seeded from storage and
+ * kept there by {@link usePersistedSetting}, which owns the cold-load
+ * re-read (#163) and the best-effort failure handling (#186).
  */
 export function useSnippetPreview() {
-  const [snippetPreviewEnabled, setEnabled] = useState<boolean>(
-    getSnippetPreviewEnabled,
+  const [snippetPreviewEnabled, setSnippetPreviewEnabled] = usePersistedSetting(
+    SNIPPET_PREVIEW_SETTING,
   );
-
-  // On a cold web load the cache may still be empty when the lazy seed above
-  // runs, so a persisted-off value reads as the default-on (#163). Re-read
-  // once hydration resolves to reapply it. No-op on native (hydration is a
-  // resolved no-op and the seed was already correct).
-  useEffect(() => {
-    let cancelled = false;
-    void hydrateSettings().then(() => {
-      if (!cancelled) setEnabled(getSnippetPreviewEnabled());
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setSnippetPreviewEnabled = useCallback((enabled: boolean) => {
-    setEnabled(enabled);
-    persistSnippetPreviewEnabled(enabled);
-  }, []);
 
   return { snippetPreviewEnabled, setSnippetPreviewEnabled };
 }

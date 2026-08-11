@@ -8,6 +8,7 @@ import {
   updateProfile,
 } from '../services/markerStore';
 import { SegmentProfile, SegmentProfileInput } from '../types';
+import { settle } from '../utils/settle';
 
 /** The region fields overwritten when saving edited markers back. */
 export type SegmentRegion = Pick<
@@ -37,7 +38,7 @@ export interface UseSegmentProfiles {
 /**
  * Owns the saved segment-profile list and its CRUD for one track, hiding the
  * native/web split in `markerStore`: native is synchronous, web returns
- * Promises, so every call is wrapped in `Promise.resolve` and the result is
+ * Promises, so every call goes through {@link settle} and the result is
  * applied once it settles. All writes refresh the list. Persistence is
  * best-effort — a failed read or write leaves the last good list in place
  * rather than throwing into the UI.
@@ -53,23 +54,26 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     };
   }, []);
 
-  const apply = useCallback((rows: SegmentProfile[]) => {
-    if (mounted.current) setProfiles(rows);
-  }, []);
+  // Sequence number for reads. On web `listProfiles` is async, so a slow read
+  // for one track can resolve *after* a later one — switching tracks quickly,
+  // or any two overlapping refreshes, could otherwise leave the previous
+  // track's segments on screen. Only the newest read is allowed to apply.
+  const latestRead = useRef(0);
 
   const refresh = useCallback(() => {
+    const readId = ++latestRead.current;
+    const apply = (rows: SegmentProfile[]) => {
+      if (mounted.current && latestRead.current === readId) setProfiles(rows);
+    };
+
     if (!trackId) {
       apply([]);
       return;
     }
-    try {
-      void Promise.resolve(listProfiles(trackId))
-        .then(apply)
-        .catch(() => apply([]));
-    } catch {
-      apply([]);
-    }
-  }, [trackId, apply]);
+    void settle(() => listProfiles(trackId))
+      .then(apply)
+      .catch(() => apply([]));
+  }, [trackId]);
 
   useEffect(() => {
     refresh();
@@ -79,7 +83,7 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     async (input: SegmentProfileInput): Promise<SegmentProfile | null> => {
       if (!trackId) return null;
       try {
-        const profile = await Promise.resolve(saveProfile(trackId, input));
+        const profile = await settle(() => saveProfile(trackId, input));
         refresh();
         return profile;
       } catch {
@@ -89,43 +93,33 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     [trackId, refresh],
   );
 
-  const update = useCallback(
-    (profileId: string, region: SegmentRegion) => {
-      try {
-        void Promise.resolve(updateProfile(profileId, region))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
+  // Every mutation is the same shape: run the store call across the sync/async
+  // platform split, refresh the list on success, and stay silent on failure so
+  // the last good list survives.
+  const runWrite = useCallback(
+    (call: () => unknown) => {
+      void settle(call)
+        .then(refresh)
+        .catch(() => {});
     },
     [refresh],
+  );
+
+  const update = useCallback(
+    (profileId: string, region: SegmentRegion) =>
+      runWrite(() => updateProfile(profileId, region)),
+    [runWrite],
   );
 
   const rename = useCallback(
-    (profileId: string, name: string) => {
-      try {
-        void Promise.resolve(renameProfile(profileId, name))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
-    },
-    [refresh],
+    (profileId: string, name: string) =>
+      runWrite(() => renameProfile(profileId, name)),
+    [runWrite],
   );
 
   const remove = useCallback(
-    (profileId: string) => {
-      try {
-        void Promise.resolve(deleteProfile(profileId))
-          .then(refresh)
-          .catch(() => {});
-      } catch {
-        // best-effort
-      }
-    },
-    [refresh],
+    (profileId: string) => runWrite(() => deleteProfile(profileId)),
+    [runWrite],
   );
 
   return { profiles, refresh, save, update, rename, remove };

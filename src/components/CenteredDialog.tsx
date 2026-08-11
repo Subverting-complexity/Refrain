@@ -1,9 +1,18 @@
 import { ReactNode } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+
+const DIALOG_MAX_WIDTH = 420;
 
 export interface CenteredDialogProps {
   /** Heading shown at the top of the card. */
@@ -31,7 +40,12 @@ export function CenteredDialog({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onDismiss}>
-      <View style={styles.overlay}>
+      {/* iOS keeps the card clear of the on-screen keyboard (dialogs here can
+          hold auto-focused text fields); Android resizes the window itself. */}
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <AccessiblePressable
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           accessibilityRole="button"
@@ -59,7 +73,7 @@ export function CenteredDialog({
           ) : null}
           <View style={styles.actions}>{children}</View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -76,8 +90,8 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 420,
-    borderRadius: 16,
+    maxWidth: DIALOG_MAX_WIDTH,
+    borderRadius: radii.lg,
     padding: spacing.xl,
     gap: spacing.md,
   },

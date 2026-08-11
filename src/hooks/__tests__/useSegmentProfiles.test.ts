@@ -144,6 +144,74 @@ describe('useSegmentProfiles', () => {
     expect(lastResult.profiles).toEqual([]);
   });
 
+  // On web `listProfiles` is async, so a slow read for one track can resolve
+  // after a later one. Without a sequence guard the stale response wins and
+  // the user sees the previous track's segments.
+  it('ignores a stale read that resolves after a newer one', async () => {
+    const slow = [profile('old', 'Old track segment')];
+    const fresh = [profile('new', 'New track segment')];
+
+    let releaseSlow!: () => void;
+    mockListProfiles.mockImplementation(
+      (trackId: string) =>
+        (trackId === 't1'
+          ? new Promise((resolve) => {
+              releaseSlow = () => resolve(slow);
+            })
+          : Promise.resolve(fresh)) as unknown as SegmentProfile[],
+    );
+
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(createElement(TestComponent, { trackId: 't1' }));
+    });
+
+    // Switch tracks; the second read resolves first.
+    await act(async () => {
+      tree.update(createElement(TestComponent, { trackId: 't2' }));
+    });
+    expect(lastResult.profiles).toEqual(fresh);
+
+    // Now let the first track's read land late.
+    await act(async () => {
+      releaseSlow();
+    });
+
+    expect(lastResult.profiles).toEqual(fresh);
+  });
+
+  it('ignores a stale read when two refreshes overlap', async () => {
+    const first = [profile('p1', 'First')];
+    const second = [profile('p2', 'Second')];
+
+    await renderHook();
+
+    let releaseFirst!: () => void;
+    mockListProfiles
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve(first);
+          }) as unknown as SegmentProfile[],
+      )
+      .mockImplementation(
+        () => Promise.resolve(second) as unknown as SegmentProfile[],
+      );
+
+    await act(async () => {
+      lastResult.refresh();
+      lastResult.refresh();
+    });
+
+    expect(lastResult.profiles).toEqual(second);
+
+    await act(async () => {
+      releaseFirst();
+    });
+
+    expect(lastResult.profiles).toEqual(second);
+  });
+
   it('keeps the last good list when a read throws', async () => {
     await renderHook();
     mockListProfiles.mockImplementation(() => {

@@ -65,6 +65,35 @@ describe('useSnippetPreview', () => {
     expect(mockSetSnippetPreviewEnabled).toHaveBeenCalledWith(false);
   });
 
+  // Regression for #186: the identical settingsStore write in useSkipInterval
+  // is guarded, so a storage throw here must not escape into the toggle's
+  // press handler either.
+  it('does not throw out of the setter when the persist write fails', async () => {
+    await renderHook();
+    mockSetSnippetPreviewEnabled.mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+
+    expect(() => {
+      act(() => {
+        lastResult.setSnippetPreviewEnabled(false);
+      });
+    }).not.toThrow();
+  });
+
+  it('still applies the new value in memory when the persist write fails', async () => {
+    await renderHook();
+    mockSetSnippetPreviewEnabled.mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+
+    act(() => {
+      lastResult.setSnippetPreviewEnabled(false);
+    });
+
+    expect(lastResult.snippetPreviewEnabled).toBe(false);
+  });
+
   // Regression for #163: on a cold web load the first synchronous seed can
   // read an unhydrated cache and fall back to the default-on. Once hydration
   // resolves, the hook re-reads and reapplies the persisted-off value.
@@ -77,5 +106,40 @@ describe('useSnippetPreview', () => {
 
     expect(lastResult.snippetPreviewEnabled).toBe(false);
     expect(mockHydrateSettings).toHaveBeenCalledTimes(1);
+  });
+
+  // The write above is already guarded (#186). The *read* paths were not, and
+  // the native store reads SQLite synchronously — so a throw escaped into the
+  // render itself, which no amount of write-guarding covers.
+  describe('best-effort reads', () => {
+    it('falls back to the default when the initial read throws', async () => {
+      mockGetSnippetPreviewEnabled.mockImplementation(() => {
+        throw new Error('database not open');
+      });
+
+      await expect(renderHook()).resolves.toBeDefined();
+      expect(lastResult.snippetPreviewEnabled).toBe(true);
+    });
+
+    it('keeps the seeded value when the post-hydration re-read throws', async () => {
+      mockGetSnippetPreviewEnabled
+        .mockReturnValueOnce(false) // lazy seed succeeds
+        .mockImplementation(() => {
+          throw new Error('database closed');
+        });
+
+      await renderHook();
+
+      expect(lastResult.snippetPreviewEnabled).toBe(false);
+    });
+
+    it('keeps the seeded value when hydration rejects', async () => {
+      mockGetSnippetPreviewEnabled.mockReturnValue(false);
+      mockHydrateSettings.mockRejectedValue(new Error('indexeddb blocked'));
+
+      await renderHook();
+
+      expect(lastResult.snippetPreviewEnabled).toBe(false);
+    });
   });
 });

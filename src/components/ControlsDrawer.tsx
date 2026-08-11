@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -12,6 +12,8 @@ import { VolumeControl } from './VolumeControl';
 
 // The three launchers that open a settings sheet. Segments is handled
 // separately because it opens the segment-profile sheet owned by the player.
+const DRAWER_BUTTON_SIZE = 48;
+
 type PanelKey = 'countIn' | 'volume' | 'skip';
 
 interface ControlsDrawerProps {
@@ -86,7 +88,7 @@ export function ControlsDrawer({
           active={openPanel === launcher.key}
           onPress={() => setOpenPanel(launcher.key)}
           accessibilityState={{ expanded: openPanel === launcher.key }}
-          size={48}
+          size={DRAWER_BUTTON_SIZE}
         />
       ))}
       {onOpenSegments ? (
@@ -94,7 +96,7 @@ export function ControlsDrawer({
           icon="bookmarks-outline"
           accessibilityLabel="Open segment profiles"
           onPress={onOpenSegments}
-          size={48}
+          size={DRAWER_BUTTON_SIZE}
         />
       ) : null}
 

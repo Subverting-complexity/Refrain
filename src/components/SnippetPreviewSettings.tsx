@@ -2,8 +2,10 @@ import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { ToggleSwitch } from './ToggleSwitch';
+
+const SETTINGS_ROW_MIN_HEIGHT = 52;
 
 interface SnippetPreviewSettingsProps {
   enabled: boolean;
@@ -12,9 +14,9 @@ interface SnippetPreviewSettingsProps {
 }
 
 /**
- * Inline toggle card for the snippet preview, sitting alongside the count-in
- * settings on the player. When on, dragging an A/B marker auditions a short
- * rolling snippet around it; when off, dragging just moves the marker.
+ * Inline toggle card for the snippet preview, rendered inside the segment
+ * profile sheet. When on, dragging an A/B marker auditions a short rolling
+ * snippet around it; when off, dragging just moves the marker.
  */
 export function SnippetPreviewSettings({
   enabled,
@@ -61,14 +63,14 @@ export function SnippetPreviewSettings({
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.md,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
+    minHeight: SETTINGS_ROW_MIN_HEIGHT,
   },
   headerLabel: {
     flexDirection: 'row',

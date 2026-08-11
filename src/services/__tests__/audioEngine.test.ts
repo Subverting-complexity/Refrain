@@ -259,14 +259,23 @@ describe('audioEngine', () => {
     });
 
     it('resets position to markerA when playing after track finished', async () => {
-      const { loadTrack, play, setMarkerA } = require('../audioEngine');
+      const {
+        loadTrack,
+        play,
+        setMarkerA,
+        setLoopEnabled,
+      } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       statusCallback?.(makeLoadedStatus());
       setMarkerA(10000);
+      // Disarm the loop so the finish parks at the end (an armed loop would
+      // rewind on its own); this exercises play()'s own restart path.
+      setLoopEnabled(false);
       statusCallback?.(
         makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
+      mockSeekTo.mockClear();
       await play();
 
       // markerA is 10000ms -> 10s at the expo-audio boundary.
@@ -275,12 +284,14 @@ describe('audioEngine', () => {
     });
 
     it('resets position to 0 when playing after track finished with no markers', async () => {
-      const { loadTrack, play } = require('../audioEngine');
+      const { loadTrack, play, setLoopEnabled } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
+      setLoopEnabled(false);
       statusCallback?.(
         makeLoadedStatus({ didJustFinish: true, currentTime: 60 }),
       );
+      mockSeekTo.mockClear();
       await play();
 
       expect(mockSeekTo).toHaveBeenCalledWith(0);
@@ -702,6 +713,95 @@ describe('audioEngine', () => {
         expect.objectContaining({ status: 'loading' }),
       );
     });
+
+    it('a listener that throws on its initial replay does not fail subscribe', () => {
+      // subscribe() replays current state immediately, from inside the
+      // subscriber's mount effect — a throw there would fail the component,
+      // not just its own state sync.
+      const { subscribe } = require('../audioEngine');
+
+      expect(() =>
+        subscribe(() => {
+          throw new Error('subscriber blew up');
+        }),
+      ).not.toThrow();
+    });
+
+    it('still returns a working unsubscribe for a throwing listener', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const throwing = jest.fn(() => {
+        throw new Error('subscriber blew up');
+      });
+
+      const unsubscribe = subscribe(throwing);
+      throwing.mockClear();
+      unsubscribe();
+
+      await loadTrack('file:///test.mp3');
+
+      expect(throwing).not.toHaveBeenCalled();
+    });
+
+    it('a throwing listener does not stop the others from being notified', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const throwing = jest.fn(() => {
+        throw new Error('subscriber blew up');
+      });
+      const listener = jest.fn();
+
+      subscribe(throwing);
+      subscribe(listener);
+      throwing.mockClear();
+      listener.mockClear();
+
+      await loadTrack('file:///test.mp3');
+
+      // Registered first, so without isolation its throw would abort the
+      // fan-out and leave the later subscriber on a stale transport.
+      expect(throwing).toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'loading' }),
+      );
+    });
+
+    it('a throwing listener does not escape the status-update callback', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      subscribe(() => {
+        throw new Error('subscriber blew up');
+      });
+
+      // Most notifications originate inside expo-audio's native
+      // playbackStatusUpdate callback; a throw there would escape into the
+      // event emitter rather than being contained by the engine.
+      expect(() =>
+        statusCallback?.(makeLoadedStatus({ currentTime: 1 })),
+      ).not.toThrow();
+    });
+
+    it('subscribing from inside a listener does not notify the newcomer mid-pass', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      const latecomer = jest.fn();
+      let calls = 0;
+      // Call 1 is this listener's own replay from subscribe(); call 2 is the
+      // status broadcast below, so the newcomer joins mid-pass.
+      subscribe(() => {
+        calls += 1;
+        if (calls === 2) subscribe(latecomer);
+      });
+      latecomer.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ currentTime: 1 }));
+
+      // Exactly one call — the replay subscribe() gives it. Iterating the live
+      // Set would visit the newly added entry as well and deliver the same
+      // state twice (and a listener that re-subscribes itself would spin).
+      expect(calls).toBe(2);
+      expect(latecomer).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('getState', () => {
@@ -907,11 +1007,18 @@ describe('audioEngine', () => {
       );
     });
 
-    it('reports paused status when finished', async () => {
-      const { loadTrack, subscribe } = require('../audioEngine');
+    it('reports paused status when finished with the loop disarmed', async () => {
+      const {
+        loadTrack,
+        setLoopEnabled,
+        subscribe,
+      } = require('../audioEngine');
       const listener = jest.fn();
 
       await loadTrack('file:///test.mp3');
+      // The loop defaults to armed (a finish would rewind and keep playing);
+      // disarm it so the natural end parks the playhead at the end.
+      setLoopEnabled(false);
       subscribe(listener);
       listener.mockClear();
 
@@ -1192,7 +1299,7 @@ describe('audioEngine', () => {
       expect(mockSeekTo).not.toHaveBeenCalled();
     });
 
-    it('does not loop back when only markerA is set', async () => {
+    it('does not loop back mid-track when only markerA is set', async () => {
       const { loadTrack, setMarkerA } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
@@ -1200,9 +1307,125 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       mockSeekTo.mockClear();
 
+      // Without B the loop region runs to the end of the track, so playback
+      // mid-track carries on undisturbed.
       statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 50 }));
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('loops the whole track on natural finish with no markers set', async () => {
+      const { loadTrack, subscribe } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      // The loop defaults to armed, so the finish rewinds to the start and
+      // keeps playing — looping needs no A/B markers.
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'playing', positionMs: 0 }),
+      );
+    });
+
+    it('loops from markerA on natural finish when only A is set', async () => {
+      const { loadTrack, setMarkerA } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setMarkerA(5000);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('does not loop the whole track when the loop is disarmed', async () => {
+      const {
+        loadTrack,
+        setLoopEnabled,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      setLoopEnabled(false);
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 60000 }),
+      );
+    });
+
+    it('invokes the per-loop count-in handler on a whole-track rewind', async () => {
+      const {
+        loadTrack,
+        setLoopRestartHandler,
+        subscribe,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      const handler = jest.fn();
+      setLoopRestartHandler(handler);
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockPlay.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          playing: false,
+          didJustFinish: true,
+          currentTime: 60,
+        }),
+      );
+
+      // Rewinds to the start, pauses there, and hands off to the count-in —
+      // same contract as an A/B loop restart.
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'paused', positionMs: 0 }),
+      );
     });
 
     it('stops at B (without rewinding) when looping is disabled', async () => {

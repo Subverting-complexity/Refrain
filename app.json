@@ -34,7 +34,8 @@
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#111d1f",
@@ -64,6 +65,12 @@
             }
           ]
         }
+      ],
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -85,7 +92,22 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": "SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO \"public.audio\").@count == 1).@count == 1",
+          "androidIntentFilters": [
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/aac"
+          ]
         }
       ]
     ],
@@ -93,7 +115,10 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "70c678d1-217f-4e5b-9ed4-945db0338d45"
+      }
     }
   }
 }

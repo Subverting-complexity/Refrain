@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -11,7 +11,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ImportButton } from '@/src/components/ImportButton';
-import { Toast } from '@/src/components/Toast';
+import { ToastHost } from '@/src/components/ToastHost';
 import { TrackListItem } from '@/src/components/TrackListItem';
 import { useShareIntent } from '@/src/hooks/useShareIntent';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -24,6 +24,7 @@ import {
 } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Track } from '@/src/types';
+import { errorMessage } from '@/src/utils/errorMessage';
 
 export default function LibraryScreen() {
   const { theme } = useTheme();
@@ -33,35 +34,70 @@ export default function LibraryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { toast, showToast, hideToast } = useToast();
 
+  // Every library read is stamped with a token and applied only while that
+  // token is still current. `loadTracks` is fully asynchronous on web
+  // (IndexedDB, plus a blob-URL resolve per track), so a read can easily land
+  // after the list has moved on. A blur-scoped flag covers refocusing, but not
+  // the two cases where the list changes *during* a single focus:
+  //
+  //   - an import or delete made while a read is in flight — the read predates
+  //     the change, so applying it drops the new track (or resurrects the
+  //     deleted one) until the next refresh;
+  //   - pull-to-refresh overlapping the focus read, where whichever resolves
+  //     last wins regardless of which started last.
+  //
+  // Bumping the token on every read and every mutation makes any superseded
+  // read a no-op, which also subsumes the blur/unmount case.
+  const loadToken = useRef(0);
+  const invalidateLoads = useCallback(() => {
+    loadToken.current += 1;
+    return loadToken.current;
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
+      const token = invalidateLoads();
       loadTracks()
-        .then(setTracks)
+        .then((loaded) => {
+          if (loadToken.current !== token) return;
+          setTracks(loaded);
+        })
         .catch(() => {
-          AccessibilityInfo.announceForAccessibility('Failed to load library');
+          if (loadToken.current !== token) return;
           showToast('Failed to load library', 'error');
         });
-    }, [showToast]),
+      return () => {
+        loadToken.current += 1;
+      };
+    }, [showToast, invalidateLoads]),
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    const token = invalidateLoads();
     try {
       const loaded = await loadTracks();
+      if (loadToken.current !== token) return;
       setTracks(loaded);
+      // Announced rather than toasted: the RefreshControl spinner is the
+      // sighted user's confirmation, so a banner here would be redundant.
       AccessibilityInfo.announceForAccessibility('Library refreshed');
     } catch {
-      AccessibilityInfo.announceForAccessibility('Failed to refresh library');
+      if (loadToken.current !== token) return;
       showToast('Failed to refresh library', 'error');
     } finally {
       setRefreshing(false);
     }
-  }, [showToast]);
+  }, [showToast, invalidateLoads]);
 
   const addTrack = useCallback(
     async (track: Track): Promise<boolean> => {
       try {
         await insertTrack(track);
+        // Retire any in-flight read before the optimistic insert, so a read
+        // that started before this track existed cannot resolve afterwards
+        // and drop it from the list.
+        invalidateLoads();
         setTracks((prev) => [track, ...prev]);
         return true;
       } catch (error) {
@@ -69,37 +105,32 @@ export default function LibraryScreen() {
         // fail for reasons the toast can't convey (schema mismatch, worker
         // error). Logging it makes those failures diagnosable.
         console.error('Failed to save track to library', error);
-        AccessibilityInfo.announceForAccessibility(
-          'Failed to save track to library',
-        );
         showToast('Failed to save track to library', 'error');
         return false;
       }
     },
-    [showToast],
+    [showToast, invalidateLoads],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
       try {
         await deleteTrack(id);
+        // As in addTrack: retire in-flight reads so a stale one cannot
+        // resurrect the deleted track.
+        invalidateLoads();
         setTracks((prev) => prev.filter((t) => t.id !== id));
-        AccessibilityInfo.announceForAccessibility('Track deleted');
         showToast('Track deleted', 'success');
       } catch {
-        AccessibilityInfo.announceForAccessibility('Failed to delete track');
         showToast('Failed to delete track', 'error');
       }
     },
-    [showToast],
+    [showToast, invalidateLoads],
   );
 
   const handleShareImport = useCallback(
     async (track: Track) => {
       if (!(await addTrack(track))) return;
-      AccessibilityInfo.announceForAccessibility(
-        `Received ${track.filename} from share`,
-      );
       showToast(`Received ${track.filename} from share`, 'success');
     },
     [addTrack, showToast],
@@ -107,9 +138,6 @@ export default function LibraryScreen() {
 
   const handleShareError = useCallback(
     (message: string) => {
-      AccessibilityInfo.announceForAccessibility(
-        `Share import failed: ${message}`,
-      );
       showToast(`Share import failed: ${message}`, 'error');
     },
     [showToast],
@@ -136,23 +164,15 @@ export default function LibraryScreen() {
       const result = await pickAndImportFile();
       if (result.success) {
         if (!(await addTrack(result.track))) return;
-        AccessibilityInfo.announceForAccessibility(
-          `Imported ${result.track.filename} successfully`,
-        );
         showToast(`Imported ${result.track.filename} successfully`, 'success');
       } else if (result.error !== 'cancelled') {
-        AccessibilityInfo.announceForAccessibility(
-          `Import failed: ${result.message}`,
-        );
         showToast(`Import failed: ${result.message}`, 'error');
       }
     } catch (error) {
       // Defensive: pickAndImportFile resolves to an outcome on expected
       // failures, but an unexpected throw must still surface to the user
       // rather than silently doing nothing.
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      AccessibilityInfo.announceForAccessibility(`Import failed: ${message}`);
-      showToast(`Import failed: ${message}`, 'error');
+      showToast(`Import failed: ${errorMessage(error)}`, 'error');
     } finally {
       setImporting(false);
     }
@@ -207,11 +227,7 @@ export default function LibraryScreen() {
           />
         </View>
       )}
-      <Toast
-        message={toast?.message ?? null}
-        variant={toast?.variant ?? 'success'}
-        onDismiss={hideToast}
-      />
+      <ToastHost toast={toast} onDismiss={hideToast} />
     </SafeAreaView>
   );
 }

@@ -1,10 +1,21 @@
 import { ReactNode } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+
+const SHEET_MIN_WIDTH = 320;
+const SHEET_MAX_WIDTH = 560;
+const SHEET_MIN_HEIGHT = 240;
 
 interface BottomSheetProps {
   /** Sheet title shown in the header. */
@@ -33,7 +44,12 @@ export function BottomSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      {/* iOS lifts the sheet above the on-screen keyboard when a sheet body
+          holds a text field; Android resizes the window itself. */}
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <AccessiblePressable
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}
           accessibilityRole="button"
@@ -66,7 +82,7 @@ export function BottomSheet({
 
           {children}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -80,20 +96,16 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
   },
   sheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
     gap: spacing.md,
-    // Give every bottom panel a meaningful footprint instead of collapsing
-    // into a thin strip at the very bottom: a height floor so the sheet
-    // claims real screen space, and a width floor (capped + centred) so it
-    // stays usable on narrow layouts without stretching on wide ones.
     width: '100%',
-    minWidth: 320,
-    maxWidth: 560,
-    minHeight: 240,
+    minWidth: SHEET_MIN_WIDTH,
+    maxWidth: SHEET_MAX_WIDTH,
+    minHeight: SHEET_MIN_HEIGHT,
     alignSelf: 'center',
   },
   header: {

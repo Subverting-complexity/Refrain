@@ -1,9 +1,8 @@
-import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { SKIP_PRESETS } from '../hooks/useSkipInterval';
+import { SKIP_PRESETS } from '../services/skipIntervalStore';
 import { spacing } from '../theme';
 import { ChipGroup, ChipOption } from './ChipGroup';
 

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import {
   AccessibilityActionEvent,
   StyleSheet,
@@ -113,10 +113,20 @@ export function SeekBar({
         paddingVertical={spacing.xl}
       />
       <View style={styles.timeRow}>
-        <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
+        <Text
+          style={[
+            theme.typography.caption,
+            { color: theme.colors.textSecondary },
+          ]}
+        >
           {formatDuration(hasRange ? elapsedMs : positionMs)}
         </Text>
-        <Text style={[styles.time, { color: theme.colors.textSecondary }]}>
+        <Text
+          style={[
+            theme.typography.caption,
+            { color: theme.colors.textSecondary },
+          ]}
+        >
           {formatDuration(hasRange ? spanMs : durationMs)}
         </Text>
       </View>
@@ -132,9 +142,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: spacing.xs,
-  },
-  time: {
-    fontSize: 12,
-    lineHeight: 16,
   },
 });

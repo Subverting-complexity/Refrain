@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import {
-  AccessibilityInfo,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,12 +11,13 @@ import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
-import { Toast } from '@/src/components/Toast';
+import { ToastHost } from '@/src/components/ToastHost';
 import { TransportControls } from '@/src/components/TransportControls';
 import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useLatestRef } from '@/src/hooks/useLatestRef';
 import { useSegmentEditor } from '@/src/hooks/useSegmentEditor';
 import { useSegmentProfiles } from '@/src/hooks/useSegmentProfiles';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
@@ -31,11 +26,15 @@ import { useToast } from '@/src/hooks/useToast';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
-import { spacing } from '@/src/theme';
+import { radii, spacing } from '@/src/theme';
 import { SegmentProfile } from '@/src/types';
 import { nextSegmentName } from '@/src/utils/nextSegmentName';
+import { settle } from '@/src/utils/settle';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
+
+// Square placeholder shown while the waveform has no peaks to draw yet.
+const ARTWORK_PLACEHOLDER_SIZE = 240;
 
 /** A pending action blocked by unsaved segment edits. */
 type SegmentGuard =
@@ -169,18 +168,13 @@ export default function PlayerScreen() {
   useEffect(() => {
     if (trackId && durationMs > 0 && !durationPersisted.current) {
       // Optimistically guard against re-entry; clear the flag on failure so
-      // the next durationMs update retries. Handles both a native synchronous
-      // throw and a web asynchronous rejection (the web store is async).
+      // the next durationMs update retries. `settle` covers both a native
+      // synchronous throw and a web asynchronous rejection (the web store is
+      // async), so the retry reset lives in one place.
       durationPersisted.current = true;
-      try {
-        void Promise.resolve(updateTrackDuration(trackId, durationMs)).catch(
-          () => {
-            durationPersisted.current = false;
-          },
-        );
-      } catch {
+      void settle(() => updateTrackDuration(trackId, durationMs)).catch(() => {
         durationPersisted.current = false;
-      }
+      });
     }
   }, [trackId, durationMs]);
 
@@ -262,13 +256,9 @@ export default function PlayerScreen() {
   // Refs let the navigation listener read the latest dirty/loaded state without
   // re-subscribing every render; the bypass flag lets a resolved guard navigate
   // through without re-triggering itself.
-  const dirtyRef = useRef(isDirty);
-  const loadedIdRef = useRef(loadedId);
+  const dirtyRef = useLatestRef(isDirty);
+  const loadedIdRef = useLatestRef(loadedId);
   const bypassGuardRef = useRef(false);
-  useEffect(() => {
-    dirtyRef.current = isDirty;
-    loadedIdRef.current = loadedId;
-  });
 
   // Leaving the player with unsaved segment edits: intercept the back action
   // and raise the same guard. Fires for in-app Stack back navigation.
@@ -296,14 +286,15 @@ export default function PlayerScreen() {
       });
     });
     return unsubscribe;
-  }, [navigation]);
+    // The refs are stable across renders, so listing them keeps the listener
+    // subscribed exactly once — as it was when they were inline `useRef`s.
+  }, [navigation, dirtyRef, loadedIdRef]);
 
   // The B button rejects placements at or before A. Surface that instead of
-  // failing silently: announce for screen readers and show a visible toast.
+  // failing silently: the toast is both shown and announced (see useToast).
   const handleSetMarkerB = useCallback(
     (positionMs: number) => {
       if (!setMarkerB(positionMs)) {
-        AccessibilityInfo.announceForAccessibility(MARKER_B_BEFORE_A_MESSAGE);
         showToast(MARKER_B_BEFORE_A_MESSAGE, 'error');
       }
     },
@@ -545,11 +536,7 @@ export default function PlayerScreen() {
         </View>
       </ScrollView>
 
-      <Toast
-        message={toast?.message ?? null}
-        variant={toast?.variant}
-        onDismiss={hideToast}
-      />
+      <ToastHost toast={toast} onDismiss={hideToast} />
 
       {profilesVisible && trackId ? (
         <SegmentProfileSheet
@@ -601,9 +588,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   artworkPlaceholder: {
-    width: 240,
-    height: 240,
-    borderRadius: 16,
+    width: ARTWORK_PLACEHOLDER_SIZE,
+    height: ARTWORK_PLACEHOLDER_SIZE,
+    borderRadius: radii.lg,
     justifyContent: 'center',
     alignItems: 'center',
   },

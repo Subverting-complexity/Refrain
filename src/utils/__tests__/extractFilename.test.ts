@@ -56,4 +56,53 @@ describe('extractFilename', () => {
       ),
     ).toBe('song.mp3');
   });
+
+  // Regression for #187: backslash-separated paths used to return the whole
+  // string, and percent-encoded names reached the UI still encoded.
+  describe('backslash separators', () => {
+    it('splits on backslashes', () => {
+      expect(extractFilename('content:\\path\\song.mp3')).toBe('song.mp3');
+    });
+
+    it('splits on mixed separators, taking the last segment', () => {
+      expect(extractFilename('file:///music\\albums/track.wav')).toBe(
+        'track.wav',
+      );
+    });
+
+    it('strips query params from a backslash path', () => {
+      expect(extractFilename('content:\\files\\recording.aac?mode=r')).toBe(
+        'recording.aac',
+      );
+    });
+  });
+
+  describe('percent-encoding', () => {
+    it('decodes encoded spaces', () => {
+      expect(extractFilename('content://com.provider/My%20Song.mp3')).toBe(
+        'My Song.mp3',
+      );
+    });
+
+    it('decodes an encoded hash without truncating the name', () => {
+      expect(extractFilename('file:///music/Track%20%231.mp3')).toBe(
+        'Track #1.mp3',
+      );
+    });
+
+    it('decodes non-ASCII names', () => {
+      expect(extractFilename('file:///music/Caf%C3%A9.m4a')).toBe('Café.m4a');
+    });
+
+    it('falls back to the raw segment on malformed encoding', () => {
+      expect(extractFilename('file:///music/50%.mp3')).toBe('50%.mp3');
+      expect(extractFilename('file:///music/%E0%A4%A.wav')).toBe(
+        '%E0%A4%A.wav',
+      );
+    });
+
+    it('still defaults when the path has no final segment', () => {
+      expect(extractFilename('content:\\path\\')).toBe('shared-audio.mp3');
+    });
+  });
 });

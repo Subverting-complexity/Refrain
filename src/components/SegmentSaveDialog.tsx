@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
 
-import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
+import { SegmentNameDialog } from './SegmentNameDialog';
 
 export interface SegmentSaveDialogProps {
   /**
@@ -26,7 +24,9 @@ export interface SegmentSaveDialogProps {
 /**
  * The player's Save flow. When a dirty segment is loaded it first offers
  * Override / Save as new / Cancel; otherwise it opens straight to a name field
- * for a brand-new segment. Picking "Save as new" reveals the same name field.
+ * for a brand-new segment. Picking "Save as new" reveals the same name field —
+ * the shared {@link SegmentNameDialog}, where an emptied field falls back to
+ * the suggested name so a new segment is never left unnamed.
  */
 export function SegmentSaveDialog({
   loadedName,
@@ -35,12 +35,8 @@ export function SegmentSaveDialog({
   onSaveNew,
   onCancel,
 }: SegmentSaveDialogProps) {
-  const { theme } = useTheme();
   // Skip the choice step when there is no loaded segment to override.
   const [naming, setNaming] = useState(loadedName == null);
-  const [draftName, setDraftName] = useState(suggestedName);
-
-  const confirmNew = () => onSaveNew(draftName.trim() || suggestedName);
 
   if (!naming && loadedName != null) {
     return (
@@ -66,36 +62,13 @@ export function SegmentSaveDialog({
   }
 
   return (
-    <CenteredDialog title="Save as new segment" onDismiss={onCancel}>
-      <TextInput
-        accessibilityLabel="New segment name"
-        value={draftName}
-        onChangeText={setDraftName}
-        placeholder="Segment name"
-        placeholderTextColor={theme.colors.textSecondary}
-        style={[
-          styles.input,
-          theme.typography.body,
-          { color: theme.colors.textPrimary, borderColor: theme.colors.border },
-        ]}
-        autoFocus
-      />
-      <DialogButton
-        label="Save"
-        accessibilityLabel="Confirm save new segment"
-        variant="primary"
-        onPress={confirmNew}
-      />
-      <DialogButton label="Cancel" variant="default" onPress={onCancel} />
-    </CenteredDialog>
+    <SegmentNameDialog
+      title="Save as new segment"
+      initialName={suggestedName}
+      fieldAccessibilityLabel="New segment name"
+      confirmAccessibilityLabel="Confirm save new segment"
+      onConfirm={(name) => onSaveNew(name || suggestedName)}
+      onCancel={onCancel}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-});

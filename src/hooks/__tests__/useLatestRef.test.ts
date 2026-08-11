@@ -1,98 +1,88 @@
-import { createElement, useState } from 'react';
-import { create, act, ReactTestRenderer } from 'react-test-renderer';
+import { createElement, RefObject } from 'react';
+import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { useLatestRef } from '../useLatestRef';
 
-let triggerUpdate: ((v: number) => void) | null = null;
+let lastRef: RefObject<unknown>;
+let renderValue: unknown;
 
-function HookHost({
-  value,
-  onRef,
-}: {
-  value: number;
-  onRef: (ref: { current: number }) => void;
-}) {
+function TestComponent({ value }: { value: unknown }) {
   const ref = useLatestRef(value);
-  onRef(ref);
+  lastRef = ref;
+  // Captured during render, before the commit-time write lands. Reading a ref
+  // here is exactly what the rule forbids in product code — the point of the
+  // assertion below is to pin down what that read would see.
+  // eslint-disable-next-line react-hooks/refs -- deliberate: asserts the one-commit lag
+  renderValue = ref.current;
   return null;
 }
 
-function Wrapper({ onRef }: { onRef: (ref: { current: number }) => void }) {
-  const [val, setVal] = useState(1);
-  triggerUpdate = setVal;
-  return createElement(HookHost, { value: val, onRef });
+function render(value: unknown): ReactTestRenderer {
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(createElement(TestComponent, { value }));
+  });
+  return tree;
 }
 
 describe('useLatestRef', () => {
-  afterEach(() => {
-    triggerUpdate = null;
+  it('seeds the ref with the initial value', () => {
+    render('first');
+    expect(lastRef.current).toBe('first');
   });
 
-  it('returns a ref with the initial value', () => {
-    let captured: { current: number } | undefined;
-
+  it('holds the latest value after a re-render', () => {
+    const tree = render('first');
     act(() => {
-      create(
-        createElement(HookHost, {
-          value: 7,
-          onRef: (r) => {
-            captured = r;
-          },
-        }),
-      );
+      tree.update(createElement(TestComponent, { value: 'second' }));
     });
-
-    expect(captured?.current).toBe(7);
-  });
-
-  it('updates the ref when the value changes', () => {
-    let captured: { current: number } | undefined;
-    let renderer: ReactTestRenderer | undefined;
-
-    act(() => {
-      renderer = create(
-        createElement(Wrapper, {
-          onRef: (r) => {
-            captured = r;
-          },
-        }),
-      );
-    });
-
-    expect(captured?.current).toBe(1);
-
-    act(() => {
-      triggerUpdate!(42);
-    });
-
-    expect(captured?.current).toBe(42);
-    act(() => {
-      renderer?.unmount();
-    });
+    expect(lastRef.current).toBe('second');
   });
 
   it('returns the same ref object across renders', () => {
-    const refs: { current: number }[] = [];
-    let renderer: ReactTestRenderer | undefined;
+    const tree = render('first');
+    const firstRef = lastRef;
+    act(() => {
+      tree.update(createElement(TestComponent, { value: 'second' }));
+    });
+    // Stability is the point: consumers list this ref in dependency arrays and
+    // must not re-subscribe when the underlying value changes.
+    expect(lastRef).toBe(firstRef);
+  });
+
+  it('tracks functions, so deferred callbacks never go stale', () => {
+    const first = jest.fn();
+    const second = jest.fn();
+    const tree = render(first);
 
     act(() => {
-      renderer = create(
-        createElement(Wrapper, {
-          onRef: (r) => {
-            refs.push(r);
-          },
-        }),
-      );
+      tree.update(createElement(TestComponent, { value: second }));
     });
 
-    act(() => {
-      triggerUpdate!(2);
-    });
+    (lastRef.current as () => void)();
+    expect(second).toHaveBeenCalled();
+    expect(first).not.toHaveBeenCalled();
+  });
 
-    expect(refs.length).toBeGreaterThanOrEqual(2);
-    expect(refs[0]).toBe(refs[refs.length - 1]);
+  it('handles null and undefined values', () => {
+    const tree = render(null);
+    expect(lastRef.current).toBeNull();
     act(() => {
-      renderer?.unmount();
+      tree.update(createElement(TestComponent, { value: undefined }));
     });
+    expect(lastRef.current).toBeUndefined();
+  });
+
+  // The write is deliberately deferred to an effect rather than done during
+  // render, so the ref is never mutated mid-render (React's `react-hooks/refs`
+  // constraint). The visible consequence is a one-commit lag when read during
+  // render — harmless for the intended post-commit callers.
+  it('does not apply the new value during the render that supplied it', () => {
+    const tree = render('first');
+    act(() => {
+      tree.update(createElement(TestComponent, { value: 'second' }));
+    });
+    expect(renderValue).toBe('first');
+    expect(lastRef.current).toBe('second');
   });
 });

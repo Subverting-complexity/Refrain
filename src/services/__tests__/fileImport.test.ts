@@ -48,8 +48,12 @@ jest.mock('expo-file-system', () => {
   };
 });
 
+const mockRandomUUID = jest.fn<string, []>(() => 'test-uuid-1234');
+
 jest.mock('expo-crypto', () => ({
-  randomUUID: jest.fn(() => 'test-uuid-1234'),
+  randomUUID: () => mockRandomUUID(),
+  // `generateId` falls back to this when randomUUID is unavailable.
+  getRandomValues: (arr: Uint8Array) => arr.fill(0xab),
 }));
 
 const { File } = jest.requireMock('expo-file-system') as {
@@ -126,6 +130,33 @@ describe('pickAndImportFile', () => {
       expect(result.track.fileSizeBytes).toBe(mockFileSize);
       expect(result.track.durationMs).toBeGreaterThan(0);
       expect(result.track.durationEstimated).toBe(true);
+      expect(mockCopy).toHaveBeenCalled();
+    }
+  });
+
+  it('still imports when randomUUID is unavailable', async () => {
+    // Import goes through the shared `generateId`, which falls back to
+    // getRandomValues. Calling Crypto.randomUUID directly here used to let its
+    // secure-context throw escape importFromFile ahead of the try/catch.
+    mockRandomUUID.mockImplementationOnce(() => {
+      throw new TypeError('randomUUID is not a function');
+    });
+    File.pickFileAsync.mockResolvedValue({
+      canceled: false,
+      result: {
+        uri: 'file:///picked/song.mp3',
+        name: 'song.mp3',
+        exists: true,
+        size: 500_000,
+        copy: mockCopy,
+      },
+    });
+
+    const result = await pickAndImportFile();
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.track.id).toBe('abababab-abab-4bab-abab-abababababab');
       expect(mockCopy).toHaveBeenCalled();
     }
   });

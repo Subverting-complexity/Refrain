@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { LayoutChangeEvent } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from './useDragThrottle';
+import { useLatestRef } from './useLatestRef';
 
 interface UseSliderGestureOptions {
   onValueChange: (ratio: number) => void;
@@ -56,14 +57,9 @@ export function useSliderGesture({
     setDragRatio(null);
   }, [throttle]);
 
-  const beginRef = useRef(beginDrag);
-  const moveRef = useRef(moveDrag);
-  const endRef = useRef(endDrag);
-  useEffect(() => {
-    beginRef.current = beginDrag;
-    moveRef.current = moveDrag;
-    endRef.current = endDrag;
-  });
+  const beginRef = useLatestRef(beginDrag);
+  const moveRef = useLatestRef(moveDrag);
+  const endRef = useLatestRef(endDrag);
 
   const pan = useMemo(
     () =>
@@ -76,7 +72,8 @@ export function useSliderGesture({
         .onUpdate((e) => moveRef.current(e.x))
         // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
-    [],
+    // Ref identities never change, so the Pan is still built exactly once.
+    [beginRef, moveRef, endRef],
   );
 
   return { pan, handleLayout, dragRatio };

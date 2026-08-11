@@ -1,4 +1,3 @@
-import React from 'react';
 import { DimensionValue, StyleSheet, View, ViewStyle } from 'react-native';
 import { GestureDetector, PanGesture } from 'react-native-gesture-handler';
 

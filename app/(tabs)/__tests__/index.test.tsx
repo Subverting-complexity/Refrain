@@ -44,10 +44,11 @@ jest.mock('@/src/hooks/useTheme', () => ({
 jest.mock('expo-router', () => {
   const ReactLocal = require('react');
   return {
-    useFocusEffect: (cb: () => void) => {
-      ReactLocal.useEffect(() => {
-        cb();
-      }, [cb]);
+    // Return the callback's result so its cleanup runs on blur/unmount, as
+    // the real useFocusEffect does — the screen relies on it to cancel an
+    // in-flight library load.
+    useFocusEffect: (cb: () => void | (() => void)) => {
+      ReactLocal.useEffect(cb, [cb]);
     },
     useRouter: () => ({ push: jest.fn() }),
   };
@@ -143,6 +144,28 @@ describe('LibraryScreen load/refresh failure announcements', () => {
     act(() => renderer.unmount());
   });
 
+  it('does not report a load failure that lands after the screen has blurred', async () => {
+    // The focus effect cancels on blur: refocusing starts a fresh load, so a
+    // slow earlier one settling afterwards must neither clobber the newer
+    // list nor announce into whatever screen the user is now on.
+    let rejectLoad!: (error: Error) => void;
+    mockLoadTracks.mockReturnValueOnce(
+      new Promise<Track[]>((_resolve, reject) => {
+        rejectLoad = reject;
+      }),
+    );
+
+    const renderer = await renderScreen();
+    act(() => renderer.unmount());
+
+    await act(async () => {
+      rejectLoad(new Error('db read failed'));
+      await Promise.resolve();
+    });
+
+    expect(announceSpy).not.toHaveBeenCalledWith('Failed to load library');
+  });
+
   it('announces a failure when pull-to-refresh rejects', async () => {
     mockLoadTracks.mockResolvedValueOnce([sampleTrack]);
     const renderer = await renderScreen();
@@ -174,6 +197,102 @@ describe('LibraryScreen load/refresh failure announcements', () => {
 
     expect(announceSpy).toHaveBeenCalledWith('Library refreshed');
     expect(announceSpy).not.toHaveBeenCalledWith('Failed to refresh library');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('LibraryScreen stale-load guard', () => {
+  beforeEach(() => {
+    // These tests control load timing precisely, so drain any queued `...Once`
+    // implementations left by earlier blocks (clearAllMocks resets call
+    // records but not the implementation queue), and make every unstaged load
+    // hang so only the load a test stages can settle.
+    mockLoadTracks.mockReset();
+    mockInsertTrack.mockReset();
+    mockDeleteTrack.mockReset();
+    mockPickAndImportFile.mockReset();
+    mockLoadTracks.mockReturnValue(new Promise<Track[]>(() => {}));
+  });
+
+  // Read the list straight off the FlatList's `data` prop. Counting rendered
+  // nodes double-counts (each mocked item is a composite plus a host element),
+  // and the empty state renders no FlatList at all.
+  function trackIds(renderer: ReactTestRenderer): string[] {
+    const lists = renderer.root.findAllByType(FlatList);
+    if (lists.length === 0) return [];
+    return (lists[0].props.data as Track[]).map((t) => t.id);
+  }
+
+  it('keeps an optimistically added track when a load in flight since before the import resolves', async () => {
+    // The blur-scoped guard does not cover this: the screen never blurred.
+    // The read simply started before the track existed, so its snapshot
+    // predates the import and applying it drops the new track.
+    let resolveLoad!: (tracks: Track[]) => void;
+    mockLoadTracks.mockReturnValueOnce(
+      new Promise<Track[]>((resolve) => {
+        resolveLoad = resolve;
+      }),
+    );
+
+    const renderer = await renderScreen();
+
+    mockPickAndImportFile.mockResolvedValueOnce({
+      success: true,
+      track: sampleTrack,
+    });
+    mockInsertTrack.mockResolvedValueOnce(undefined as never);
+
+    const importButton = renderer.root.findAllByProps({
+      testID: 'import-button',
+    })[0];
+    await act(async () => {
+      await importButton.props.onPress();
+    });
+    expect(trackIds(renderer)).toEqual(['track-1']);
+
+    // The stale read finally lands, reporting the library as it was before.
+    await act(async () => {
+      resolveLoad([]);
+    });
+
+    expect(trackIds(renderer)).toEqual(['track-1']);
+    act(() => renderer.unmount());
+  });
+
+  it('does not resurrect a deleted track when an older load resolves', async () => {
+    let resolveLoad!: (tracks: Track[]) => void;
+    mockLoadTracks
+      .mockReturnValueOnce(Promise.resolve([sampleTrack]))
+      .mockReturnValueOnce(
+        new Promise<Track[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+      );
+
+    const renderer = await renderScreen();
+    expect(trackIds(renderer)).toEqual(['track-1']);
+
+    // A refresh is in flight when the user deletes the track.
+    mockDeleteTrack.mockResolvedValueOnce(undefined as never);
+    const onRefresh =
+      renderer.root.findByType(FlatList).props.refreshControl.props.onRefresh;
+    let refreshDone!: Promise<void>;
+    await act(async () => {
+      refreshDone = onRefresh();
+    });
+
+    const item = renderer.root.findAllByProps({ testID: 'track-item' })[0];
+    await act(async () => {
+      await item.props.onDelete();
+    });
+    expect(trackIds(renderer)).toEqual([]);
+
+    await act(async () => {
+      resolveLoad([sampleTrack]);
+      await refreshDone;
+    });
+
+    expect(trackIds(renderer)).toEqual([]);
     act(() => renderer.unmount());
   });
 });

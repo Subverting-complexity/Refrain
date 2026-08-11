@@ -16,4 +16,12 @@ export default [
       'react-hooks/globals': 'off',
     },
   },
+  {
+    // The Jest setup file runs in the test environment but sits outside the
+    // test-file globs above, so it needs the `jest` global declared here.
+    files: ['jest.setup.js'],
+    languageOptions: {
+      globals: { jest: 'readonly' },
+    },
+  },
 ];

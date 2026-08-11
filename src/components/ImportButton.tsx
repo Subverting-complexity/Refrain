@@ -5,6 +5,8 @@ import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
 
+const BUTTON_MIN_WIDTH = 160;
+
 interface ImportButtonProps {
   loading?: boolean;
   onPress: () => void;
@@ -58,7 +60,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
-    minWidth: 160,
+    minWidth: BUTTON_MIN_WIDTH,
   },
   icon: {
     marginRight: spacing.sm,

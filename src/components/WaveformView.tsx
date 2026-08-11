@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   AccessibilityInfo,
@@ -17,10 +11,12 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
 import { formatDuration } from '../utils/formatTime';
+import { clampToBounds, markerBounds } from '../utils/markerBounds';
 
 interface WaveformViewProps {
   peaks: WaveformPeaks;
@@ -243,16 +239,20 @@ export function WaveformView({
   // Keep a dragged/placed marker valid relative to its sibling. The B handle
   // can never be placed at or before A (the A < B invariant the engine
   // enforces), so clamp it to just past A — the handle visibly stops at the
-  // boundary instead of snapping back silently when dropped before A.
+  // boundary instead of snapping back silently when dropped before A. Shared
+  // with the marker time editor via `markerBounds` so both stop identically.
   const clampForTarget = useCallback(
     (target: DragTarget, ms: number): number => {
-      if (target === 'markerA' && markerB != null) {
-        return Math.max(0, Math.min(ms, markerB - 1));
-      }
-      if (target === 'markerB' && markerA != null) {
-        return Math.min(durationMs, Math.max(ms, markerA + 1));
-      }
-      return ms;
+      if (!isMarkerTarget(target)) return ms;
+      return clampToBounds(
+        ms,
+        markerBounds(
+          target === 'markerA' ? 'A' : 'B',
+          markerA ?? null,
+          markerB ?? null,
+          durationMs,
+        ),
+      );
     },
     [markerA, markerB, durationMs],
   );
@@ -344,14 +344,9 @@ export function WaveformView({
   // itself is created once. A marker drag updates markerA/markerB mid-gesture
   // (throttled), which would otherwise rebuild the gesture ~20x/sec and risk
   // RNGH dropping the active drag.
-  const beginRef = useRef(beginDrag);
-  const moveRef = useRef(moveDrag);
-  const endRef = useRef(endDrag);
-  useEffect(() => {
-    beginRef.current = beginDrag;
-    moveRef.current = moveDrag;
-    endRef.current = endDrag;
-  });
+  const beginRef = useLatestRef(beginDrag);
+  const moveRef = useLatestRef(moveDrag);
+  const endRef = useLatestRef(endDrag);
 
   // A single Pan drives taps and drags. `minDistance(0)` makes it claim the
   // touch the instant a finger lands on the waveform, so the surrounding
@@ -371,7 +366,8 @@ export function WaveformView({
         .onUpdate((e) => moveRef.current(e.x))
         // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
-    [],
+    // Ref identities never change, so the Pan is still built exactly once.
+    [beginRef, moveRef, endRef],
   );
 
   const bars = useMemo(() => {
@@ -610,7 +606,7 @@ export function WaveformView({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    borderRadius: 14,
+    borderRadius: radii.lg,
     overflow: 'hidden',
   },
   touchArea: {

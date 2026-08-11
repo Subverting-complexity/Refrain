@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
+import { radii, spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
+import { markerBounds } from '../utils/markerBounds';
 import { AccessiblePressable } from './AccessiblePressable';
 import { IconSquareButton } from './IconSquareButton';
 import { MarkerTimeSheet } from './MarkerTimeSheet';
+
+const MARKER_TILE_MIN_WIDTH = 50;
+const MARKER_TILE_HEIGHT = 52;
 
 export type PlaceMode = 'none' | 'A' | 'B';
 
@@ -63,12 +67,15 @@ export function MarkerControls({
   // null = closed; 'A' or 'B' = sheet open for that marker
   const [sheetTarget, setSheetTarget] = useState<'A' | 'B' | null>(null);
   const isDisabled = status === 'idle' || status === 'error';
-  const canLoop = markerA != null && markerB != null;
-  const loopActive = canLoop && loopEnabled;
-  const loopDisabled = isDisabled || !canLoop;
+  const hasRegion = markerA != null && markerB != null;
+  // The loop is armable with or without markers: a full A/B region loops
+  // between the markers, A alone loops from A to the end, and no markers
+  // loops the whole track. So the toggle only needs a loaded track.
+  const loopActive = !isDisabled && loopEnabled;
+  const loopDisabled = isDisabled;
   // Save needs a complete region and somewhere to save it; Clear needs at
   // least a start marker to wipe.
-  const saveDisabled = isDisabled || !canLoop || !onSave;
+  const saveDisabled = isDisabled || !hasRegion || !onSave;
   const clearDisabled = isDisabled || markerA == null || !onClear;
 
   const renderButton = (
@@ -114,7 +121,11 @@ export function MarkerControls({
       >
         <Text style={[styles.tileLabel, { color }]}>{label}</Text>
         <Text
-          style={[styles.tileValue, { color: theme.colors.textPrimary }]}
+          style={[
+            theme.typography.caption,
+            styles.tileValue,
+            { color: theme.colors.textPrimary },
+          ]}
           numberOfLines={1}
         >
           {sub}
@@ -151,7 +162,11 @@ export function MarkerControls({
           onPress={() => onToggleLoop(!loopEnabled)}
           accessibilityRole="switch"
           accessibilityState={{ checked: loopActive }}
-          accessibilityHint="Repeats playback between the A and B points"
+          accessibilityHint={
+            hasRegion
+              ? 'Repeats playback between the A and B points'
+              : 'Repeats the whole track, or from A when only A is set'
+          }
         />
         <IconSquareButton
           icon="save-outline"
@@ -172,7 +187,11 @@ export function MarkerControls({
 
       {!isDisabled && (placeMode === 'A' || placeMode === 'B') && (
         <Text
-          style={[styles.caption, { color: theme.colors.textSecondary }]}
+          style={[
+            theme.typography.caption,
+            styles.caption,
+            { color: theme.colors.textSecondary },
+          ]}
           accessibilityLiveRegion="polite"
         >
           {placeMode === 'A'
@@ -186,6 +205,7 @@ export function MarkerControls({
           marker="A"
           initialMs={markerA}
           durationMs={durationMs}
+          {...markerBounds('A', markerA, markerB, durationMs)}
           onCommit={onEditA}
           onRemove={() => {
             setSheetTarget(null);
@@ -199,6 +219,7 @@ export function MarkerControls({
           marker="B"
           initialMs={markerB}
           durationMs={durationMs}
+          {...markerBounds('B', markerA, markerB, durationMs)}
           onCommit={onEditB}
           onRemove={() => {
             setSheetTarget(null);
@@ -222,23 +243,25 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   tile: {
-    minWidth: 50,
-    height: 52,
-    borderRadius: 12,
+    minWidth: MARKER_TILE_MIN_WIDTH,
+    height: MARKER_TILE_HEIGHT,
+    borderRadius: radii.md,
     paddingHorizontal: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // The tile letter is intentionally bespoke (13/700): it is a badge, not
+  // body copy, sized between caption and bodySmall so the tile stays compact.
   tileLabel: {
     fontSize: 13,
     fontWeight: '700',
   },
+  // Type comes from theme.typography.caption at the usage site; these hold
+  // only the layout deltas.
   tileValue: {
-    fontSize: 12,
-    marginTop: 2,
+    marginTop: spacing.xs / 2,
   },
   caption: {
-    fontSize: 12,
     textAlign: 'center',
     marginTop: spacing.md,
   },

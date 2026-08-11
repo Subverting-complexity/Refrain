@@ -16,6 +16,7 @@ export const spacing = {
 export const radii = {
   sm: 8,
   md: 12,
+  lg: 16,
 } as const;
 
 export type Spacing = typeof spacing;

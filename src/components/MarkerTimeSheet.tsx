@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useLatestRef } from '../hooks/useLatestRef';
 import { useTheme } from '../hooks/useTheme';
 import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import { formatDurationTenths } from '../utils/formatTime';
@@ -23,6 +24,19 @@ export interface MarkerTimeSheetProps {
   marker: 'A' | 'B';
   initialMs: number;
   durationMs: number;
+  /**
+   * Lowest position this marker may be stepped to. Defaults to the start of
+   * the track. Callers pass the sibling-derived bound (see `markerBounds`) so
+   * B cannot be nudged to or before A — a rejected write would otherwise leave
+   * the display showing a position the engine never accepted.
+   */
+  minMs?: number;
+  /**
+   * Highest position this marker may be stepped to. Defaults to the end of the
+   * track. Callers pass the sibling-derived bound so A cannot be nudged to or
+   * past B, which the engine answers by dropping B entirely.
+   */
+  maxMs?: number;
   /** Called on every 100 ms step — the parent writes through to the engine in real time. */
   onCommit: (ms: number) => void;
   /** A tile: clear both markers. B tile: clear B only. Enforced by caller. */
@@ -34,6 +48,8 @@ export function MarkerTimeSheet({
   marker,
   initialMs,
   durationMs,
+  minMs = 0,
+  maxMs = durationMs,
   onCommit,
   onRemove,
   onDismiss,
@@ -64,30 +80,31 @@ export function MarkerTimeSheet({
   useEffect(() => () => clearHoldTimers(), [clearHoldTimers]);
 
   // Keep refs in sync with the latest props so timer callbacks are never stale.
-  const durationMsRef = useRef(durationMs);
-  const onCommitRef = useRef(onCommit);
-  useEffect(() => {
-    durationMsRef.current = durationMs;
-  }, [durationMs]);
-  useEffect(() => {
-    onCommitRef.current = onCommit;
-  }, [onCommit]);
+  // `minMs`/`maxMs` are held the same way: a hold-repeat runs off a timer, and
+  // the bounds can move under it if the sibling marker changes mid-hold.
+  const minMsRef = useLatestRef(minMs);
+  const maxMsRef = useLatestRef(maxMs);
+  const onCommitRef = useLatestRef(onCommit);
 
   // Apply one step of `amountMs`: mutate the ref, update display state, notify
   // parent. Called both immediately on pressIn and on each timer tick, so
   // onCommit fires synchronously every time (not batched through useEffect).
-  const applyStep = useCallback((direction: 1 | -1, amountMs: number) => {
-    const next = Math.max(
-      0,
-      Math.min(
-        durationMsRef.current,
-        currentMsRef.current + direction * amountMs,
-      ),
-    );
-    currentMsRef.current = next;
-    setCurrentMs(next);
-    onCommitRef.current(next);
-  }, []);
+  // Clamped to [minMs, maxMs] — stepping past the sibling marker is what the
+  // bounds exist to prevent, and the display must never move somewhere the
+  // engine will refuse.
+  const applyStep = useCallback(
+    (direction: 1 | -1, amountMs: number) => {
+      const next = Math.max(
+        minMsRef.current,
+        Math.min(maxMsRef.current, currentMsRef.current + direction * amountMs),
+      );
+      currentMsRef.current = next;
+      setCurrentMs(next);
+      onCommitRef.current(next);
+      // Ref identities never change, so this callback stays stable.
+    },
+    [minMsRef, maxMsRef, onCommitRef],
+  );
 
   // Begin a press: apply one step now, then after a hold delay repeat the step
   // and eventually accelerate to the larger step size for the tier.

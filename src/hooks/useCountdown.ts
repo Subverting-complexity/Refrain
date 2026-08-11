@@ -30,6 +30,8 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     IDLE_STATE,
   );
   const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
+  // Keep the latest config/onPlay in refs so the stable callbacks below read
+  // current values without being rebuilt.
   const configRef = useLatestRef(config);
   const onPlayRef = useLatestRef(onPlay);
 
@@ -57,6 +59,7 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     await countdownEngine.start(cfg, () => {
       void onPlayRef.current();
     });
+    // Ref identities never change, so this callback stays stable.
   }, [configRef, onPlayRef]);
 
   const cancelCountdown = useCallback(() => {

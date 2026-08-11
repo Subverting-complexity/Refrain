@@ -34,6 +34,26 @@ describe('parseFormat', () => {
     expect(parseFormat('file.flac')).toBeNull();
     expect(parseFormat('noext')).toBeNull();
   });
+
+  // A bare index lookup reaches the prototype chain, so these resolved to a
+  // truthy non-format that `?? null` let through. Only all-lowercase keys are
+  // reachable — `getExtension` lowercases, so `.toString` arrives as
+  // `tostring` and misses the prototype anyway (see below).
+  it.each(['constructor', '__proto__'])(
+    'returns null for the inherited Object.prototype key .%s',
+    (key) => {
+      expect(parseFormat(`mix.${key}`)).toBeNull();
+    },
+  );
+
+  // Pins the lowercasing that makes the mixed-case prototype keys unreachable,
+  // so a future change to getExtension can't quietly widen the hole.
+  it.each(['toString', 'valueOf', 'hasOwnProperty'])(
+    'returns null for the mixed-case prototype key .%s',
+    (key) => {
+      expect(parseFormat(`mix.${key}`)).toBeNull();
+    },
+  );
 });
 
 describe('isSupportedFilename', () => {
@@ -47,6 +67,13 @@ describe('isSupportedFilename', () => {
   it('rejects unsupported formats', () => {
     expect(isSupportedFilename('a.flac')).toBe(false);
     expect(isSupportedFilename('noext')).toBe(false);
+  });
+
+  // This is the share-intent guard: a name clearing it reaches importFromUri
+  // and lands a track whose duration estimate is NaN.
+  it('rejects filenames whose extension names an Object.prototype key', () => {
+    expect(isSupportedFilename('mix.constructor')).toBe(false);
+    expect(isSupportedFilename('mix.__proto__')).toBe(false);
   });
 });
 

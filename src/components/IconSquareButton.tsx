@@ -1,8 +1,8 @@
-import React from 'react';
 import { StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
+import { MIN_TOUCH_TARGET, radii } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
 
 interface IconSquareButtonProps {
@@ -24,7 +24,7 @@ export function IconSquareButton({
   onPress,
   active = false,
   disabled = false,
-  size = 44,
+  size = MIN_TOUCH_TARGET,
   accessibilityRole = 'button',
   accessibilityState,
   accessibilityHint,
@@ -68,7 +68,7 @@ export function IconSquareButton({
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 12,
+    borderRadius: radii.md,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,11 +1,13 @@
-import { Link, Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { useTheme } from '@/src/hooks/useTheme';
 import { spacing } from '@/src/theme';
 
 export default function NotFoundScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
 
   return (
     <>
@@ -14,9 +16,16 @@ export default function NotFoundScreen() {
         style={[styles.container, { backgroundColor: theme.colors.background }]}
       >
         <Text style={theme.typography.heading}>Page not found</Text>
-        <Link href="/" style={[styles.link, { color: theme.colors.accent }]}>
-          <Text>Go to home</Text>
-        </Link>
+        <AccessiblePressable
+          accessibilityRole="link"
+          accessibilityLabel="Go to home"
+          onPress={() => router.replace('/')}
+          style={styles.link}
+        >
+          <Text style={[theme.typography.body, { color: theme.colors.accent }]}>
+            Go to home
+          </Text>
+        </AccessiblePressable>
       </View>
     </>
   );
@@ -32,5 +41,6 @@ const styles = StyleSheet.create({
   link: {
     marginTop: spacing.lg,
     paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
 });

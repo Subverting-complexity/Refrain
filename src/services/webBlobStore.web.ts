@@ -43,8 +43,22 @@ function runTransaction<T>(
       new Promise<T>((resolve, reject) => {
         const tx = db.transaction(STORE, mode);
         const request = run(tx.objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
+        // A request can report success before the transaction commits, so
+        // resolving on `request.onsuccess` would surface success even when the
+        // commit later fails — for the large audio blobs stored here, a
+        // quota-exceeded abort at commit time is the likeliest failure, and it
+        // would leave the track's metadata written but its audio missing.
+        // Capture the result on success, but only resolve once the transaction
+        // actually commits (mirrors database.web.ts).
+        let result: T;
+        request.onsuccess = () => {
+          result = request.result;
+        };
         request.onerror = () => reject(request.error);
+        tx.oncomplete = () => resolve(result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () =>
+          reject(tx.error ?? new Error('IndexedDB transaction aborted'));
       }),
   );
 }
@@ -83,36 +97,78 @@ export function listBlobIds(): Promise<string[]> {
 
 const objectUrls = new Map<string, string>();
 
+// In-flight creations, keyed by track id. Reading the blob out of IndexedDB is
+// asynchronous, so two overlapping calls for the same id both miss the cache,
+// both call `createObjectURL`, and the second overwrites the first in the map
+// — leaking a URL that nothing will ever revoke, pinning a whole audio blob in
+// memory for the page session. Overlapping reads are routine: every library
+// load resolves a URL per track, and navigating to the player and straight
+// back starts a second load while the first is still running. Callers share
+// one in-flight promise per id instead.
+const pendingUrls = new Map<string, Promise<string | null>>();
+
+// Bumped whenever a cached URL is invalidated (track deleted, or its blob
+// re-put). A creation already in flight compares the token it started with
+// against the current one, so it cannot install a URL for a track that was
+// deleted or replaced while it was reading.
+const revokeTokens = new Map<string, number>();
+
+function tokenFor(id: string): number {
+  return revokeTokens.get(id) ?? 0;
+}
+
 /**
  * Return a `blob:` object URL for a track id, creating and caching it on
- * first use. Returns null if no blob is stored for the id. Cached so the
- * same URL is reused across library reloads within a page session.
+ * first use. Returns null if no blob is stored for the id. Cached so the same
+ * URL is reused across library reloads within a page session, and de-duplicated
+ * so concurrent callers share one URL rather than leaking one per call.
  */
-export async function getObjectUrl(id: string): Promise<string | null> {
+export function getObjectUrl(id: string): Promise<string | null> {
   const cached = objectUrls.get(id);
-  if (cached) return cached;
+  if (cached) return Promise.resolve(cached);
 
-  const blob = await getBlob(id);
-  if (!blob) return null;
+  const inFlight = pendingUrls.get(id);
+  if (inFlight) return inFlight;
 
-  const url = URL.createObjectURL(blob);
-  objectUrls.set(id, url);
-  return url;
+  const token = tokenFor(id);
+  // The promise is held in a box so the `finally` below can identify itself
+  // without a self-referential `const`. Clearing the slot there — before this
+  // promise settles — means a caller that awaits it can never then observe a
+  // stale in-flight entry, and a failed read cannot wedge the id on a rejected
+  // promise for the rest of the session.
+  const box: { promise?: Promise<string | null> } = {};
+  box.promise = (async () => {
+    try {
+      const blob = await getBlob(id);
+      if (!blob) return null;
+
+      const url = URL.createObjectURL(blob);
+      if (tokenFor(id) !== token) {
+        // Revoked mid-read: this URL refers to a blob the caller no longer
+        // wants. Release it rather than caching a URL nothing will revoke.
+        URL.revokeObjectURL(url);
+        return null;
+      }
+      objectUrls.set(id, url);
+      return url;
+    } finally {
+      if (pendingUrls.get(id) === box.promise) pendingUrls.delete(id);
+    }
+  })();
+
+  pendingUrls.set(id, box.promise);
+  return box.promise;
 }
 
 /** Revoke and forget the cached object URL for a track id, if any. */
 export function revokeObjectUrl(id: string): void {
+  revokeTokens.set(id, tokenFor(id) + 1);
+  // Drop any in-flight read too: its result is now stale, so the next caller
+  // should start a fresh read rather than join a doomed one.
+  pendingUrls.delete(id);
   const url = objectUrls.get(id);
   if (url) {
     URL.revokeObjectURL(url);
     objectUrls.delete(id);
   }
-}
-
-/** Revoke and forget every cached object URL (e.g. on teardown). */
-export function revokeAllObjectUrls(): void {
-  for (const url of objectUrls.values()) {
-    URL.revokeObjectURL(url);
-  }
-  objectUrls.clear();
 }

@@ -1,10 +1,4 @@
-import { useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
-
-import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
-import { CenteredDialog } from './CenteredDialog';
-import { DialogButton } from './DialogButton';
+import { SegmentNameDialog } from './SegmentNameDialog';
 
 export interface SegmentRenameDialogProps {
   /** Current name of the segment, pre-filled into the field. */
@@ -16,56 +10,23 @@ export interface SegmentRenameDialogProps {
 }
 
 /**
- * Centred rename dialog for a saved segment. Mirrors the new-segment naming
- * step of {@link SegmentSaveDialog}: a name field plus a Save button. Being a
- * centred card (rather than the bottom-anchored profile sheet) keeps the field
- * clear of the on-screen keyboard so the user can see what they are typing.
+ * Centred rename dialog for a saved segment. A thin policy wrapper over the
+ * shared {@link SegmentNameDialog}: an emptied field means "I changed my mind",
+ * so it dismisses rather than saving a nameless segment.
  */
 export function SegmentRenameDialog({
   currentName,
   onSave,
   onCancel,
 }: SegmentRenameDialogProps) {
-  const { theme } = useTheme();
-  const [draftName, setDraftName] = useState(currentName);
-
-  const confirm = () => {
-    const name = draftName.trim();
-    if (name) onSave(name);
-    else onCancel();
-  };
-
   return (
-    <CenteredDialog title="Rename segment" onDismiss={onCancel}>
-      <TextInput
-        accessibilityLabel="Segment name"
-        value={draftName}
-        onChangeText={setDraftName}
-        placeholder="Segment name"
-        placeholderTextColor={theme.colors.textSecondary}
-        style={[
-          styles.input,
-          theme.typography.body,
-          { color: theme.colors.textPrimary, borderColor: theme.colors.border },
-        ]}
-        autoFocus
-      />
-      <DialogButton
-        label="Save"
-        accessibilityLabel="Confirm rename"
-        variant="primary"
-        onPress={confirm}
-      />
-      <DialogButton label="Cancel" variant="default" onPress={onCancel} />
-    </CenteredDialog>
+    <SegmentNameDialog
+      title="Rename segment"
+      initialName={currentName}
+      fieldAccessibilityLabel="Segment name"
+      confirmAccessibilityLabel="Confirm rename"
+      onConfirm={(name) => (name ? onSave(name) : onCancel())}
+      onCancel={onCancel}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-});

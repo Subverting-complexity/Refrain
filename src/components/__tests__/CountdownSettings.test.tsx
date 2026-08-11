@@ -46,6 +46,28 @@ function defaultConfig(
   };
 }
 
+// The ToggleSwitch inside this component starts a 160ms Animated.timing on
+// mount. Fake timers keep its frames off the real event loop, and the
+// afterEach below unmounts and flushes so no timer survives the suite —
+// otherwise a late frame fires after Jest tears down the environment and
+// crashes the worker.
+let trees: ReactTestRenderer[] = [];
+
+beforeEach(() => {
+  jest.useFakeTimers();
+});
+
+afterEach(() => {
+  act(() => {
+    trees.forEach((tree) => tree.unmount());
+  });
+  trees = [];
+  act(() => {
+    jest.runOnlyPendingTimers();
+  });
+  jest.useRealTimers();
+});
+
 function renderSettings(
   config: CountdownConfig,
   onChange: jest.Mock,
@@ -56,6 +78,7 @@ function renderSettings(
       <CountdownSettings config={config} onConfigChange={onChange} />,
     );
   });
+  trees.push(tree);
   return tree;
 }
 
@@ -138,7 +161,7 @@ describe('CountdownSettings', () => {
   it('switches the count-in repeat scope', () => {
     const onChange = jest.fn();
     const tree = renderSettings(defaultConfig({ enabled: true }), onChange);
-    const everyLoopChip = findByLabel(tree.root, 'Count in Every loop')[0];
+    const everyLoopChip = findByLabel(tree.root, 'Repeat Every loop')[0];
     act(() => {
       everyLoopChip.props.onPress();
     });

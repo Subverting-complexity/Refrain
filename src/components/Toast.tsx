@@ -35,6 +35,7 @@ export function Toast({
       <AccessiblePressable
         accessibilityRole="alert"
         accessibilityLabel={message}
+        accessibilityHint="Tap to dismiss"
         onPress={onDismiss}
         style={[
           styles.banner,
