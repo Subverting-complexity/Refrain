@@ -13,7 +13,16 @@ export function getExtension(filename: string): string {
 }
 
 export function parseFormat(filename: string): AudioFormat | null {
-  return EXTENSION_TO_FORMAT[getExtension(filename)] ?? null;
+  const extension = getExtension(filename);
+  // Own properties only. A bare index reaches the prototype chain, so an
+  // extension naming an `Object.prototype` member — `mix.constructor`,
+  // `mix.__proto__` — resolved to a truthy non-format that `?? null` let
+  // through. That cleared `isSupportedFilename` (the share-intent guard) and
+  // then produced a NaN duration, since `bitrateMap[format]` is undefined.
+  if (!Object.prototype.hasOwnProperty.call(EXTENSION_TO_FORMAT, extension)) {
+    return null;
+  }
+  return EXTENSION_TO_FORMAT[extension];
 }
 
 export function isSupportedFilename(filename: string): boolean {
