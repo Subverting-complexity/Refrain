@@ -41,7 +41,6 @@ jest.mock('../../services/audioEngine', () => ({
   unloadTrack: () => mockUnloadTrack(),
   play: jest.fn(),
   pause: jest.fn(),
-  stop: jest.fn(),
   seekTo: jest.fn(),
   setMarkerA: jest.fn(),
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
