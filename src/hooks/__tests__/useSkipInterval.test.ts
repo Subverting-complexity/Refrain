@@ -116,4 +116,29 @@ describe('useSkipInterval', () => {
 
     expect(lastResult.skipSeconds).toBe(15);
   });
+
+  // The seed can succeed and the post-hydration re-read still fail (storage
+  // goes away between the two). Falling back to the default there would
+  // silently reset a user's 30s choice to 5s — the #163 clobber, arriving by
+  // the other door.
+  it('keeps a good seed when the post-hydration re-read throws', async () => {
+    mockGetNumber.mockReturnValueOnce(30).mockImplementation(() => {
+      throw new Error('db went away');
+    });
+
+    await renderTestHook();
+
+    expect(lastResult.skipSeconds).toBe(30);
+  });
+
+  it('never puts an off-list amount into state', async () => {
+    await renderTestHook();
+
+    act(() => {
+      lastResult.setSkipSeconds(7);
+    });
+
+    expect(lastResult.skipSeconds).toBe(5);
+    expect(mockSetNumber).toHaveBeenCalledWith('playback.skipSeconds', 5);
+  });
 });

@@ -7,6 +7,7 @@ import { importFromUri, isSupportedFilename } from '../services/fileImport';
 import { Track } from '../types';
 import { errorMessage } from '../utils/errorMessage';
 import { extractFilename } from '../utils/extractFilename';
+import { useLatestRef } from './useLatestRef';
 
 interface UseShareIntentOptions {
   onTrackImported: (track: Track) => void;
@@ -20,12 +21,8 @@ export function useShareIntent({
   // Keep the latest callbacks in refs so the mount-only effect below always
   // calls current handlers without re-subscribing. Writes happen in an effect,
   // not during render.
-  const onTrackImportedRef = useRef(onTrackImported);
-  const onErrorRef = useRef(onError);
-  useEffect(() => {
-    onTrackImportedRef.current = onTrackImported;
-    onErrorRef.current = onError;
-  });
+  const onTrackImportedRef = useLatestRef(onTrackImported);
+  const onErrorRef = useLatestRef(onError);
 
   // Records the initial URL once it has been handled. The mount effect runs
   // twice under StrictMode (dev), and getInitialURL can resolve in a race in
@@ -82,13 +79,20 @@ export function useShareIntent({
         }
       }
     })().catch(() => undefined);
-  }, [hasShareIntent, shareIntent, resetShareIntent]);
+    // The callback refs are stable, so this still re-runs only per share.
+  }, [
+    hasShareIntent,
+    shareIntent,
+    resetShareIntent,
+    onTrackImportedRef,
+    onErrorRef,
+  ]);
 
   useEffect(() => {
     if (shareIntentError) {
       onErrorRef.current?.(shareIntentError);
     }
-  }, [shareIntentError]);
+  }, [shareIntentError, onErrorRef]);
 
   // "Open with" / "open in place" (Android VIEW intents, iOS document types)
   // still arrive as plain URLs through expo-linking — expo-share-intent only
@@ -152,5 +156,6 @@ export function useShareIntent({
     });
 
     return () => subscription.remove();
-  }, []);
+    // The callback refs are stable, so this stays a mount-only subscription.
+  }, [onTrackImportedRef, onErrorRef]);
 }

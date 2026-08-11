@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import * as countdownEngine from '../services/countdownEngine';
 import { CountdownConfig, CountdownState } from '../types';
+import { useLatestRef } from './useLatestRef';
 
 const DEFAULT_CONFIG: CountdownConfig = {
   enabled: false,
@@ -27,14 +28,9 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     useState<CountdownState>(IDLE_STATE);
   const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
   // Keep the latest config/onPlay in refs so the stable callbacks below read
-  // current values without being rebuilt. Writes happen in an effect, not
-  // during render.
-  const configRef = useRef(config);
-  const onPlayRef = useRef(onPlay);
-  useEffect(() => {
-    configRef.current = config;
-    onPlayRef.current = onPlay;
-  });
+  // current values without being rebuilt.
+  const configRef = useLatestRef(config);
+  const onPlayRef = useLatestRef(onPlay);
 
   useEffect(() => {
     const unsub = countdownEngine.subscribe(setCountdownState);
@@ -65,7 +61,8 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     await countdownEngine.start(cfg, () => {
       void onPlayRef.current();
     });
-  }, []);
+    // Ref identities never change, so this callback stays stable.
+  }, [configRef, onPlayRef]);
 
   const cancelCountdown = useCallback(() => {
     countdownEngine.cancel();
