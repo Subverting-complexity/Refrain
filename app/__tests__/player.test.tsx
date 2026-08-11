@@ -24,6 +24,7 @@ const mockAudioPlayerState = {
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
   clearMarkerB: jest.fn(),
+  commitMarkerPlacement: jest.fn(),
   setLoopEnabled: jest.fn(),
   setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),
@@ -329,6 +330,97 @@ function getWaveform(tree: ReactTestRenderer) {
   )[0];
 }
 
+function getMarkerControls(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) => typeof node.props.onEditA === 'function',
+  )[0];
+}
+
+describe('PlayerScreen marker commit', () => {
+  it('reports a settled waveform gesture to the engine', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getWaveform(tree).props.onMarkerCommit('A');
+    });
+
+    expect(mockAudioPlayerState.commitMarkerPlacement).toHaveBeenCalledWith(
+      'A',
+    );
+  });
+
+  it('does not commit on every marker change during a drag', () => {
+    mockSetMarkerB.mockReturnValue(true);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    // The throttled drag callbacks fire ~20x/sec; seeking at that cadence is
+    // exactly what the commit split avoids.
+    act(() => {
+      getWaveform(tree).props.onMarkerAChange(2000);
+      getWaveform(tree).props.onMarkerBChange(8000);
+    });
+
+    expect(mockAudioPlayerState.commitMarkerPlacement).not.toHaveBeenCalled();
+  });
+
+  it('commits an A time typed into the marker sheet', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getMarkerControls(tree).props.onEditA(2000);
+    });
+
+    expect(mockAudioPlayerState.setMarkerA).toHaveBeenCalledWith(2000);
+    expect(mockAudioPlayerState.commitMarkerPlacement).toHaveBeenCalledWith(
+      'A',
+    );
+  });
+
+  it('commits a B time typed into the marker sheet', () => {
+    mockSetMarkerB.mockReturnValue(true);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getMarkerControls(tree).props.onEditB(8000);
+    });
+
+    expect(mockSetMarkerB).toHaveBeenCalledWith(8000);
+    expect(mockAudioPlayerState.commitMarkerPlacement).toHaveBeenCalledWith(
+      'B',
+    );
+  });
+
+  it('does not commit a B time the engine rejects', () => {
+    mockSetMarkerB.mockReturnValue(false);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getMarkerControls(tree).props.onEditB(1000);
+    });
+
+    expect(mockAudioPlayerState.commitMarkerPlacement).not.toHaveBeenCalled();
+    expect(findToastMessage(tree)).toBe('Loop end must come after loop start');
+  });
+});
+
 describe('PlayerScreen header title', () => {
   it('folds the track filename into the navigation header', () => {
     act(() => {
@@ -451,6 +543,28 @@ describe('PlayerScreen segment profiles', () => {
     expect(mockSetMarkerB).toHaveBeenCalledWith(5000);
     expect(mockAudioPlayerState.setLoopEnabled).toHaveBeenCalledWith(false);
     expect(mockMarkLoaded).toHaveBeenCalled();
+  });
+
+  it('parks the playhead at the loaded segment start, exactly once', () => {
+    mockSetMarkerB.mockReturnValue(true);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<PlayerScreen />);
+    });
+
+    act(() => {
+      getSegmentsButton(tree).props.onPress();
+    });
+    act(() => {
+      mockSheetProps?.onLoadProfile(loadedProfile('p1', 'Verse'));
+    });
+
+    // One commit for the load, not one per marker.
+    expect(mockAudioPlayerState.commitMarkerPlacement).toHaveBeenCalledTimes(1);
+    expect(mockAudioPlayerState.commitMarkerPlacement).toHaveBeenCalledWith(
+      'A',
+    );
   });
 });
 

@@ -59,6 +59,11 @@ export function useAudioPlayer(
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
   const clearMarkerB = useCallback(() => audioEngine.clearMarkerB(), []);
+  const commitMarkerPlacement = useCallback(
+    (placed: audioEngine.MarkerCommit) =>
+      audioEngine.commitMarkerPlacement(placed),
+    [],
+  );
   const setLoopEnabled = useCallback(
     (enabled: boolean) => audioEngine.setLoopEnabled(enabled),
     [],
@@ -89,6 +94,7 @@ export function useAudioPlayer(
     setMarkerB,
     clearMarkers,
     clearMarkerB,
+    commitMarkerPlacement,
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,

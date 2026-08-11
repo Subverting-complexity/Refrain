@@ -72,6 +72,7 @@ export default function PlayerScreen() {
     setMarkerB,
     clearMarkers,
     clearMarkerB,
+    commitMarkerPlacement,
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,
@@ -139,8 +140,11 @@ export default function PlayerScreen() {
       if (profile.markerB != null) setMarkerB(profile.markerB);
       setLoopEnabled(profile.loopEnabled);
       markLoaded(profile);
+      // Park at the segment's start, but only once both markers have landed —
+      // committing per-marker would seek twice for a single load.
+      if (profile.markerA != null) void commitMarkerPlacement('A');
     },
-    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded],
+    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded, commitMarkerPlacement],
   );
 
   // Loading from the sheet. If the loaded segment has unsaved marker edits,
@@ -291,13 +295,52 @@ export default function PlayerScreen() {
 
   // The B button rejects placements at or before A. Surface that instead of
   // failing silently: the toast is both shown and announced (see useToast).
-  const handleSetMarkerB = useCallback(
-    (positionMs: number) => {
+  // Returns whether the placement landed, so callers that follow it with a
+  // commit don't move the playhead for a placement that never happened.
+  const applyMarkerB = useCallback(
+    (positionMs: number): boolean => {
       if (!setMarkerB(positionMs)) {
         showToast(MARKER_B_BEFORE_A_MESSAGE, 'error');
+        return false;
       }
+      return true;
     },
     [setMarkerB, showToast],
+  );
+
+  // Drag/tap path: fires throughout the gesture, so it never commits — the
+  // waveform reports the commit once on release.
+  const handleSetMarkerB = useCallback(
+    (positionMs: number) => {
+      applyMarkerB(positionMs);
+    },
+    [applyMarkerB],
+  );
+
+  // A drag or tap on the wave has settled. Park the playhead at the loop start
+  // so the region just defined is the one that plays next.
+  const handleMarkerCommit = useCallback(
+    (marker: 'A' | 'B') => {
+      void commitMarkerPlacement(marker);
+    },
+    [commitMarkerPlacement],
+  );
+
+  // Typing a time into the marker sheet is just another way to place a marker,
+  // so it parks the playhead exactly as a wave gesture does.
+  const handleEditA = useCallback(
+    (positionMs: number) => {
+      setMarkerA(positionMs);
+      void commitMarkerPlacement('A');
+    },
+    [setMarkerA, commitMarkerPlacement],
+  );
+
+  const handleEditB = useCallback(
+    (positionMs: number) => {
+      if (applyMarkerB(positionMs)) void commitMarkerPlacement('B');
+    },
+    [applyMarkerB, commitMarkerPlacement],
   );
 
   // Pressing A: with A set, clear both markers; otherwise arm placing A. The
@@ -411,6 +454,7 @@ export default function PlayerScreen() {
               loopEnabled={loopEnabled}
               placeMode={placeMode}
               onPlaceComplete={handlePlaceComplete}
+              onMarkerCommit={handleMarkerCommit}
               onMarkerAChange={setMarkerA}
               onMarkerBChange={handleSetMarkerB}
               onPreviewStart={
@@ -479,8 +523,8 @@ export default function PlayerScreen() {
             placeMode={placeMode}
             onPressA={handlePressA}
             onPressB={handlePressB}
-            onEditA={setMarkerA}
-            onEditB={handleSetMarkerB}
+            onEditA={handleEditA}
+            onEditB={handleEditB}
             onRemoveA={handleClear}
             onRemoveB={handleRemoveB}
             onToggleLoop={setLoopEnabled}
