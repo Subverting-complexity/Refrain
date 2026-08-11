@@ -65,6 +65,35 @@ describe('useSnippetPreview', () => {
     expect(mockSetSnippetPreviewEnabled).toHaveBeenCalledWith(false);
   });
 
+  // Regression for #186: the identical settingsStore write in useSkipInterval
+  // is guarded, so a storage throw here must not escape into the toggle's
+  // press handler either.
+  it('does not throw out of the setter when the persist write fails', async () => {
+    await renderHook();
+    mockSetSnippetPreviewEnabled.mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+
+    expect(() => {
+      act(() => {
+        lastResult.setSnippetPreviewEnabled(false);
+      });
+    }).not.toThrow();
+  });
+
+  it('still applies the new value in memory when the persist write fails', async () => {
+    await renderHook();
+    mockSetSnippetPreviewEnabled.mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+
+    act(() => {
+      lastResult.setSnippetPreviewEnabled(false);
+    });
+
+    expect(lastResult.snippetPreviewEnabled).toBe(false);
+  });
+
   // Regression for #163: on a cold web load the first synchronous seed can
   // read an unhydrated cache and fall back to the default-on. Once hydration
   // resolves, the hook re-reads and reapplies the persisted-off value.

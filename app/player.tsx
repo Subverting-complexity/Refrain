@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import {
-  AccessibilityInfo,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +11,7 @@ import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
-import { Toast } from '@/src/components/Toast';
+import { ToastHost } from '@/src/components/ToastHost';
 import { TransportControls } from '@/src/components/TransportControls';
 import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
@@ -34,6 +28,7 @@ import { updateTrackDuration } from '@/src/services/trackStore';
 import { radii, spacing } from '@/src/theme';
 import { SegmentProfile } from '@/src/types';
 import { nextSegmentName } from '@/src/utils/nextSegmentName';
+import { settle } from '@/src/utils/settle';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
 
@@ -172,18 +167,13 @@ export default function PlayerScreen() {
   useEffect(() => {
     if (trackId && durationMs > 0 && !durationPersisted.current) {
       // Optimistically guard against re-entry; clear the flag on failure so
-      // the next durationMs update retries. Handles both a native synchronous
-      // throw and a web asynchronous rejection (the web store is async).
+      // the next durationMs update retries. `settle` covers both a native
+      // synchronous throw and a web asynchronous rejection (the web store is
+      // async), so the retry reset lives in one place.
       durationPersisted.current = true;
-      try {
-        void Promise.resolve(updateTrackDuration(trackId, durationMs)).catch(
-          () => {
-            durationPersisted.current = false;
-          },
-        );
-      } catch {
+      void settle(() => updateTrackDuration(trackId, durationMs)).catch(() => {
         durationPersisted.current = false;
-      }
+      });
     }
   }, [trackId, durationMs]);
 
@@ -302,11 +292,10 @@ export default function PlayerScreen() {
   }, [navigation]);
 
   // The B button rejects placements at or before A. Surface that instead of
-  // failing silently: announce for screen readers and show a visible toast.
+  // failing silently: the toast is both shown and announced (see useToast).
   const handleSetMarkerB = useCallback(
     (positionMs: number) => {
       if (!setMarkerB(positionMs)) {
-        AccessibilityInfo.announceForAccessibility(MARKER_B_BEFORE_A_MESSAGE);
         showToast(MARKER_B_BEFORE_A_MESSAGE, 'error');
       }
     },
@@ -548,11 +537,7 @@ export default function PlayerScreen() {
         </View>
       </ScrollView>
 
-      <Toast
-        message={toast?.message ?? null}
-        variant={toast?.variant}
-        onDismiss={hideToast}
-      />
+      <ToastHost toast={toast} onDismiss={hideToast} />
 
       {profilesVisible && trackId ? (
         <SegmentProfileSheet

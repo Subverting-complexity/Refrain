@@ -11,7 +11,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ImportButton } from '@/src/components/ImportButton';
-import { Toast } from '@/src/components/Toast';
+import { ToastHost } from '@/src/components/ToastHost';
 import { TrackListItem } from '@/src/components/TrackListItem';
 import { useShareIntent } from '@/src/hooks/useShareIntent';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -24,6 +24,7 @@ import {
 } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Track } from '@/src/types';
+import { errorMessage } from '@/src/utils/errorMessage';
 
 export default function LibraryScreen() {
   const { theme } = useTheme();
@@ -35,12 +36,21 @@ export default function LibraryScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Ignore a load that resolves after the screen has blurred: refocusing
+      // starts a fresh load, and a slow earlier one landing afterwards would
+      // clobber the newer list (and any import made in between) with its
+      // stale snapshot.
+      let cancelled = false;
       loadTracks()
-        .then(setTracks)
+        .then((loaded) => {
+          if (!cancelled) setTracks(loaded);
+        })
         .catch(() => {
-          AccessibilityInfo.announceForAccessibility('Failed to load library');
-          showToast('Failed to load library', 'error');
+          if (!cancelled) showToast('Failed to load library', 'error');
         });
+      return () => {
+        cancelled = true;
+      };
     }, [showToast]),
   );
 
@@ -49,9 +59,10 @@ export default function LibraryScreen() {
     try {
       const loaded = await loadTracks();
       setTracks(loaded);
+      // Announced rather than toasted: the RefreshControl spinner is the
+      // sighted user's confirmation, so a banner here would be redundant.
       AccessibilityInfo.announceForAccessibility('Library refreshed');
     } catch {
-      AccessibilityInfo.announceForAccessibility('Failed to refresh library');
       showToast('Failed to refresh library', 'error');
     } finally {
       setRefreshing(false);
@@ -69,9 +80,6 @@ export default function LibraryScreen() {
         // fail for reasons the toast can't convey (schema mismatch, worker
         // error). Logging it makes those failures diagnosable.
         console.error('Failed to save track to library', error);
-        AccessibilityInfo.announceForAccessibility(
-          'Failed to save track to library',
-        );
         showToast('Failed to save track to library', 'error');
         return false;
       }
@@ -84,10 +92,8 @@ export default function LibraryScreen() {
       try {
         await deleteTrack(id);
         setTracks((prev) => prev.filter((t) => t.id !== id));
-        AccessibilityInfo.announceForAccessibility('Track deleted');
         showToast('Track deleted', 'success');
       } catch {
-        AccessibilityInfo.announceForAccessibility('Failed to delete track');
         showToast('Failed to delete track', 'error');
       }
     },
@@ -97,9 +103,6 @@ export default function LibraryScreen() {
   const handleShareImport = useCallback(
     async (track: Track) => {
       if (!(await addTrack(track))) return;
-      AccessibilityInfo.announceForAccessibility(
-        `Received ${track.filename} from share`,
-      );
       showToast(`Received ${track.filename} from share`, 'success');
     },
     [addTrack, showToast],
@@ -107,9 +110,6 @@ export default function LibraryScreen() {
 
   const handleShareError = useCallback(
     (message: string) => {
-      AccessibilityInfo.announceForAccessibility(
-        `Share import failed: ${message}`,
-      );
       showToast(`Share import failed: ${message}`, 'error');
     },
     [showToast],
@@ -136,23 +136,15 @@ export default function LibraryScreen() {
       const result = await pickAndImportFile();
       if (result.success) {
         if (!(await addTrack(result.track))) return;
-        AccessibilityInfo.announceForAccessibility(
-          `Imported ${result.track.filename} successfully`,
-        );
         showToast(`Imported ${result.track.filename} successfully`, 'success');
       } else if (result.error !== 'cancelled') {
-        AccessibilityInfo.announceForAccessibility(
-          `Import failed: ${result.message}`,
-        );
         showToast(`Import failed: ${result.message}`, 'error');
       }
     } catch (error) {
       // Defensive: pickAndImportFile resolves to an outcome on expected
       // failures, but an unexpected throw must still surface to the user
       // rather than silently doing nothing.
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      AccessibilityInfo.announceForAccessibility(`Import failed: ${message}`);
-      showToast(`Import failed: ${message}`, 'error');
+      showToast(`Import failed: ${errorMessage(error)}`, 'error');
     } finally {
       setImporting(false);
     }
@@ -207,11 +199,7 @@ export default function LibraryScreen() {
           />
         </View>
       )}
-      <Toast
-        message={toast?.message ?? null}
-        variant={toast?.variant ?? 'success'}
-        onDismiss={hideToast}
-      />
+      <ToastHost toast={toast} onDismiss={hideToast} />
     </SafeAreaView>
   );
 }

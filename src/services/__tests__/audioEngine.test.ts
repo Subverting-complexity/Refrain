@@ -713,6 +713,95 @@ describe('audioEngine', () => {
         expect.objectContaining({ status: 'loading' }),
       );
     });
+
+    it('a listener that throws on its initial replay does not fail subscribe', () => {
+      // subscribe() replays current state immediately, from inside the
+      // subscriber's mount effect — a throw there would fail the component,
+      // not just its own state sync.
+      const { subscribe } = require('../audioEngine');
+
+      expect(() =>
+        subscribe(() => {
+          throw new Error('subscriber blew up');
+        }),
+      ).not.toThrow();
+    });
+
+    it('still returns a working unsubscribe for a throwing listener', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const throwing = jest.fn(() => {
+        throw new Error('subscriber blew up');
+      });
+
+      const unsubscribe = subscribe(throwing);
+      throwing.mockClear();
+      unsubscribe();
+
+      await loadTrack('file:///test.mp3');
+
+      expect(throwing).not.toHaveBeenCalled();
+    });
+
+    it('a throwing listener does not stop the others from being notified', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      const throwing = jest.fn(() => {
+        throw new Error('subscriber blew up');
+      });
+      const listener = jest.fn();
+
+      subscribe(throwing);
+      subscribe(listener);
+      throwing.mockClear();
+      listener.mockClear();
+
+      await loadTrack('file:///test.mp3');
+
+      // Registered first, so without isolation its throw would abort the
+      // fan-out and leave the later subscriber on a stale transport.
+      expect(throwing).toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'loading' }),
+      );
+    });
+
+    it('a throwing listener does not escape the status-update callback', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      subscribe(() => {
+        throw new Error('subscriber blew up');
+      });
+
+      // Most notifications originate inside expo-audio's native
+      // playbackStatusUpdate callback; a throw there would escape into the
+      // event emitter rather than being contained by the engine.
+      expect(() =>
+        statusCallback?.(makeLoadedStatus({ currentTime: 1 })),
+      ).not.toThrow();
+    });
+
+    it('subscribing from inside a listener does not notify the newcomer mid-pass', async () => {
+      const { subscribe, loadTrack } = require('../audioEngine');
+      await loadTrack('file:///test.mp3');
+
+      const latecomer = jest.fn();
+      let calls = 0;
+      // Call 1 is this listener's own replay from subscribe(); call 2 is the
+      // status broadcast below, so the newcomer joins mid-pass.
+      subscribe(() => {
+        calls += 1;
+        if (calls === 2) subscribe(latecomer);
+      });
+      latecomer.mockClear();
+
+      statusCallback?.(makeLoadedStatus({ currentTime: 1 }));
+
+      // Exactly one call — the replay subscribe() gives it. Iterating the live
+      // Set would visit the newly added entry as well and deliver the same
+      // state twice (and a listener that re-subscribes itself would spin).
+      expect(calls).toBe(2);
+      expect(latecomer).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('getState', () => {

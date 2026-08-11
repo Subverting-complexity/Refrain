@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import * as Crypto from 'expo-crypto';
 
 import { ImportOutcome, Track } from '../types';
+import { generateId } from '../utils/generateId';
 import {
   estimateDurationMs,
   getExtension,
@@ -72,7 +72,11 @@ async function importFromFile(
     );
   }
 
-  const id = Crypto.randomUUID();
+  // Use the shared generator rather than `Crypto.randomUUID` directly: it is
+  // gated to secure contexts and throws otherwise, and here that throw would
+  // escape `importFromFile` entirely (it sits ahead of the try below). The web
+  // import and the segment-profile store already go through this helper.
+  const id = generateId();
   const destFilename = `${id}.${format}`;
 
   try {
