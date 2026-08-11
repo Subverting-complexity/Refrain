@@ -107,4 +107,39 @@ describe('useSnippetPreview', () => {
     expect(lastResult.snippetPreviewEnabled).toBe(false);
     expect(mockHydrateSettings).toHaveBeenCalledTimes(1);
   });
+
+  // The write above is already guarded (#186). The *read* paths were not, and
+  // the native store reads SQLite synchronously — so a throw escaped into the
+  // render itself, which no amount of write-guarding covers.
+  describe('best-effort reads', () => {
+    it('falls back to the default when the initial read throws', async () => {
+      mockGetSnippetPreviewEnabled.mockImplementation(() => {
+        throw new Error('database not open');
+      });
+
+      await expect(renderHook()).resolves.toBeDefined();
+      expect(lastResult.snippetPreviewEnabled).toBe(true);
+    });
+
+    it('keeps the seeded value when the post-hydration re-read throws', async () => {
+      mockGetSnippetPreviewEnabled
+        .mockReturnValueOnce(false) // lazy seed succeeds
+        .mockImplementation(() => {
+          throw new Error('database closed');
+        });
+
+      await renderHook();
+
+      expect(lastResult.snippetPreviewEnabled).toBe(false);
+    });
+
+    it('keeps the seeded value when hydration rejects', async () => {
+      mockGetSnippetPreviewEnabled.mockReturnValue(false);
+      mockHydrateSettings.mockRejectedValue(new Error('indexeddb blocked'));
+
+      await renderHook();
+
+      expect(lastResult.snippetPreviewEnabled).toBe(false);
+    });
+  });
 });
