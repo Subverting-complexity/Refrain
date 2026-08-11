@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import * as settingsStore from '../services/settingsStore';
 
@@ -18,6 +18,20 @@ function sanitize(seconds: number): number {
 }
 
 /**
+ * Read the persisted amount, snapped to a known preset. Best-effort: a storage
+ * failure falls back to the default and never throws.
+ */
+function readPersistedSkipSeconds(): number {
+  try {
+    return sanitize(
+      settingsStore.getNumber(SKIP_SETTING_KEY, DEFAULT_SKIP_SECONDS),
+    );
+  } catch {
+    return DEFAULT_SKIP_SECONDS;
+  }
+}
+
+/**
  * Manages the configurable skip-back/forward amount, persisted across reloads
  * and tracks via the shared settings store (best-effort — a storage failure
  * falls back to the default and never throws). Returns the amount in seconds,
@@ -26,17 +40,28 @@ function sanitize(seconds: number): number {
 export function useSkipInterval() {
   // Hydrate the persisted amount once, in the lazy initializer, so the first
   // render already shows the stored value (no default-then-update flash) and we
-  // avoid a synchronous setState in an effect. Reads are best-effort: a storage
-  // failure falls back to the default and never throws.
-  const [skipSeconds, setSkipSeconds] = useState(() => {
+  // avoid a synchronous setState in an effect.
+  const [skipSeconds, setSkipSeconds] = useState(readPersistedSkipSeconds);
+
+  // On a cold web load the settings cache may still be empty when the lazy
+  // seed above runs, so a persisted amount reads as the default 5s (#163).
+  // Re-read once hydration resolves to reapply it. No-op on native, where
+  // hydration is a resolved no-op and the seed was already correct.
+  useEffect(() => {
+    let cancelled = false;
     try {
-      return sanitize(
-        settingsStore.getNumber(SKIP_SETTING_KEY, DEFAULT_SKIP_SECONDS),
-      );
+      void Promise.resolve(settingsStore.hydrateSettings())
+        .then(() => {
+          if (!cancelled) setSkipSeconds(readPersistedSkipSeconds());
+        })
+        .catch(() => undefined);
     } catch {
-      return DEFAULT_SKIP_SECONDS;
+      // Best-effort: the lazy seed above already holds a usable value.
     }
-  });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updateSkipSeconds = useCallback((seconds: number) => {
     const next = sanitize(seconds);

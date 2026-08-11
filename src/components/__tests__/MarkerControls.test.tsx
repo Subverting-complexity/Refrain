@@ -369,6 +369,83 @@ describe('MarkerControls', () => {
     expect(findPressableByLabel(tree, 'Close marker editor')).toHaveLength(0);
   });
 
+  // The time editor is the one marker control that could move a marker past
+  // its sibling: the waveform handles clamp on drag, but the sheet stepped
+  // freely, so nudging A up destroyed B (the engine drops B when A reaches it)
+  // and nudging B down was rejected while the sheet kept counting.
+  describe('time editor sibling bounds', () => {
+    function pressRepeatedly(
+      tree: ReactTestRenderer,
+      label: string,
+      times: number,
+    ) {
+      const button = tree.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === label &&
+          typeof node.props.onPressIn === 'function',
+      )[0];
+      for (let i = 0; i < times; i++) {
+        act(() => {
+          button.props.onPressIn();
+        });
+        act(() => {
+          button.props.onPressOut();
+        });
+      }
+    }
+
+    it('never steps A to or past B', () => {
+      const onEditA = jest.fn();
+      const tree = renderControls({ markerA: 5000, markerB: 8000, onEditA });
+      act(() => {
+        findPressableByLabelFragment(
+          tree,
+          'Loop start 0:05',
+        )[0].props.onPress();
+      });
+
+      pressRepeatedly(tree, 'Increase loop start by 1 second', 6);
+
+      expect(onEditA).toHaveBeenCalled();
+      const committed = onEditA.mock.calls.map(([ms]: [number]) => ms);
+      expect(Math.max(...committed)).toBe(7999);
+    });
+
+    it('never steps B to or before A', () => {
+      const onEditB = jest.fn();
+      const tree = renderControls({ markerA: 5000, markerB: 8000, onEditB });
+      act(() => {
+        findPressableByLabelFragment(tree, 'Loop end 0:08')[0].props.onPress();
+      });
+
+      pressRepeatedly(tree, 'Decrease loop end by 1 second', 6);
+
+      expect(onEditB).toHaveBeenCalled();
+      const committed = onEditB.mock.calls.map(([ms]: [number]) => ms);
+      expect(Math.min(...committed)).toBe(5001);
+    });
+
+    it('lets A use the whole track when B is unset', () => {
+      const onEditA = jest.fn();
+      const tree = renderControls({
+        markerA: 5000,
+        markerB: null,
+        durationMs: 120000,
+        onEditA,
+      });
+      act(() => {
+        findPressableByLabelFragment(
+          tree,
+          'Loop start 0:05',
+        )[0].props.onPress();
+      });
+
+      pressRepeatedly(tree, 'Increase loop start by 1 second', 3);
+
+      expect(onEditA).toHaveBeenLastCalledWith(8000);
+    });
+  });
+
   it('accepts style prop override', () => {
     const tree = renderControls({ style: { marginTop: 10 } });
     const container = tree.root.children[0];

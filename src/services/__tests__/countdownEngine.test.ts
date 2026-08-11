@@ -45,6 +45,16 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+// Metronome ticks await the click before scheduling the next one, so a bare
+// `advanceTimersByTime` would fire one tick and stop. Step a second at a time,
+// flushing the awaited click in between.
+async function advanceTicks(count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    jest.advanceTimersByTime(1000);
+    await flushMicrotasks();
+  }
+}
+
 describe('countdownEngine', () => {
   beforeEach(async () => {
     jest.useFakeTimers();
@@ -238,6 +248,64 @@ describe('countdownEngine', () => {
 
     it('is safe to call when idle', () => {
       expect(() => countdownEngine.cancel()).not.toThrow();
+    });
+
+    // `start` awaits the click asset before it schedules anything, so a cancel
+    // can land while it is suspended. The suspended run used to resume past the
+    // cancel, reinstate the counting state and run to completion — the user
+    // cancelled the count-in and the track started playing anyway.
+    it('does not resume a start that was cancelled mid-load', async () => {
+      const onFinished = jest.fn();
+      const pending = countdownEngine.start(metronomeConfig(), onFinished);
+      countdownEngine.cancel();
+      await pending;
+
+      expect(countdownEngine.getState().phase).toBe('idle');
+
+      await advanceTicks(5);
+
+      expect(onFinished).not.toHaveBeenCalled();
+      expect(countdownEngine.getState().phase).toBe('idle');
+    });
+  });
+
+  describe('overlapping starts', () => {
+    // Two starts can collide: a double-tapped play, or a per-loop count-in
+    // firing just as the user hits play. Both used to get past their awaits and
+    // schedule a tick loop over the same shared state, counting down at double
+    // speed and firing both callbacks.
+    it('supersedes an in-flight start instead of running two tick loops', async () => {
+      const first = jest.fn();
+      const second = jest.fn();
+
+      const pendingFirst = countdownEngine.start(metronomeConfig(), first);
+      const pendingSecond = countdownEngine.start(metronomeConfig(), second);
+      await pendingFirst;
+      await pendingSecond;
+
+      // Four beats, one per second: nothing may finish before the fourth.
+      await advanceTicks(3);
+      expect(first).not.toHaveBeenCalled();
+      expect(second).not.toHaveBeenCalled();
+
+      await advanceTicks(1);
+      expect(first).not.toHaveBeenCalled();
+      expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts down once, not twice, after overlapping starts', async () => {
+      const states: CountdownState[] = [];
+      countdownEngine.subscribe((s) => states.push({ ...s }));
+
+      const pendingFirst = countdownEngine.start(metronomeConfig(), jest.fn());
+      const pendingSecond = countdownEngine.start(metronomeConfig(), jest.fn());
+      await pendingFirst;
+      await pendingSecond;
+
+      await advanceTicks(4);
+
+      const counting = states.filter((s) => s.phase === 'counting');
+      expect(counting.map((s) => s.displayValue)).toEqual([4, 3, 2, 1]);
     });
   });
 

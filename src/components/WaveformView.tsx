@@ -21,6 +21,7 @@ import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
 import { formatDuration } from '../utils/formatTime';
+import { clampToBounds, markerBounds } from '../utils/markerBounds';
 
 interface WaveformViewProps {
   peaks: WaveformPeaks;
@@ -243,16 +244,20 @@ export function WaveformView({
   // Keep a dragged/placed marker valid relative to its sibling. The B handle
   // can never be placed at or before A (the A < B invariant the engine
   // enforces), so clamp it to just past A — the handle visibly stops at the
-  // boundary instead of snapping back silently when dropped before A.
+  // boundary instead of snapping back silently when dropped before A. Shared
+  // with the marker time editor via `markerBounds` so both stop identically.
   const clampForTarget = useCallback(
     (target: DragTarget, ms: number): number => {
-      if (target === 'markerA' && markerB != null) {
-        return Math.max(0, Math.min(ms, markerB - 1));
-      }
-      if (target === 'markerB' && markerA != null) {
-        return Math.min(durationMs, Math.max(ms, markerA + 1));
-      }
-      return ms;
+      if (!isMarkerTarget(target)) return ms;
+      return clampToBounds(
+        ms,
+        markerBounds(
+          target === 'markerA' ? 'A' : 'B',
+          markerA ?? null,
+          markerB ?? null,
+          durationMs,
+        ),
+      );
     },
     [markerA, markerB, durationMs],
   );

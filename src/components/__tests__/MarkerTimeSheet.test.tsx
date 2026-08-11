@@ -273,6 +273,98 @@ describe('MarkerTimeSheet', () => {
     expect(onCommit.mock.calls.length).toBe(callsAfterRelease);
   });
 
+  // The engine drops B outright when A is moved to or past it, and rejects a B
+  // at or before A. Without these bounds the stepper walked straight through
+  // the sibling: nudging A up silently destroyed B, and nudging B down left the
+  // sheet showing a position the engine had refused.
+  describe('sibling bounds', () => {
+    it('stops marker A just before marker B instead of passing it', () => {
+      const onCommit = jest.fn();
+      const tree = renderSheet({
+        marker: 'A',
+        initialMs: 7950,
+        maxMs: 7999,
+        onCommit,
+      });
+      const increaseBtn = findPressableByLabel(
+        tree,
+        'Increase loop start by 100 milliseconds',
+      )[0];
+      act(() => {
+        increaseBtn.props.onPressIn();
+      });
+      expect(onCommit).toHaveBeenCalledWith(7999);
+    });
+
+    it('stops marker B just after marker A instead of passing it', () => {
+      const onCommit = jest.fn();
+      const tree = renderSheet({
+        marker: 'B',
+        initialMs: 8050,
+        minMs: 8001,
+        onCommit,
+      });
+      const decreaseBtn = findPressableByLabel(
+        tree,
+        'Decrease loop end by 100 milliseconds',
+      )[0];
+      act(() => {
+        decreaseBtn.props.onPressIn();
+      });
+      expect(onCommit).toHaveBeenCalledWith(8001);
+    });
+
+    it('holds the displayed time at the bound while the step repeats', () => {
+      const onCommit = jest.fn();
+      const tree = renderSheet({
+        marker: 'A',
+        initialMs: 7900,
+        maxMs: 7999,
+        onCommit,
+      });
+      const increaseBtn = findPressableByLabel(
+        tree,
+        'Increase loop start by 1 second',
+      )[0];
+      act(() => {
+        increaseBtn.props.onPressIn();
+      });
+      act(() => {
+        jest.advanceTimersByTime(1000);
+      });
+      act(() => {
+        increaseBtn.props.onPressOut();
+      });
+
+      // Every commit pinned to the bound, and the display followed it rather
+      // than drifting past a value the engine would reject.
+      expect(onCommit.mock.calls.every(([ms]: [number]) => ms === 7999)).toBe(
+        true,
+      );
+      expect(findTextContaining(tree, '0:08.0').length).toBeGreaterThanOrEqual(
+        1,
+      );
+    });
+
+    it('defaults to the full track when no bounds are supplied', () => {
+      const onCommit = jest.fn();
+      const tree = renderSheet({
+        marker: 'A',
+        initialMs: 0,
+        durationMs: 120000,
+        onCommit,
+      });
+      const decreaseBtn = findPressableByLabel(
+        tree,
+        'Decrease loop start by 100 milliseconds',
+      )[0];
+      act(() => {
+        decreaseBtn.props.onPressIn();
+      });
+      expect(onCommit).toHaveBeenCalledWith(0);
+    });
+  });
+
   it('has a live region on the time display', () => {
     const tree = renderSheet();
     const liveText = tree.root.findAll(
