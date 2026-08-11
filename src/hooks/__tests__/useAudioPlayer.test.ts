@@ -27,6 +27,7 @@ const mockLoadPersistedVolume = jest.fn<void, []>();
 const mockStartMonitor = jest.fn<Promise<void>, [number]>();
 const mockUpdateMonitor = jest.fn<void, [number]>();
 const mockStopMonitor = jest.fn<Promise<void>, []>();
+const mockCommitMarkerPlacement = jest.fn<Promise<void>, ['A' | 'B']>();
 
 jest.mock('../../services/audioEngine', () => ({
   subscribe: (cb: (state: PlaybackState) => void) => {
@@ -52,6 +53,8 @@ jest.mock('../../services/audioEngine', () => ({
   startMonitor: (ms: number) => mockStartMonitor(ms),
   updateMonitor: (ms: number) => mockUpdateMonitor(ms),
   stopMonitor: () => mockStopMonitor(),
+  commitMarkerPlacement: (placed: 'A' | 'B') =>
+    mockCommitMarkerPlacement(placed),
 }));
 
 let lastResult: ReturnType<typeof useAudioPlayer>;
@@ -238,5 +241,15 @@ describe('useAudioPlayer', () => {
       void lastResult.stopMonitor();
     });
     expect(mockStopMonitor).toHaveBeenCalled();
+  });
+
+  it('forwards commitMarkerPlacement to the engine', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      void lastResult.commitMarkerPlacement('B');
+    });
+
+    expect(mockCommitMarkerPlacement).toHaveBeenCalledWith('B');
   });
 });

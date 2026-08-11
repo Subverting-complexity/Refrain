@@ -601,6 +601,79 @@ describe('WaveformView', () => {
       expect(onPlaceComplete).not.toHaveBeenCalled();
     });
 
+    it('fires onMarkerCommit on release of a tap-to-place', () => {
+      const onMarkerCommit = jest.fn();
+      const tree = renderWaveform({
+        durationMs: 10000,
+        placeMode: 'A',
+        onMarkerAChange: jest.fn(),
+        onMarkerCommit,
+      });
+      layout(tree);
+
+      begin(150);
+      expect(onMarkerCommit).not.toHaveBeenCalled();
+      finalize();
+
+      expect(onMarkerCommit).toHaveBeenCalledWith('A');
+    });
+
+    it('fires onMarkerCommit when fine-tuning an existing handle', () => {
+      const onMarkerCommit = jest.fn();
+      const tree = renderWaveform({
+        markerA: 5000,
+        durationMs: 10000,
+        placeMode: 'none',
+        onMarkerAChange: jest.fn(),
+        onMarkerCommit,
+      });
+      layout(tree);
+
+      // A nudge re-parks the playhead even though it never re-arms placement.
+      begin(150);
+      move(160);
+      finalize();
+
+      expect(onMarkerCommit).toHaveBeenCalledWith('A');
+    });
+
+    it('does not fire onMarkerCommit for a plain seek', () => {
+      const onMarkerCommit = jest.fn();
+      const tree = renderWaveform({
+        durationMs: 10000,
+        placeMode: 'none',
+        onSeek: jest.fn(),
+        onMarkerCommit,
+      });
+      layout(tree);
+
+      begin(150);
+      finalize();
+
+      expect(onMarkerCommit).not.toHaveBeenCalled();
+    });
+
+    it('commits before tearing the snippet preview down', () => {
+      // The engine redirects the preview's pending restore, so the commit must
+      // land while the monitor is still up — otherwise the restore's seek
+      // races it and can win.
+      const order: string[] = [];
+      const tree = renderWaveform({
+        durationMs: 10000,
+        placeMode: 'A',
+        onMarkerAChange: jest.fn(),
+        onMarkerCommit: () => order.push('commit'),
+        onPreviewStart: jest.fn(),
+        onPreviewEnd: () => order.push('previewEnd'),
+      });
+      layout(tree);
+
+      begin(150);
+      finalize();
+
+      expect(order).toEqual(['commit', 'previewEnd']);
+    });
+
     it('seeks on a bare tap once both markers exist', () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
@@ -831,6 +904,72 @@ describe('WaveformView', () => {
       expect(announceSpy).toHaveBeenCalledWith(
         expect.stringContaining('B marker placed'),
       );
+      announceSpy.mockRestore();
+    });
+
+    it('commits the placement made by the placeA action', () => {
+      const onMarkerCommit = jest.fn();
+      const announceSpy = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => undefined);
+      const tree = renderWaveform({
+        positionMs: 5000,
+        durationMs: 20000,
+        onMarkerAChange: jest.fn(),
+        onMarkerCommit,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeA' },
+        });
+      });
+      expect(onMarkerCommit).toHaveBeenCalledWith('A');
+      announceSpy.mockRestore();
+    });
+
+    it('commits a placeB action that lands after A', () => {
+      const onMarkerCommit = jest.fn();
+      const announceSpy = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => undefined);
+      const tree = renderWaveform({
+        positionMs: 8000,
+        durationMs: 20000,
+        markerA: 5000,
+        onMarkerBChange: jest.fn(),
+        onMarkerCommit,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeB' },
+        });
+      });
+      expect(onMarkerCommit).toHaveBeenCalledWith('B');
+      announceSpy.mockRestore();
+    });
+
+    it('does not commit a placeB action the engine will reject', () => {
+      // This path isn't clamped past A like a drag is, so B at or before A is
+      // refused — and a refused placement must not move the playhead.
+      const onMarkerBChange = jest.fn();
+      const onMarkerCommit = jest.fn();
+      const announceSpy = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => undefined);
+      const tree = renderWaveform({
+        positionMs: 2000,
+        durationMs: 20000,
+        markerA: 5000,
+        onMarkerBChange,
+        onMarkerCommit,
+      });
+      act(() => {
+        getAdjustable(tree).props.onAccessibilityAction({
+          nativeEvent: { actionName: 'placeB' },
+        });
+      });
+      expect(onMarkerBChange).toHaveBeenCalledWith(2000);
+      expect(onMarkerCommit).not.toHaveBeenCalled();
       announceSpy.mockRestore();
     });
 
