@@ -110,11 +110,10 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    // Platform-standard shadow base — always black regardless of theme.
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 2,
-    elevation: 2,
+    // Platform-standard shadow base — always black regardless of theme. Uses
+    // `boxShadow` rather than the `shadow*`/`elevation` props, which React
+    // Native Web has deprecated (they log a warning on every render) and which
+    // React Native now maps onto this same cross-platform property.
+    boxShadow: '0px 1px 2px rgba(0, 0, 0, 0.18)',
   },
 });

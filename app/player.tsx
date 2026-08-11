@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +29,7 @@ import { useSegmentProfiles } from '@/src/hooks/useSegmentProfiles';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
 import { useSnippetPreview } from '@/src/hooks/useSnippetPreview';
 import { useToast } from '@/src/hooks/useToast';
+import { useTrackSource } from '@/src/hooks/useTrackSource';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
 import { updateTrackDuration } from '@/src/services/trackStore';
@@ -49,11 +56,35 @@ export default function PlayerScreen() {
   const waveformHeight = Math.round(
     Math.min(340, Math.max(180, windowHeight * 0.28)),
   );
-  const { uri, filename, trackId } = useLocalSearchParams<{
+  const {
+    uri: rawUri,
+    filename: rawFilename,
+    trackId: rawTrackId,
+  } = useLocalSearchParams<{
     uri: string;
     filename: string;
     trackId: string;
   }>();
+
+  // Normalise the params once, up front. An absent param arrives as undefined
+  // but a present-and-empty one arrives as `''`, and an empty value is just as
+  // absent as a missing one — so `|| null` rather than `?? null`, applied here
+  // so every consumer below sees the same shape.
+  const trackId = rawTrackId || null;
+  const paramUri = rawUri || null;
+  const paramFilename = rawFilename || null;
+
+  // Re-read the playable uri from the store rather than trusting the one in the
+  // route. A uri captured at navigation time goes stale — on web it is a
+  // `blob:` URL that dies with the document, so a reload, a restored history
+  // entry, or a shared link left the player with a dead source. See
+  // `useTrackSource`.
+  const {
+    uri,
+    filename,
+    isResolving: isResolvingSource,
+    isMissing: isTrackMissing,
+  } = useTrackSource(trackId, paramUri, paramFilename);
 
   const {
     status,
@@ -79,14 +110,13 @@ export default function PlayerScreen() {
     startMonitor,
     updateMonitor,
     stopMonitor,
-  } = useAudioPlayer(uri ?? null, trackId ?? null, filename ?? null);
+  } = useAudioPlayer(uri, trackId, filename);
 
   // Named-segment list + CRUD for this track, owned here so the player can show
   // the loaded segment's name and suggest the next one. The sheet receives the
   // list and the rename/remove actions as props.
-  const { profiles, save, update, rename, remove } = useSegmentProfiles(
-    trackId ?? null,
-  );
+  const { profiles, save, update, rename, remove } =
+    useSegmentProfiles(trackId);
   // Tracks which segment is loaded and whether its A/B region has been edited.
   const { loadedId, isDirty, markLoaded, clearLoaded } = useSegmentEditor(
     markerA,
@@ -271,7 +301,7 @@ export default function PlayerScreen() {
   // "Now Playing" title is replaced by the filename so the player body no
   // longer needs a separate centered title band.
   useEffect(() => {
-    navigation.setOptions({ title: filename ?? 'Now Playing' });
+    navigation.setOptions({ title: filename || 'Now Playing' });
   }, [navigation, filename]);
 
   useEffect(() => {
@@ -390,7 +420,7 @@ export default function PlayerScreen() {
     setPlaceMode(marker === 'A' ? 'B' : 'none');
   }, []);
 
-  const { peaks } = useWaveformData(uri ?? null);
+  const { peaks, isLoading: isWaveformLoading } = useWaveformData(uri);
   const {
     countdownState,
     countdownConfig,
@@ -419,6 +449,9 @@ export default function PlayerScreen() {
   ]);
 
   const isCounting = countdownState.phase === 'counting';
+  // Something is still being worked out — the store lookup for the track, or
+  // the peak analysis — as opposed to having finished with nothing to show.
+  const waveformPending = isResolvingSource || isWaveformLoading;
 
   const handlePlay = () => {
     if (isCounting) {
@@ -474,17 +507,53 @@ export default function PlayerScreen() {
                 styles.artworkPlaceholder,
                 { backgroundColor: theme.colors.surface },
               ]}
+              accessibilityRole="image"
+              accessibilityLabel={
+                waveformPending ? 'Loading waveform' : 'No waveform available'
+              }
             >
-              <Ionicons
-                name="musical-notes"
-                size={64}
-                color={theme.colors.accent}
-              />
+              {/* Distinguish "still analysing the audio" from "no waveform for
+                  this file". The two used to render the same static icon, so a
+                  slow analysis was indistinguishable from a failed one. */}
+              {waveformPending ? (
+                <ActivityIndicator size="large" color={theme.colors.accent} />
+              ) : (
+                <Ionicons
+                  name="musical-notes"
+                  size={64}
+                  color={theme.colors.accent}
+                />
+              )}
             </View>
           )}
         </View>
 
-        {status === 'error' && (
+        {isTrackMissing && (
+          <View style={styles.errorBanner}>
+            <View style={styles.errorHeadline}>
+              <Ionicons
+                name="alert-circle"
+                size={20}
+                color={theme.colors.error}
+              />
+              <Text
+                style={[theme.typography.body, { color: theme.colors.error }]}
+              >
+                This track is no longer in your library
+              </Text>
+            </View>
+            <Text
+              style={[
+                theme.typography.caption,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              Go back and import it again to keep playing.
+            </Text>
+          </View>
+        )}
+
+        {!isTrackMissing && status === 'error' && (
           <View style={styles.errorBanner}>
             <View style={styles.errorHeadline}>
               <Ionicons

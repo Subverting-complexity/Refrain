@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Text } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, ViewStyle } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { BottomSheet } from '../BottomSheet';
@@ -98,5 +98,32 @@ describe('BottomSheet', () => {
     expect(modal.props.transparent).toBe(true);
     expect(modal.props.animationType).toBe('slide');
     expect(modal.props.visible).toBe(true);
+  });
+
+  // Every sheet in the player shares this scaffold, so an unbounded body here
+  // pushed content off the bottom of the screen with no way to reach it — a
+  // saved-segment list of any length was entirely unreachable.
+  describe('tall content', () => {
+    it('puts the body in a scroll view so it stays reachable', () => {
+      const tree = renderSheet();
+      const scroll = tree.root.findByType(ScrollView);
+      expect(JSON.stringify(scroll.props.children)).toContain('Sheet body');
+    });
+
+    it('caps the sheet below the viewport so a tall body scrolls instead of overflowing', () => {
+      const tree = renderSheet();
+      const scroll = tree.root.findByType(ScrollView);
+      // The sheet is the ScrollView's nearest ancestor View carrying the
+      // rounded-top surface style.
+      const sheet = scroll.parent!;
+      const style = StyleSheet.flatten(sheet.props.style) as ViewStyle;
+      expect(style.maxHeight).toBe('85%');
+    });
+
+    it('keeps taps working on controls inside the scrollable body', () => {
+      const tree = renderSheet();
+      const scroll = tree.root.findByType(ScrollView);
+      expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
+    });
   });
 });

@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -16,6 +17,12 @@ import { AccessiblePressable } from './AccessiblePressable';
 const SHEET_MIN_WIDTH = 320;
 const SHEET_MAX_WIDTH = 560;
 const SHEET_MIN_HEIGHT = 240;
+// Cap the sheet below the viewport so the backdrop stays reachable and, more
+// importantly, so a body taller than the screen is bounded and scrolls instead
+// of overflowing. Without the cap the sheet grows past the bottom edge (the
+// overlay is bottom-aligned), pushing its content off-screen with no way to
+// reach it — a saved-segment list of any length was entirely unreachable.
+const SHEET_MAX_HEIGHT_RATIO = '85%';
 
 interface BottomSheetProps {
   /** Sheet title shown in the header. */
@@ -80,7 +87,18 @@ export function BottomSheet({
             </AccessiblePressable>
           </View>
 
-          {children}
+          {/* The body scrolls so a tall sheet (a long segment list, a settings
+              panel on a short landscape viewport) stays fully reachable.
+              `alwaysBounceVertical={false}` keeps short bodies feeling static
+              rather than rubber-banding for no reason. */}
+          <ScrollView
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            alwaysBounceVertical={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -100,17 +118,28 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radii.lg,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
     width: '100%',
     minWidth: SHEET_MIN_WIDTH,
     maxWidth: SHEET_MAX_WIDTH,
     minHeight: SHEET_MIN_HEIGHT,
+    maxHeight: SHEET_MAX_HEIGHT_RATIO,
     alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  // `flexGrow: 0` keeps a short body at its natural height instead of the
+  // ScrollView stretching to fill the sheet's minHeight.
+  body: {
+    flexGrow: 0,
+  },
+  // The bottom padding lives on the scroll content (not the sheet) so the last
+  // row can scroll clear of the bottom edge.
+  bodyContent: {
+    paddingBottom: spacing.xxl,
+    gap: spacing.md,
   },
 });

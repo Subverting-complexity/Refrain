@@ -61,6 +61,17 @@ export async function loadTracks(): Promise<Track[]> {
   return Promise.all(rows.map(rowToTrack));
 }
 
+/**
+ * Reads a single track by id, or `null` when it is not in the library. The
+ * `uri` is a freshly resolved `blob:` object URL, which is why the player must
+ * re-read it per page session rather than reusing one captured earlier: object
+ * URLs die with the document that created them (see `useTrackSource`).
+ */
+export async function getTrack(id: string): Promise<Track | null> {
+  const row = await getStoredTrack(id);
+  return row ? rowToTrack(row) : null;
+}
+
 export async function insertTrack(track: Track): Promise<void> {
   await putStoredTrack(toStored(track));
 }
