@@ -54,11 +54,18 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     };
   }, []);
 
-  const apply = useCallback((rows: SegmentProfile[]) => {
-    if (mounted.current) setProfiles(rows);
-  }, []);
+  // Sequence number for reads. On web `listProfiles` is async, so a slow read
+  // for one track can resolve *after* a later one — switching tracks quickly,
+  // or any two overlapping refreshes, could otherwise leave the previous
+  // track's segments on screen. Only the newest read is allowed to apply.
+  const latestRead = useRef(0);
 
   const refresh = useCallback(() => {
+    const readId = ++latestRead.current;
+    const apply = (rows: SegmentProfile[]) => {
+      if (mounted.current && latestRead.current === readId) setProfiles(rows);
+    };
+
     if (!trackId) {
       apply([]);
       return;
@@ -66,7 +73,7 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     void settle(() => listProfiles(trackId))
       .then(apply)
       .catch(() => apply([]));
-  }, [trackId, apply]);
+  }, [trackId]);
 
   useEffect(() => {
     refresh();
@@ -86,31 +93,33 @@ export function useSegmentProfiles(trackId: string | null): UseSegmentProfiles {
     [trackId, refresh],
   );
 
-  const update = useCallback(
-    (profileId: string, region: SegmentRegion) => {
-      void settle(() => updateProfile(profileId, region))
+  // Every mutation is the same shape: run the store call across the sync/async
+  // platform split, refresh the list on success, and stay silent on failure so
+  // the last good list survives.
+  const runWrite = useCallback(
+    (call: () => unknown) => {
+      void settle(call)
         .then(refresh)
         .catch(() => {});
     },
     [refresh],
+  );
+
+  const update = useCallback(
+    (profileId: string, region: SegmentRegion) =>
+      runWrite(() => updateProfile(profileId, region)),
+    [runWrite],
   );
 
   const rename = useCallback(
-    (profileId: string, name: string) => {
-      void settle(() => renameProfile(profileId, name))
-        .then(refresh)
-        .catch(() => {});
-    },
-    [refresh],
+    (profileId: string, name: string) =>
+      runWrite(() => renameProfile(profileId, name)),
+    [runWrite],
   );
 
   const remove = useCallback(
-    (profileId: string) => {
-      void settle(() => deleteProfile(profileId))
-        .then(refresh)
-        .catch(() => {});
-    },
-    [refresh],
+    (profileId: string) => runWrite(() => deleteProfile(profileId)),
+    [runWrite],
   );
 
   return { profiles, refresh, save, update, rename, remove };

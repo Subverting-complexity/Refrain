@@ -17,6 +17,7 @@ import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useLatestRef } from '@/src/hooks/useLatestRef';
 import { useSegmentEditor } from '@/src/hooks/useSegmentEditor';
 import { useSegmentProfiles } from '@/src/hooks/useSegmentProfiles';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
@@ -255,13 +256,9 @@ export default function PlayerScreen() {
   // Refs let the navigation listener read the latest dirty/loaded state without
   // re-subscribing every render; the bypass flag lets a resolved guard navigate
   // through without re-triggering itself.
-  const dirtyRef = useRef(isDirty);
-  const loadedIdRef = useRef(loadedId);
+  const dirtyRef = useLatestRef(isDirty);
+  const loadedIdRef = useLatestRef(loadedId);
   const bypassGuardRef = useRef(false);
-  useEffect(() => {
-    dirtyRef.current = isDirty;
-    loadedIdRef.current = loadedId;
-  });
 
   // Leaving the player with unsaved segment edits: intercept the back action
   // and raise the same guard. Fires for in-app Stack back navigation.
@@ -289,7 +286,9 @@ export default function PlayerScreen() {
       });
     });
     return unsubscribe;
-  }, [navigation]);
+    // The refs are stable across renders, so listing them keeps the listener
+    // subscribed exactly once — as it was when they were inline `useRef`s.
+  }, [navigation, dirtyRef, loadedIdRef]);
 
   // The B button rejects placements at or before A. Surface that instead of
   // failing silently: the toast is both shown and announced (see useToast).

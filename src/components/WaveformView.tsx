@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   AccessibilityInfo,
@@ -17,6 +11,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useDragThrottle } from '../hooks/useDragThrottle';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
@@ -349,14 +344,9 @@ export function WaveformView({
   // itself is created once. A marker drag updates markerA/markerB mid-gesture
   // (throttled), which would otherwise rebuild the gesture ~20x/sec and risk
   // RNGH dropping the active drag.
-  const beginRef = useRef(beginDrag);
-  const moveRef = useRef(moveDrag);
-  const endRef = useRef(endDrag);
-  useEffect(() => {
-    beginRef.current = beginDrag;
-    moveRef.current = moveDrag;
-    endRef.current = endDrag;
-  });
+  const beginRef = useLatestRef(beginDrag);
+  const moveRef = useLatestRef(moveDrag);
+  const endRef = useLatestRef(endDrag);
 
   // A single Pan drives taps and drags. `minDistance(0)` makes it claim the
   // touch the instant a finger lands on the waveform, so the surrounding
@@ -376,7 +366,8 @@ export function WaveformView({
         .onUpdate((e) => moveRef.current(e.x))
         // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current()),
-    [],
+    // Ref identities never change, so the Pan is still built exactly once.
+    [beginRef, moveRef, endRef],
   );
 
   const bars = useMemo(() => {

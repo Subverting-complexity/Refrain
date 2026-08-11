@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useLatestRef } from '../hooks/useLatestRef';
 import { useTheme } from '../hooks/useTheme';
 import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import { formatDurationTenths } from '../utils/formatTime';
@@ -81,16 +82,9 @@ export function MarkerTimeSheet({
   // Keep refs in sync with the latest props so timer callbacks are never stale.
   // `minMs`/`maxMs` are held the same way: a hold-repeat runs off a timer, and
   // the bounds can move under it if the sibling marker changes mid-hold.
-  const minMsRef = useRef(minMs);
-  const maxMsRef = useRef(maxMs);
-  const onCommitRef = useRef(onCommit);
-  useEffect(() => {
-    minMsRef.current = minMs;
-    maxMsRef.current = maxMs;
-  }, [minMs, maxMs]);
-  useEffect(() => {
-    onCommitRef.current = onCommit;
-  }, [onCommit]);
+  const minMsRef = useLatestRef(minMs);
+  const maxMsRef = useLatestRef(maxMs);
+  const onCommitRef = useLatestRef(onCommit);
 
   // Apply one step of `amountMs`: mutate the ref, update display state, notify
   // parent. Called both immediately on pressIn and on each timer tick, so
@@ -98,15 +92,19 @@ export function MarkerTimeSheet({
   // Clamped to [minMs, maxMs] — stepping past the sibling marker is what the
   // bounds exist to prevent, and the display must never move somewhere the
   // engine will refuse.
-  const applyStep = useCallback((direction: 1 | -1, amountMs: number) => {
-    const next = Math.max(
-      minMsRef.current,
-      Math.min(maxMsRef.current, currentMsRef.current + direction * amountMs),
-    );
-    currentMsRef.current = next;
-    setCurrentMs(next);
-    onCommitRef.current(next);
-  }, []);
+  const applyStep = useCallback(
+    (direction: 1 | -1, amountMs: number) => {
+      const next = Math.max(
+        minMsRef.current,
+        Math.min(maxMsRef.current, currentMsRef.current + direction * amountMs),
+      );
+      currentMsRef.current = next;
+      setCurrentMs(next);
+      onCommitRef.current(next);
+      // Ref identities never change, so this callback stays stable.
+    },
+    [minMsRef, maxMsRef, onCommitRef],
+  );
 
   // Begin a press: apply one step now, then after a hold delay repeat the step
   // and eventually accelerate to the larger step size for the tier.
