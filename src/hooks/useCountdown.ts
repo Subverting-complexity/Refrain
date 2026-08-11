@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import * as countdownEngine from '../services/countdownEngine';
 import { CountdownConfig, CountdownState } from '../types';
+import { useEngineSubscription } from './useEngineSubscription';
 import { useLatestRef } from './useLatestRef';
 
 const DEFAULT_CONFIG: CountdownConfig = {
@@ -24,18 +25,15 @@ interface UseCountdownOptions {
 }
 
 export function useCountdown({ onPlay }: UseCountdownOptions) {
-  const [countdownState, setCountdownState] =
-    useState<CountdownState>(IDLE_STATE);
+  const countdownState = useEngineSubscription(
+    countdownEngine.subscribe,
+    IDLE_STATE,
+  );
   const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
   // Keep the latest config/onPlay in refs so the stable callbacks below read
   // current values without being rebuilt.
   const configRef = useLatestRef(config);
   const onPlayRef = useLatestRef(onPlay);
-
-  useEffect(() => {
-    const unsub = countdownEngine.subscribe(setCountdownState);
-    return unsub;
-  }, []);
 
   // Warm up the click asset as soon as the metronome is armed so the first beat
   // of the count-in plays without the initial decode delay.

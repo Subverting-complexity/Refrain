@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import * as audioEngine from '../services/audioEngine';
 import { PlaybackState } from '../types';
+import { useEngineSubscription } from './useEngineSubscription';
 
 const IDLE_STATE: PlaybackState = {
   status: 'idle',
@@ -18,12 +19,7 @@ export function useAudioPlayer(
   trackId?: string | null,
   trackName?: string | null,
 ) {
-  const [state, setState] = useState<PlaybackState>(IDLE_STATE);
-
-  useEffect(() => {
-    const unsubscribe = audioEngine.subscribe(setState);
-    return unsubscribe;
-  }, []);
+  const state = useEngineSubscription(audioEngine.subscribe, IDLE_STATE);
 
   // Hydrate the persisted volume once on mount, before the track loads, so
   // playback starts at the user's saved level rather than the default. The
