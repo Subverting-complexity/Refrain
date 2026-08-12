@@ -5,6 +5,7 @@ import { Track } from '../../types';
 import {
   cleanupOrphanFiles,
   deleteTrack,
+  getTrack,
   insertTrack,
   loadTracks,
   updateTrackDuration,
@@ -113,6 +114,29 @@ describe('loadTracks', () => {
     ]);
     const tracks = await loadTracks();
     expect(tracks.map((t) => t.id)).toEqual(['new', 'old']);
+  });
+});
+
+describe('getTrack', () => {
+  it('mints a fresh object URL for the stored row', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+    mockGetObjectUrl.mockResolvedValue('blob:obj/track-1');
+
+    await expect(getTrack('track-1')).resolves.toEqual(sampleTrack);
+    expect(mockGetObjectUrl).toHaveBeenCalledWith('track-1');
+  });
+
+  it('returns null when the id is not in the library', async () => {
+    mockGetStoredTrack.mockResolvedValue(null);
+    await expect(getTrack('missing')).resolves.toBeNull();
+  });
+
+  it('falls back to the sentinel uri when the audio blob is gone', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+    mockGetObjectUrl.mockResolvedValue(null);
+
+    const track = await getTrack('track-1');
+    expect(track?.uri).toBe('idb://track-1');
   });
 });
 

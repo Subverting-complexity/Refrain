@@ -34,6 +34,14 @@ export interface UseWaveformGestureParams {
   onMarkerAChange?: (positionMs: number) => void;
   onMarkerBChange?: (positionMs: number) => void;
   onPlaceComplete?: (marker: 'A' | 'B') => void;
+  /**
+   * Fired once a marker edit is committed — on release of a tap-to-place *or*
+   * a fine-tune drag — so the caller can park the playhead at the loop start.
+   * Distinct from `onPlaceComplete`, which is placement-only because it drives
+   * the arm state; nudging an existing handle must move the playhead without
+   * re-arming anything.
+   */
+  onMarkerCommit?: (marker: 'A' | 'B') => void;
   onPreviewStart?: (centerMs: number) => void;
   onPreviewMove?: (centerMs: number) => void;
   onPreviewEnd?: () => void;
@@ -75,6 +83,7 @@ export function useWaveformGesture({
   onMarkerAChange,
   onMarkerBChange,
   onPlaceComplete,
+  onMarkerCommit,
   onPreviewStart,
   onPreviewMove,
   onPreviewEnd,
@@ -264,6 +273,10 @@ export function useWaveformGesture({
     // correct end state.
     dragThrottle.end();
     if (isMarkerTarget(dragTarget.current)) {
+      // Commit before tearing the preview down. While the monitor is still
+      // active the engine redirects its pending restore to the loop start, so
+      // the playhead moves exactly once instead of racing the restore's seek.
+      onMarkerCommit?.(dragTarget.current === 'markerA' ? 'A' : 'B');
       onPreviewEnd?.();
     }
     if (isPlacement.current) {
@@ -271,7 +284,7 @@ export function useWaveformGesture({
       onPlaceComplete?.(dragTarget.current === 'markerA' ? 'A' : 'B');
     }
     setDrag(null);
-  }, [dragThrottle, onPlaceComplete, onPreviewEnd]);
+  }, [dragThrottle, onPlaceComplete, onMarkerCommit, onPreviewEnd]);
 
   // Route the gesture through refs to the latest callbacks so the Pan object
   // itself is created once.

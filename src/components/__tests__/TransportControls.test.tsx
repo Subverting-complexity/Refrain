@@ -67,31 +67,11 @@ describe('TransportControls', () => {
     }
   });
 
-  it('does not render a Stop control unless onStop is provided', () => {
-    const tree = renderControls();
+  it('renders no Stop control', () => {
+    const tree = renderControls({ status: 'playing' });
     expect(
       tree.root.findAll((n) => n.props.accessibilityLabel === 'Stop').length,
     ).toBe(0);
-  });
-
-  it('renders a Stop control and calls onStop when provided', () => {
-    const onStop = jest.fn();
-    const tree = renderControls({ status: 'playing', onStop });
-
-    expect(
-      tree.root.findAll((n) => n.props.accessibilityLabel === 'Stop').length,
-    ).toBeGreaterThanOrEqual(1);
-
-    pressByLabel(tree, 'Stop');
-    expect(onStop).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables Stop when idle', () => {
-    const tree = renderControls({ status: 'idle', onStop: jest.fn() });
-    const stop = tree.root.find((n) => n.props.accessibilityLabel === 'Stop');
-    expect(stop.props.accessibilityState).toEqual(
-      expect.objectContaining({ disabled: true }),
-    );
   });
 
   it('calls onSkipBack and onSkipForward', () => {

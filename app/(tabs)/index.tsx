@@ -145,9 +145,13 @@ export default function LibraryScreen() {
 
   const handleTrackPress = useCallback(
     (track: Track) => {
+      // Deliberately no `uri` param: the player re-resolves it from `trackId`
+      // so the route stays valid across a reload (on web `track.uri` is a
+      // `blob:` URL that dies with the document). `filename` rides along only
+      // so the header has a title before the store lookup lands.
       router.push({
         pathname: '/player',
-        params: { uri: track.uri, filename: track.filename, trackId: track.id },
+        params: { filename: track.filename, trackId: track.id },
       });
     },
     [router],

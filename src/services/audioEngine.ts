@@ -894,6 +894,64 @@ export function clearMarkerB(): void {
 }
 
 /**
+ * Which marker a {@link commitMarkerPlacement} call is reporting. `'A'` covers
+ * any commit that moved A — including a segment load, which sets both markers
+ * but should park the playhead once, at the region start.
+ */
+export type MarkerCommit = 'A' | 'B';
+
+/**
+ * Park the playhead at the loop start once a marker edit is committed, so the
+ * region you just defined is the region you hear next.
+ *
+ * Committing A always moves the playhead to A: placing A declares where the
+ * phrase starts, and the point of a practice looper is hearing that
+ * immediately. Committing B only moves it when the new region leaves the
+ * playhead stranded outside `[A, B)` — placing B ahead of a playhead that is
+ * still inside the region lets it run on and loop naturally, instead of
+ * yanking back to A mid-phrase.
+ *
+ * Deliberately never starts or stops playback: playing keeps playing from A,
+ * paused stays paused at A, ready for the next play().
+ *
+ * This is a *commit*-time operation. `setMarkerA`/`setMarkerB` are called
+ * throughout a drag (~20/sec), and seeking at that cadence is the scrubbing
+ * that `updateMonitor` goes out of its way to avoid on web — so the move lives
+ * here, called once on release, rather than inside the setters.
+ */
+export async function commitMarkerPlacement(
+  placed: MarkerCommit,
+): Promise<void> {
+  if (!player || markerA == null) return;
+
+  // While a snippet preview is running, the live playhead is somewhere inside
+  // the preview window — the position that actually matters is the one
+  // stopMonitor is about to restore.
+  const settledPosition =
+    monitorActive && savedTransport
+      ? savedTransport.positionMs
+      : currentState.positionMs;
+
+  if (placed === 'B') {
+    const region = regionBounds();
+    if (!region) return;
+    if (settledPosition >= region.a && settledPosition < region.b) return;
+  }
+
+  if (monitorActive && savedTransport) {
+    // Redirect the preview's pending restore rather than racing its seek: the
+    // caller fires this before tearing the monitor down, so stopMonitor lands
+    // the playhead at A in a single move and still applies the prior
+    // play/pause state on top. Seeking here instead would leave two seeks in
+    // flight with the restore free to win.
+    savedTransport = { ...savedTransport, positionMs: markerA };
+    return;
+  }
+
+  await seekTo(markerA);
+}
+
+/**
  * Arm or disarm the A/B loop without touching the markers. When disabled,
  * playback runs straight through marker B instead of rewinding to A, so the
  * user can audition the surrounding context and re-arm the loop later.

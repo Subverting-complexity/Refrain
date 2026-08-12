@@ -48,6 +48,17 @@ interface WaveformViewProps {
    * Not called for fine-tune drags of an already-placed handle.
    */
   onPlaceComplete?: (marker: 'A' | 'B') => void;
+  /**
+   * Fired once a marker edit is committed — on release of a tap-to-place *or*
+   * a fine-tune drag, and after an accessibility place action — so the parent
+   * can park the playhead at the loop start. Distinct from `onPlaceComplete`,
+   * which is placement-only because it drives the arm state; nudging an
+   * existing handle must move the playhead without re-arming anything.
+   *
+   * `onMarkerAChange`/`onMarkerBChange` fire throughout the drag and so cannot
+   * carry this: seeking at drag cadence scrubs badly (see `updateMonitor`).
+   */
+  onMarkerCommit?: (marker: 'A' | 'B') => void;
   onMarkerAChange?: (positionMs: number) => void;
   onMarkerBChange?: (positionMs: number) => void;
   /**
@@ -90,6 +101,7 @@ export function WaveformView({
   loopEnabled = true,
   placeMode = 'none',
   onPlaceComplete,
+  onMarkerCommit,
   onMarkerAChange,
   onMarkerBChange,
   onPreviewStart,
@@ -110,6 +122,7 @@ export function WaveformView({
     onMarkerAChange,
     onMarkerBChange,
     onPlaceComplete,
+    onMarkerCommit,
     onPreviewStart,
     onPreviewMove,
     onPreviewEnd,
@@ -143,17 +156,31 @@ export function WaveformView({
         onSeek(Math.max(0, positionMs - SEEK_STEP_MS));
       } else if (actionName === 'placeA' && onMarkerAChange) {
         onMarkerAChange(positionMs);
+        onMarkerCommit?.('A');
         AccessibilityInfo.announceForAccessibility(
           `A marker placed at ${formatDuration(positionMs)}`,
         );
       } else if (actionName === 'placeB' && onMarkerBChange) {
         onMarkerBChange(positionMs);
+        // Unlike a drag, this path isn't clamped past A, so the engine can
+        // reject it. Only a placement that actually lands may move the
+        // playhead — otherwise a rejected B would jump to A having changed
+        // nothing.
+        if (markerA == null || positionMs > markerA) onMarkerCommit?.('B');
         AccessibilityInfo.announceForAccessibility(
           `B marker placed at ${formatDuration(positionMs)}`,
         );
       }
     },
-    [durationMs, positionMs, onSeek, onMarkerAChange, onMarkerBChange],
+    [
+      durationMs,
+      positionMs,
+      markerA,
+      onSeek,
+      onMarkerAChange,
+      onMarkerBChange,
+      onMarkerCommit,
+    ],
   );
 
   const a11yLabel = useMemo(() => {
@@ -207,8 +234,8 @@ export function WaveformView({
             />
 
             <View
-              pointerEvents="none"
               style={[
+                styles.noPointerEvents,
                 styles.cursor,
                 {
                   left: `${progress * 100}%`,
@@ -224,6 +251,12 @@ export function WaveformView({
 }
 
 const styles = StyleSheet.create({
+  // The decorative overlays (region tint, marker lines/dots/flags, cursor) must
+  // not swallow touches meant for the pan gesture. Carried as a style rather
+  // than the `pointerEvents` prop, which React Native Web has deprecated.
+  noPointerEvents: {
+    pointerEvents: 'none',
+  },
   container: {
     width: '100%',
     borderRadius: radii.lg,

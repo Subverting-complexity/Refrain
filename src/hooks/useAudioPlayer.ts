@@ -44,7 +44,6 @@ export function useAudioPlayer(
 
   const play = useCallback(() => audioEngine.play(), []);
   const pause = useCallback(() => audioEngine.pause(), []);
-  const stop = useCallback(() => audioEngine.stop(), []);
   const seekTo = useCallback((ms: number) => audioEngine.seekTo(ms), []);
   const skipBy = useCallback(
     (deltaMs: number) => audioEngine.skipBy(deltaMs),
@@ -60,6 +59,11 @@ export function useAudioPlayer(
   );
   const clearMarkers = useCallback(() => audioEngine.clearMarkers(), []);
   const clearMarkerB = useCallback(() => audioEngine.clearMarkerB(), []);
+  const commitMarkerPlacement = useCallback(
+    (placed: audioEngine.MarkerCommit) =>
+      audioEngine.commitMarkerPlacement(placed),
+    [],
+  );
   const setLoopEnabled = useCallback(
     (enabled: boolean) => audioEngine.setLoopEnabled(enabled),
     [],
@@ -84,13 +88,13 @@ export function useAudioPlayer(
     ...state,
     play,
     pause,
-    stop,
     seekTo,
     skipBy,
     setMarkerA,
     setMarkerB,
     clearMarkers,
     clearMarkerB,
+    commitMarkerPlacement,
     setLoopEnabled,
     setLoopRestartHandler,
     setVolume,

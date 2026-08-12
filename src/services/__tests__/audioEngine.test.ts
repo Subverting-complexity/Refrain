@@ -1206,6 +1206,236 @@ describe('audioEngine', () => {
     });
   });
 
+  describe('commitMarkerPlacement', () => {
+    it('parks the playhead at A when A is committed', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      setMarkerA(10000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('A');
+
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+    });
+
+    it('moves to A but never starts or stops playback', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: false, currentTime: 30 }));
+      setMarkerA(10000);
+      mockSeekTo.mockClear();
+      mockPlay.mockClear();
+      mockPause.mockClear();
+
+      await commitMarkerPlacement('A');
+
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+      expect(mockPlay).not.toHaveBeenCalled();
+      expect(mockPause).not.toHaveBeenCalled();
+    });
+
+    it('moves to A on an A commit even from inside the region', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+      setMarkerA(10000);
+      setMarkerB(20000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('A');
+
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+    });
+
+    it('leaves the playhead alone when a B commit keeps it inside the region', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+      setMarkerA(10000);
+      setMarkerB(20000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('B');
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('rescues the playhead to A when a B commit strands it past B', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 40 }));
+      setMarkerA(10000);
+      setMarkerB(25000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('B');
+
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+    });
+
+    it('rescues the playhead to A when a B commit leaves it before A', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 5 }));
+      setMarkerA(10000);
+      setMarkerB(25000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('B');
+
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+    });
+
+    it('is a no-op when no A marker is set', async () => {
+      const { loadTrack, commitMarkerPlacement } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30 }));
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('A');
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op for a B commit with no complete region', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30 }));
+      setMarkerA(10000);
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('B');
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when no track is loaded', async () => {
+      const { commitMarkerPlacement } = require('../audioEngine');
+
+      await commitMarkerPlacement('A');
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('redirects an in-flight preview restore instead of seeking itself', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        startMonitor,
+        stopMonitor,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      setMarkerA(10000);
+      await startMonitor(50000); // captures the 30s playhead
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('A');
+      // Nothing moves yet — the pending restore now carries the new target.
+      expect(mockSeekTo).not.toHaveBeenCalled();
+
+      await stopMonitor();
+
+      // Exactly one seek, and to A rather than the captured 30s position.
+      expect(mockSeekTo).toHaveBeenCalledTimes(1);
+      expect(mockSeekTo).toHaveBeenCalledWith(10);
+    });
+
+    it('keeps the preview restore in charge of play/pause when redirected', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        startMonitor,
+        stopMonitor,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: false, currentTime: 30 }));
+      setMarkerA(10000);
+      await startMonitor(50000);
+      mockPlay.mockClear();
+      mockPause.mockClear();
+
+      await commitMarkerPlacement('A');
+      await stopMonitor();
+
+      // Paused before the drag, so still paused — parked at A, not playing.
+      expect(mockPause).toHaveBeenCalled();
+      expect(mockPlay).not.toHaveBeenCalled();
+    });
+
+    it('judges a B commit by the restored playhead, not the preview window', async () => {
+      const {
+        loadTrack,
+        setMarkerA,
+        setMarkerB,
+        startMonitor,
+        stopMonitor,
+        commitMarkerPlacement,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 15 }));
+      setMarkerA(10000);
+      setMarkerB(20000);
+      await startMonitor(50000); // captures 15s; preview runs near 48s
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 48 }));
+      mockSeekTo.mockClear();
+
+      await commitMarkerPlacement('B');
+      await stopMonitor();
+
+      // The 15s playhead it returns to is inside [10s, 20s), so the commit
+      // leaves it be — the monitor's own 48s position is not the subject.
+      expect(mockSeekTo).toHaveBeenCalledTimes(1);
+      expect(mockSeekTo).toHaveBeenCalledWith(15);
+    });
+  });
+
   describe('setLoopEnabled', () => {
     it('defaults loopEnabled to true', () => {
       const { getState } = require('../audioEngine');

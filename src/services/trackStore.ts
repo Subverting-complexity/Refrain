@@ -86,6 +86,23 @@ export async function loadTracks(): Promise<Track[]> {
   return rows.map(rowToTrack);
 }
 
+/**
+ * Reads a single track by id, or `null` when it is not in the library. The
+ * returned `uri` is resolved against the current sandbox root, so it is a
+ * playable absolute path even for rows written before an iOS sandbox rotation.
+ * Callers use this to re-resolve a playable uri from a track id rather than
+ * trusting one captured earlier (see `useTrackSource`).
+ */
+export async function getTrack(id: string): Promise<Track | null> {
+  await migrateFromJson();
+  const db = getDatabase();
+  const row = db.getFirstSync<TrackRow>(
+    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks WHERE id = ?',
+    id,
+  );
+  return row ? rowToTrack(row) : null;
+}
+
 export function insertTrack(track: Track): void {
   const db = getDatabase();
   db.runSync(

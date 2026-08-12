@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigation } from 'expo-router';
 
 import { ToastVariant } from '../components/Toast';
+import { MarkerCommit } from '../services/audioEngine';
 import { SegmentProfile } from '../types';
 import { nextSegmentName } from '../utils/nextSegmentName';
 import { useLatestRef } from './useLatestRef';
@@ -23,6 +24,8 @@ export interface UseSegmentWorkflowParams {
   setMarkerA: (positionMs: number) => void;
   setMarkerB: (positionMs: number) => boolean;
   setLoopEnabled: (enabled: boolean) => void;
+  /** Parks the playhead at the loop start once a marker edit is committed. */
+  commitMarkerPlacement: (placed: MarkerCommit) => Promise<void>;
   showToast: (message: string, variant?: ToastVariant) => void;
 }
 
@@ -81,6 +84,7 @@ export function useSegmentWorkflow({
   setMarkerA,
   setMarkerB,
   setLoopEnabled,
+  commitMarkerPlacement,
   showToast,
 }: UseSegmentWorkflowParams): UseSegmentWorkflow {
   // Named-segment list + CRUD for this track. The player shows the loaded
@@ -116,8 +120,11 @@ export function useSegmentWorkflow({
       if (profile.markerB != null) setMarkerB(profile.markerB);
       setLoopEnabled(profile.loopEnabled);
       markLoaded(profile);
+      // Park at the segment's start, but only once both markers have landed —
+      // committing per-marker would seek twice for a single load.
+      if (profile.markerA != null) void commitMarkerPlacement('A');
     },
-    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded],
+    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded, commitMarkerPlacement],
   );
 
   // Loading from the sheet. If the loaded segment has unsaved marker edits,

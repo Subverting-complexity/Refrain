@@ -45,6 +45,7 @@ jest.mock('../useSegmentProfiles', () => ({
 const setMarkerA = jest.fn();
 const setMarkerB = jest.fn(() => true);
 const setLoopEnabled = jest.fn();
+const commitMarkerPlacement = jest.fn(() => Promise.resolve());
 const showToast = jest.fn();
 
 let lastResult: UseSegmentWorkflow;
@@ -70,6 +71,7 @@ function TestComponent({
     setMarkerA,
     setMarkerB,
     setLoopEnabled,
+    commitMarkerPlacement,
     showToast,
   });
   return null;
@@ -152,6 +154,25 @@ describe('useSegmentWorkflow', () => {
 
       expect(setMarkerA).toHaveBeenCalledWith(1000);
       expect(setMarkerB).not.toHaveBeenCalled();
+    });
+
+    // Park the playhead at the loaded region's start, once per load — never
+    // once per marker, which would seek twice for a single load.
+    it('commits the playhead to A once both markers have landed', () => {
+      render({ markerA: null, markerB: null });
+
+      act(() => lastResult.requestLoad(profile()));
+
+      expect(commitMarkerPlacement).toHaveBeenCalledWith('A');
+      expect(commitMarkerPlacement).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not commit when the loaded profile has no A marker', () => {
+      render({ markerA: null, markerB: null });
+
+      act(() => lastResult.requestLoad(profile({ markerA: null })));
+
+      expect(commitMarkerPlacement).not.toHaveBeenCalled();
     });
 
     it('raises the guard instead of loading when the segment is dirty', () => {

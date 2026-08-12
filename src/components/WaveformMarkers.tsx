@@ -36,23 +36,23 @@ function Marker({ label, ms, durationMs, color, textColor }: MarkerProps) {
   return (
     <>
       <View
-        pointerEvents="none"
         style={[
+          styles.noPointerEvents,
           isStart ? styles.markerLineStart : styles.markerLineEnd,
           { left: `${leftPct}%`, backgroundColor: color },
         ]}
         accessibilityLabel={`Loop ${label} marker at ${formatDuration(ms)}`}
       />
       <View
-        pointerEvents="none"
         style={[
+          styles.noPointerEvents,
           isStart ? styles.markerDotStart : styles.markerDotEnd,
           { left: `${leftPct}%`, backgroundColor: color },
         ]}
       />
       <View
-        pointerEvents="none"
         style={[
+          styles.noPointerEvents,
           styles.markerHandle,
           isStart ? styles.markerHandleStart : styles.markerHandleEnd,
           { left: `${leftPct}%`, backgroundColor: color },
@@ -95,8 +95,8 @@ export function WaveformMarkers({
     <>
       {hasRegion ? (
         <View
-          pointerEvents="none"
           style={[
+            styles.noPointerEvents,
             styles.markerRegion,
             {
               left: `${regionLeftPct}%`,
@@ -131,6 +131,12 @@ export function WaveformMarkers({
 }
 
 const styles = StyleSheet.create({
+  // These overlays must not swallow touches meant for the pan gesture. Carried
+  // as a style rather than the `pointerEvents` prop, which React Native Web
+  // has deprecated.
+  noPointerEvents: {
+    pointerEvents: 'none',
+  },
   // A's line runs from just under its top flag down through the bars; B's runs
   // from the bars down to just above its bottom flag.
   markerLineStart: {
