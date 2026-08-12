@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   ActivityIndicator,
@@ -23,30 +23,20 @@ import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
-import { useLatestRef } from '@/src/hooks/useLatestRef';
-import { useSegmentEditor } from '@/src/hooks/useSegmentEditor';
-import { useSegmentProfiles } from '@/src/hooks/useSegmentProfiles';
+import { usePersistTrackDuration } from '@/src/hooks/usePersistTrackDuration';
+import { useSegmentWorkflow } from '@/src/hooks/useSegmentWorkflow';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
 import { useSnippetPreview } from '@/src/hooks/useSnippetPreview';
 import { useToast } from '@/src/hooks/useToast';
 import { useTrackSource } from '@/src/hooks/useTrackSource';
 import { useWaveformData } from '@/src/hooks/useWaveformData';
 import { useTheme } from '@/src/hooks/useTheme';
-import { updateTrackDuration } from '@/src/services/trackStore';
 import { radii, spacing } from '@/src/theme';
-import { SegmentProfile } from '@/src/types';
-import { nextSegmentName } from '@/src/utils/nextSegmentName';
-import { settle } from '@/src/utils/settle';
 
 const MARKER_B_BEFORE_A_MESSAGE = 'Loop end must come after loop start';
 
 // Square placeholder shown while the waveform has no peaks to draw yet.
 const ARTWORK_PLACEHOLDER_SIZE = 240;
-
-/** A pending action blocked by unsaved segment edits. */
-type SegmentGuard =
-  | { kind: 'load'; profile: SegmentProfile }
-  | { kind: 'leave'; proceed: () => void };
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
@@ -112,19 +102,24 @@ export default function PlayerScreen() {
     stopMonitor,
   } = useAudioPlayer(uri, trackId, filename);
 
-  // Named-segment list + CRUD for this track, owned here so the player can show
-  // the loaded segment's name and suggest the next one. The sheet receives the
-  // list and the rename/remove actions as props.
-  const { profiles, save, update, rename, remove } =
-    useSegmentProfiles(trackId);
-  // Tracks which segment is loaded and whether its A/B region has been edited.
-  const { loadedId, isDirty, markLoaded, clearLoaded } = useSegmentEditor(
+  const { toast, showToast, hideToast } = useToast();
+
+  // The named-segment side of the player: the saved list, which one is loaded,
+  // both dialogs, and the unsaved-edit guard (including the leave-the-screen
+  // intercept). The live A/B region stays with the engine above.
+  const segments = useSegmentWorkflow({
+    trackId: trackId ?? null,
     markerA,
     markerB,
-  );
-  const loadedProfile = loadedId
-    ? (profiles.find((p) => p.id === loadedId) ?? null)
-    : null;
+    loopEnabled,
+    setMarkerA,
+    setMarkerB,
+    setLoopEnabled,
+    commitMarkerPlacement,
+    showToast,
+  });
+
+  usePersistTrackDuration(trackId ?? null, durationMs);
 
   const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
   const { snippetPreviewEnabled, setSnippetPreviewEnabled } =
@@ -156,172 +151,14 @@ export default function PlayerScreen() {
   // Whether the segment-profile sheet is open. The sheet is mounted only while
   // open so its profile store is read on demand, not on every player render.
   const [profilesVisible, setProfilesVisible] = useState(false);
-  // Whether the player's Save dialog is open.
-  const [saveVisible, setSaveVisible] = useState(false);
-  // A load/leave action deferred behind the unsaved-edit guard, or null.
-  const [guard, setGuard] = useState<SegmentGuard | null>(null);
-
-  // Arm a saved profile on the engine: set A before B so the A < B invariant
-  // holds (saved profiles always carry a valid region), then the loop flag, and
-  // adopt it as the loaded segment. Each setter auto-persists the markers (#117).
-  const applyProfile = useCallback(
-    (profile: SegmentProfile) => {
-      if (profile.markerA != null) setMarkerA(profile.markerA);
-      if (profile.markerB != null) setMarkerB(profile.markerB);
-      setLoopEnabled(profile.loopEnabled);
-      markLoaded(profile);
-      // Park at the segment's start, but only once both markers have landed —
-      // committing per-marker would seek twice for a single load.
-      if (profile.markerA != null) void commitMarkerPlacement('A');
-    },
-    [setMarkerA, setMarkerB, setLoopEnabled, markLoaded, commitMarkerPlacement],
-  );
-
-  // Loading from the sheet. If the loaded segment has unsaved marker edits,
-  // defer the load behind the guard; otherwise arm the new segment straight away.
-  const handleRequestLoad = useCallback(
-    (profile: SegmentProfile) => {
-      if (isDirty && loadedId) {
-        setGuard({ kind: 'load', profile });
-      } else {
-        applyProfile(profile);
-      }
-    },
-    [isDirty, loadedId, applyProfile],
-  );
-
-  const durationPersisted = useRef(false);
-  // Reset the persist guard when the track changes so a reused component
-  // instance persists the new track's measured duration instead of dropping
-  // it. Declared before the persist effect so, on a trackId change, the reset
-  // runs first and the new track persists in the same commit (#168).
-  useEffect(() => {
-    durationPersisted.current = false;
-  }, [trackId]);
-  useEffect(() => {
-    if (trackId && durationMs > 0 && !durationPersisted.current) {
-      // Optimistically guard against re-entry; clear the flag on failure so
-      // the next durationMs update retries. `settle` covers both a native
-      // synchronous throw and a web asynchronous rejection (the web store is
-      // async), so the retry reset lives in one place.
-      durationPersisted.current = true;
-      void settle(() => updateTrackDuration(trackId, durationMs)).catch(() => {
-        durationPersisted.current = false;
-      });
-    }
-  }, [trackId, durationMs]);
-
-  const { toast, showToast, hideToast } = useToast();
-
-  // Save dialog: overwrite the loaded segment with the live region, keeping it
-  // the loaded segment (snapshot moves to the current markers, so it is clean).
-  const handleOverride = useCallback(() => {
-    if (loadedId) {
-      update(loadedId, { markerA, markerB, loopEnabled });
-      markLoaded({ id: loadedId, markerA, markerB });
-    }
-    setSaveVisible(false);
-    showToast('Segment updated');
-  }, [loadedId, update, markerA, markerB, loopEnabled, markLoaded, showToast]);
-
-  // Save dialog: create a new segment, then adopt it as the loaded one. The
-  // success toast waits for the write to resolve with a stored profile; a
-  // falsy result or a rejection reports an error instead of falsely claiming
-  // success, and the rejection is caught so none escapes unhandled.
-  const handleSaveNew = useCallback(
-    (name: string) => {
-      setSaveVisible(false);
-      void save({ name, markerA, markerB, loopEnabled })
-        .then((profile) => {
-          if (profile) {
-            markLoaded(profile);
-            showToast('Segment saved');
-          } else {
-            showToast('Could not save segment', 'error');
-          }
-        })
-        .catch(() => {
-          showToast('Could not save segment', 'error');
-        });
-    },
-    [save, markerA, markerB, loopEnabled, markLoaded, showToast],
-  );
-
-  // Carry out a guarded action once the user resolves the unsaved-edit prompt.
-  const proceedGuard = useCallback(
-    (pending: SegmentGuard) => {
-      if (pending.kind === 'load') applyProfile(pending.profile);
-      else pending.proceed();
-    },
-    [applyProfile],
-  );
-
-  // Guard "Save": overwrite the loaded segment, then carry on. Advancing the
-  // dirty baseline via markLoaded (as handleOverride does) is what keeps the
-  // segment from re-reporting as dirty against its now-stale snapshot.
-  const handleGuardSave = useCallback(() => {
-    if (loadedId) {
-      update(loadedId, { markerA, markerB, loopEnabled });
-      markLoaded({ id: loadedId, markerA, markerB });
-    }
-    if (guard) proceedGuard(guard);
-    setGuard(null);
-  }, [
-    loadedId,
-    update,
-    markerA,
-    markerB,
-    loopEnabled,
-    markLoaded,
-    guard,
-    proceedGuard,
-  ]);
-
-  // Guard "Discard": carry on without saving the named segment. Live per-track
-  // markers persist as today (#117); a load overwrites them as usual.
-  const handleGuardDiscard = useCallback(() => {
-    if (guard) proceedGuard(guard);
-    setGuard(null);
-  }, [guard, proceedGuard]);
-
-  const handleGuardCancel = useCallback(() => setGuard(null), []);
-
-  // Refs let the navigation listener read the latest dirty/loaded state without
-  // re-subscribing every render; the bypass flag lets a resolved guard navigate
-  // through without re-triggering itself.
-  const dirtyRef = useLatestRef(isDirty);
-  const loadedIdRef = useLatestRef(loadedId);
-  const bypassGuardRef = useRef(false);
-
-  // Leaving the player with unsaved segment edits: intercept the back action
-  // and raise the same guard. Fires for in-app Stack back navigation.
-  const navigation = useNavigation();
 
   // Fold the track title into the header: the stack screen's static
   // "Now Playing" title is replaced by the filename so the player body no
   // longer needs a separate centered title band.
+  const navigation = useNavigation();
   useEffect(() => {
     navigation.setOptions({ title: filename || 'Now Playing' });
   }, [navigation, filename]);
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
-      if (bypassGuardRef.current) return;
-      if (!dirtyRef.current || !loadedIdRef.current) return;
-      event.preventDefault();
-      setGuard({
-        kind: 'leave',
-        proceed: () => {
-          bypassGuardRef.current = true;
-          navigation.dispatch(event.data.action);
-          bypassGuardRef.current = false;
-        },
-      });
-    });
-    return unsubscribe;
-    // The refs are stable across renders, so listing them keeps the listener
-    // subscribed exactly once — as it was when they were inline `useRef`s.
-  }, [navigation, dirtyRef, loadedIdRef]);
 
   // The B button rejects placements at or before A. Surface that instead of
   // failing silently: the toast is both shown and announced (see useToast).
@@ -337,6 +174,8 @@ export default function PlayerScreen() {
     },
     [setMarkerB, showToast],
   );
+
+  const { clearLoaded } = segments;
 
   // Drag/tap path: fires throughout the gesture, so it never commits — the
   // waveform reports the commit once on release.
@@ -597,7 +436,7 @@ export default function PlayerScreen() {
             onRemoveA={handleClear}
             onRemoveB={handleRemoveB}
             onToggleLoop={setLoopEnabled}
-            onSave={trackId ? () => setSaveVisible(true) : undefined}
+            onSave={trackId ? segments.openSave : undefined}
             onClear={handleClear}
             style={styles.markers}
           />
@@ -643,32 +482,36 @@ export default function PlayerScreen() {
 
       {profilesVisible && trackId ? (
         <SegmentProfileSheet
-          profiles={profiles}
-          onLoadProfile={handleRequestLoad}
-          onRename={rename}
-          onRemove={remove}
+          profiles={segments.profiles}
+          onLoadProfile={segments.requestLoad}
+          onRename={segments.rename}
+          onRemove={segments.remove}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
           onClose={() => setProfilesVisible(false)}
         />
       ) : null}
 
-      {saveVisible ? (
+      {segments.saveVisible ? (
         <SegmentSaveDialog
-          loadedName={isDirty && loadedProfile ? loadedProfile.name : null}
-          suggestedName={nextSegmentName(profiles)}
-          onOverride={handleOverride}
-          onSaveNew={handleSaveNew}
-          onCancel={() => setSaveVisible(false)}
+          loadedName={
+            segments.isDirty && segments.loadedProfile
+              ? segments.loadedProfile.name
+              : null
+          }
+          suggestedName={segments.suggestedName}
+          onOverride={segments.saveOverLoaded}
+          onSaveNew={segments.saveAsNew}
+          onCancel={segments.closeSave}
         />
       ) : null}
 
-      {guard ? (
+      {segments.guardVisible ? (
         <UnsavedSegmentDialog
-          profileName={loadedProfile?.name ?? 'this segment'}
-          onSave={handleGuardSave}
-          onDiscard={handleGuardDiscard}
-          onCancel={handleGuardCancel}
+          profileName={segments.loadedProfile?.name ?? 'this segment'}
+          onSave={segments.guardSave}
+          onDiscard={segments.guardDiscard}
+          onCancel={segments.guardCancel}
         />
       ) : null}
     </SafeAreaView>
