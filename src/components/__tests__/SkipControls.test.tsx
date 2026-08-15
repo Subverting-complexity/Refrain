@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { SkipControls } from '../SkipControls';
-import { SKIP_PRESETS } from '../../hooks/useSkipInterval';
+import { formatSkipLabel, SKIP_PRESETS } from '../../hooks/useSkipInterval';
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');
@@ -33,8 +33,8 @@ function renderControls(
   act(() => {
     tree = create(
       <SkipControls
-        skipSeconds={5}
-        onSkipSecondsChange={jest.fn()}
+        preference={{ mode: 'interval', seconds: 5 }}
+        onPreferenceChange={jest.fn()}
         {...props}
       />,
     );
@@ -42,10 +42,10 @@ function renderControls(
   return tree;
 }
 
-function findChip(tree: ReactTestRenderer, seconds: number) {
+function findChip(tree: ReactTestRenderer, label: string) {
   const nodes = tree.root.findAll(
     (node) =>
-      node.props.accessibilityLabel === `Skip amount ${seconds}s` &&
+      node.props.accessibilityLabel === `Skip amount ${label}` &&
       typeof node.props.onPress === 'function',
   );
   return nodes[nodes.length - 1];
@@ -60,27 +60,77 @@ describe('SkipControls', () => {
   it('renders one chip per skip preset with interval labels', () => {
     const tree = renderControls();
     for (const seconds of SKIP_PRESETS) {
-      const chip = findChip(tree, seconds);
+      const chip = findChip(tree, formatSkipLabel(seconds));
       expect(chip).toBeDefined();
       expect(chip.props.accessibilityRole).toBe('radio');
     }
   });
 
-  it('marks the chip matching skipSeconds as selected', () => {
-    const tree = renderControls({ skipSeconds: 10 });
-    expect(findChip(tree, 10).props.accessibilityState).toEqual({
+  it('renders minute presets in minutes', () => {
+    const tree = renderControls();
+    expect(findChip(tree, '1m')).toBeDefined();
+    expect(findChip(tree, '5m')).toBeDefined();
+  });
+
+  it('renders a Full chip alongside the intervals', () => {
+    const tree = renderControls();
+    expect(findChip(tree, 'Full')).toBeDefined();
+  });
+
+  it('marks the chip matching the configured interval as selected', () => {
+    const tree = renderControls({
+      preference: { mode: 'interval', seconds: 10 },
+    });
+    expect(findChip(tree, '10s').props.accessibilityState).toEqual({
       selected: true,
     });
-    expect(findChip(tree, 5).props.accessibilityState).toEqual({
+    expect(findChip(tree, '5s').props.accessibilityState).toEqual({
       selected: false,
     });
   });
 
-  it('calls onSkipSecondsChange with the pressed interval', () => {
-    const onSkipSecondsChange = jest.fn();
-    const tree = renderControls({ onSkipSecondsChange });
-    act(() => findChip(tree, 30).props.onPress());
-    expect(onSkipSecondsChange).toHaveBeenCalledTimes(1);
-    expect(onSkipSecondsChange).toHaveBeenCalledWith(30);
+  it('marks Full as selected in full mode, and no interval with it', () => {
+    const tree = renderControls({ preference: { mode: 'full', seconds: 10 } });
+    expect(findChip(tree, 'Full').props.accessibilityState).toEqual({
+      selected: true,
+    });
+    expect(findChip(tree, '10s').props.accessibilityState).toEqual({
+      selected: false,
+    });
+  });
+
+  it('calls onPreferenceChange with the pressed interval', () => {
+    const onPreferenceChange = jest.fn();
+    const tree = renderControls({ onPreferenceChange });
+    act(() => findChip(tree, '30s').props.onPress());
+    expect(onPreferenceChange).toHaveBeenCalledTimes(1);
+    expect(onPreferenceChange).toHaveBeenCalledWith({
+      mode: 'interval',
+      seconds: 30,
+    });
+  });
+
+  it('calls onPreferenceChange with full mode when Full is pressed', () => {
+    const onPreferenceChange = jest.fn();
+    const tree = renderControls({ onPreferenceChange });
+    act(() => findChip(tree, 'Full').props.onPress());
+    expect(onPreferenceChange).toHaveBeenCalledWith({
+      mode: 'full',
+      seconds: 5,
+    });
+  });
+
+  // Switching to Full and back must not lose the amount the user had picked.
+  it('carries the stored amount through a switch to Full', () => {
+    const onPreferenceChange = jest.fn();
+    const tree = renderControls({
+      preference: { mode: 'interval', seconds: 300 },
+      onPreferenceChange,
+    });
+    act(() => findChip(tree, 'Full').props.onPress());
+    expect(onPreferenceChange).toHaveBeenCalledWith({
+      mode: 'full',
+      seconds: 300,
+    });
   });
 });

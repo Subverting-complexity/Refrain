@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { SkipPreference } from '../services/skipIntervalStore';
 import { spacing } from '../theme';
 import { CountdownConfig } from '../types';
 import { BottomSheet } from './BottomSheet';
@@ -21,8 +22,8 @@ interface ControlsDrawerProps {
   onCountdownConfigChange: (config: CountdownConfig) => void;
   volume: number;
   onVolumeChange: (volume: number) => void;
-  skipSeconds: number;
-  onSkipSecondsChange: (seconds: number) => void;
+  skipPreference: SkipPreference;
+  onSkipPreferenceChange: (preference: SkipPreference) => void;
   /**
    * Opens the segment-profile sheet. When omitted (no track loaded) the
    * Segments launcher is hidden, since there is nothing to manage.
@@ -69,8 +70,8 @@ export function ControlsDrawer({
   onCountdownConfigChange,
   volume,
   onVolumeChange,
-  skipSeconds,
-  onSkipSecondsChange,
+  skipPreference,
+  onSkipPreferenceChange,
   onOpenSegments,
   style,
 }: ControlsDrawerProps) {
@@ -113,8 +114,8 @@ export function ControlsDrawer({
           ) : null}
           {openPanel === 'skip' ? (
             <SkipControls
-              skipSeconds={skipSeconds}
-              onSkipSecondsChange={onSkipSecondsChange}
+              preference={skipPreference}
+              onPreferenceChange={onSkipPreferenceChange}
             />
           ) : null}
         </BottomSheet>

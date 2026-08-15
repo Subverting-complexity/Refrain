@@ -47,13 +47,32 @@ jest.mock('expo-audio', () => ({
 
 const mockGetNumber = jest.fn<number, [string, number]>();
 const mockSetNumber = jest.fn<void, [string, number]>();
+const mockGetSetting = jest.fn<string | null, [string]>();
+const mockSetSetting = jest.fn<void, [string, string]>();
 const mockHydrateSettings = jest.fn<Promise<void>, []>();
 
 jest.mock('../settingsStore', () => ({
   getNumber: (key: string, fallback: number) => mockGetNumber(key, fallback),
   setNumber: (key: string, value: number) => mockSetNumber(key, value),
+  getSetting: (key: string) => mockGetSetting(key),
+  setSetting: (key: string, value: string) => mockSetSetting(key, value),
   hydrateSettings: () => mockHydrateSettings(),
 }));
+
+/** Point the persisted skip preference at a given mode/amount for one test. */
+function setStoredSkip(preference: {
+  mode?: 'interval' | 'full';
+  seconds?: number;
+}) {
+  mockGetSetting.mockImplementation((key) =>
+    key === 'playback.skipMode' ? (preference.mode ?? 'interval') : null,
+  );
+  mockGetNumber.mockImplementation((key, fallback) =>
+    key === 'playback.skipSeconds'
+      ? (preference.seconds ?? fallback)
+      : fallback,
+  );
+}
 
 interface ActiveMarkersShape {
   markerA: number | null;
@@ -92,6 +111,8 @@ beforeEach(() => {
   mockSeekTo.mockResolvedValue(undefined);
   // Default: no persisted volume, so the engine uses its fallback.
   mockGetNumber.mockImplementation((_key, fallback) => fallback);
+  // Default: no stored skip mode, so the engine reads the default 5s interval.
+  mockGetSetting.mockReturnValue(null);
   // Default: hydration resolves immediately (warm cache / native no-op).
   mockHydrateSettings.mockResolvedValue(undefined);
   // Default: no saved markers, so loads start with empty markers.
@@ -157,7 +178,7 @@ describe('audioEngine', () => {
       expect(mockSetActiveForLockScreen).toHaveBeenCalledWith(
         true,
         { title: 'My Song', artist: 'Refrain' },
-        { showSeekForward: false, showSeekBackward: false },
+        { showSeekForward: true, showSeekBackward: true },
       );
     });
 
@@ -519,27 +540,50 @@ describe('audioEngine', () => {
     });
   });
 
-  describe('skipBy', () => {
-    it('skips within the full track when no loop is armed', async () => {
-      const { loadTrack, skipBy } = require('../audioEngine');
+  describe('skipBack / skipForward', () => {
+    it('skips by the configured interval within the full track', async () => {
+      setStoredSkip({ seconds: 15 });
+      const { loadTrack, skipBack, skipForward } = require('../audioEngine');
 
       await loadTrack('file:///test.mp3');
       statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 60 }));
 
-      await skipBy(5000);
-      expect(mockSeekTo).toHaveBeenLastCalledWith(35);
+      await skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(45);
+      await skipBack();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(15);
+    });
 
-      // Forward past the end clamps to the duration; back past 0 clamps to 0.
-      await skipBy(40000);
+    it('honours a minute-scale interval', async () => {
+      setStoredSkip({ seconds: 60 });
+      const { loadTrack, skipForward } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 300 }));
+
+      await skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(90);
+    });
+
+    it('clamps to the track ends', async () => {
+      setStoredSkip({ seconds: 300 });
+      const { loadTrack, skipBack, skipForward } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 60 }));
+
+      await skipForward();
       expect(mockSeekTo).toHaveBeenLastCalledWith(60);
-      await skipBy(-40000);
+      await skipBack();
       expect(mockSeekTo).toHaveBeenLastCalledWith(0);
     });
 
     it('skips within the A/B window while looping', async () => {
+      setStoredSkip({ seconds: 5 });
       const {
         loadTrack,
-        skipBy,
+        skipBack,
+        skipForward,
         setMarkerA,
         setMarkerB,
       } = require('../audioEngine');
@@ -549,18 +593,299 @@ describe('audioEngine', () => {
       setMarkerA(5000);
       setMarkerB(10000);
 
-      await skipBy(5000);
+      await skipForward();
       expect(mockSeekTo).toHaveBeenLastCalledWith(10);
-      await skipBy(-10000);
+      await skipBack();
       expect(mockSeekTo).toHaveBeenLastCalledWith(5);
     });
 
-    it('does nothing when no player is loaded', async () => {
-      const { skipBy } = require('../audioEngine');
+    it('runs to the track ends in full mode', async () => {
+      setStoredSkip({ mode: 'full' });
+      const { loadTrack, skipBack, skipForward } = require('../audioEngine');
 
-      await skipBy(5000);
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 60 }));
+
+      await skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(60);
+      await skipBack();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(0);
+    });
+
+    it('runs to the region edges in full mode with markers set', async () => {
+      setStoredSkip({ mode: 'full' });
+      const {
+        loadTrack,
+        skipBack,
+        skipForward,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 8, duration: 60 }));
+      setMarkerA(5000);
+      setMarkerB(10000);
+
+      await skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(10);
+      await skipBack();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(5);
+    });
+
+    // A failed settings read must not leave the transport buttons inert.
+    it('falls back to the default interval when the store throws', async () => {
+      const { loadTrack, skipForward } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 30, duration: 60 }));
+      mockGetSetting.mockImplementation(() => {
+        throw new Error('db unavailable');
+      });
+
+      await skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(35);
+    });
+
+    it('does nothing when no player is loaded', async () => {
+      const { skipForward } = require('../audioEngine');
+
+      await skipForward();
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+  });
+
+  // expo-audio performs the lock-screen seek itself, with a hardcoded 10s
+  // interval and no JS callback, so a press arrives only as an unexplained
+  // jump in the status stream. These cover the engine spotting that jump and
+  // redirecting it to the configured skip.
+  describe('lock-screen skip interception', () => {
+    /** Load a track and settle the playhead at `currentTime` seconds. */
+    async function loadAt(currentTime: number, duration = 300) {
+      const engine = require('../audioEngine');
+      await engine.loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime, duration }));
+      mockSeekTo.mockClear();
+      return engine;
+    }
+
+    /** The native lock-screen seek: a bare ±10s jump we never asked for. */
+    function nativeSkip(fromSeconds: number, direction: 1 | -1) {
+      statusCallback?.(
+        makeLoadedStatus({
+          currentTime: fromSeconds + direction * 10,
+          duration: 300,
+          playing: true,
+        }),
+      );
+    }
+
+    it('rewrites a forward press to the configured interval', async () => {
+      setStoredSkip({ seconds: 30 });
+      await loadAt(60);
+
+      nativeSkip(60, 1);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(90);
+    });
+
+    it('rewrites a backward press to the configured interval', async () => {
+      setStoredSkip({ seconds: 30 });
+      await loadAt(60);
+
+      nativeSkip(60, -1);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(30);
+    });
+
+    it('honours a minute-scale interval', async () => {
+      setStoredSkip({ seconds: 300 });
+      await loadAt(60, 3600);
+
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 70, duration: 3600, playing: true }),
+      );
+
+      expect(mockSeekTo).toHaveBeenCalledWith(360);
+    });
+
+    it('runs to the region edge in full mode', async () => {
+      setStoredSkip({ mode: 'full' });
+      const engine = await loadAt(60);
+      engine.setMarkerA(50000);
+      engine.setMarkerB(200000);
+      mockSeekTo.mockClear();
+
+      nativeSkip(60, 1);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(200);
+    });
+
+    // The native seek knows nothing about A/B, so without the clamp a
+    // lock-screen press would walk the playhead straight out of the loop.
+    it('clamps a forward press to the end of the A/B region', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+      engine.setMarkerA(50000);
+      engine.setMarkerB(65000);
+      mockSeekTo.mockClear();
+
+      nativeSkip(60, 1);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(65);
+    });
+
+    it('clamps a backward press to the start of the A/B region', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+      engine.setMarkerA(55000);
+      engine.setMarkerB(200000);
+      mockSeekTo.mockClear();
+
+      nativeSkip(60, -1);
+
+      expect(mockSeekTo).toHaveBeenCalledWith(55);
+    });
+
+    it('publishes the corrected position rather than the native landing spot', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+      const listener = jest.fn();
+      engine.subscribe(listener);
+      listener.mockClear();
+
+      nativeSkip(60, 1);
+
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({ positionMs: 90000 }),
+      );
+    });
+
+    // With a 10s preference the native interval is already right; re-seeking
+    // would be a pointless second seek on every press.
+    it('leaves a press alone when the interval already matches', async () => {
+      setStoredSkip({ seconds: 10 });
+      await loadAt(60);
+
+      nativeSkip(60, 1);
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('ignores ordinary playback advance', async () => {
+      setStoredSkip({ seconds: 30 });
+      await loadAt(60);
+
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 60.1, duration: 300, playing: true }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    // Our own seeks land as jumps too. A 10s in-app skip must not be read as a
+    // lock-screen press and then re-applied.
+    it('ignores the landing of a seek we issued ourselves', async () => {
+      setStoredSkip({ seconds: 10 });
+      const engine = await loadAt(60);
+
+      await engine.skipForward();
+      expect(mockSeekTo).toHaveBeenLastCalledWith(70);
+      mockSeekTo.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 70, duration: 300, playing: true }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('ignores a seek we issued even when the preference differs', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+
+      await engine.seekTo(70000);
+      mockSeekTo.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 70, duration: 300, playing: true }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    // A marker drag re-seeks continuously to follow the marker; those jumps
+    // are the preview working, not the lock screen.
+    it('ignores jumps while the monitor is previewing', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+      // Preview window [198s, 202s].
+      await engine.startMonitor(200000);
+      // Settle inside the window, then jump backwards by the native interval.
+      // Backwards, so the movement can't also trip the monitor's own rewind.
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 199, duration: 300, playing: true }),
+      );
+      mockSeekTo.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ currentTime: 189, duration: 300, playing: true }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('does not read the first update of a track as a jump', async () => {
+      setStoredSkip({ seconds: 30 });
+      const { loadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockSeekTo.mockClear();
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 300 }));
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    // Reaching the end auto-pauses at the duration, which can look like a jump.
+    // Markers well short of the end make the difference observable: read as a
+    // press, the correction would drag the playhead back to marker B.
+    it('does not read a natural end as a press', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(290);
+      engine.setMarkerA(50000);
+      engine.setMarkerB(200000);
+      engine.setLoopEnabled(false);
+      mockSeekTo.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({
+          currentTime: 300,
+          duration: 300,
+          didJustFinish: true,
+        }),
+      );
+
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a failed corrective seek as an error', async () => {
+      setStoredSkip({ seconds: 30 });
+      const engine = await loadAt(60);
+      const listener = jest.fn();
+      engine.subscribe(listener);
+      mockSeekTo.mockRejectedValueOnce(new Error('seek failed'));
+
+      nativeSkip(60, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'error',
+          lastError: 'seek failed',
+        }),
+      );
     });
   });
 

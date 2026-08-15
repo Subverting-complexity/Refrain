@@ -41,6 +41,16 @@ function installSession(
   return session;
 }
 
+function fakeHandlers() {
+  return {
+    play: jest.fn(),
+    pause: jest.fn(),
+    stop: jest.fn(),
+    seekBackward: jest.fn(),
+    seekForward: jest.fn(),
+  };
+}
+
 afterEach(() => {
   delete (global as Record<string, unknown>).navigator;
   delete (global as Record<string, unknown>).MediaMetadata;
@@ -53,13 +63,7 @@ describe('webMediaSession', () => {
     expect(webMediaSession.isSupported()).toBe(false);
     // Calls are safe no-ops when unsupported.
     expect(() => webMediaSession.setPlaybackState('playing')).not.toThrow();
-    expect(() =>
-      webMediaSession.setHandlers({
-        play: jest.fn(),
-        pause: jest.fn(),
-        stop: jest.fn(),
-      }),
-    ).not.toThrow();
+    expect(() => webMediaSession.setHandlers(fakeHandlers())).not.toThrow();
   });
 
   it('publishes metadata via the MediaMetadata constructor', () => {
@@ -74,22 +78,37 @@ describe('webMediaSession', () => {
     });
   });
 
-  it('registers play/pause/stop handlers and routes them to the engine', () => {
+  it('registers every transport handler and routes it to the engine', () => {
     const session = installSession();
     const webMediaSession = require('../webMediaSession');
-    const play = jest.fn();
-    const pause = jest.fn();
-    const stop = jest.fn();
+    const handlers = fakeHandlers();
 
-    webMediaSession.setHandlers({ play, pause, stop });
+    webMediaSession.setHandlers(handlers);
 
     session.handlers.play?.();
     session.handlers.pause?.();
     session.handlers.stop?.();
+    session.handlers.seekbackward?.();
+    session.handlers.seekforward?.();
 
-    expect(play).toHaveBeenCalledTimes(1);
-    expect(pause).toHaveBeenCalledTimes(1);
-    expect(stop).toHaveBeenCalledTimes(1);
+    expect(handlers.play).toHaveBeenCalledTimes(1);
+    expect(handlers.pause).toHaveBeenCalledTimes(1);
+    expect(handlers.stop).toHaveBeenCalledTimes(1);
+    expect(handlers.seekBackward).toHaveBeenCalledTimes(1);
+    expect(handlers.seekForward).toHaveBeenCalledTimes(1);
+  });
+
+  // The OS overlay's skip buttons are the lock screen on web; without these two
+  // the preference would only work inside the app.
+  it('registers the seek actions under the Media Session action names', () => {
+    const session = installSession();
+    const webMediaSession = require('../webMediaSession');
+
+    webMediaSession.setHandlers(fakeHandlers());
+
+    const actions = session.setActionHandler.mock.calls.map((c) => c[0]);
+    expect(actions).toContain('seekbackward');
+    expect(actions).toContain('seekforward');
   });
 
   it('skips an unsupported action without dropping the others', () => {
@@ -98,17 +117,17 @@ describe('webMediaSession', () => {
     });
     const webMediaSession = require('../webMediaSession');
 
-    expect(() =>
-      webMediaSession.setHandlers({
-        play: jest.fn(),
-        pause: jest.fn(),
-        stop: jest.fn(),
-      }),
-    ).not.toThrow();
+    expect(() => webMediaSession.setHandlers(fakeHandlers())).not.toThrow();
 
-    // play and pause were still attempted despite stop throwing.
+    // Every other action was still attempted despite stop throwing.
     const actions = session.setActionHandler.mock.calls.map((c) => c[0]);
-    expect(actions).toEqual(['play', 'pause', 'stop']);
+    expect(actions).toEqual([
+      'play',
+      'pause',
+      'stop',
+      'seekbackward',
+      'seekforward',
+    ]);
   });
 
   it('reflects playback state', () => {
@@ -124,11 +143,7 @@ describe('webMediaSession', () => {
     const webMediaSession = require('../webMediaSession');
 
     webMediaSession.setMetadata({ title: 'My Song' });
-    webMediaSession.setHandlers({
-      play: jest.fn(),
-      pause: jest.fn(),
-      stop: jest.fn(),
-    });
+    webMediaSession.setHandlers(fakeHandlers());
 
     webMediaSession.clear();
 
@@ -137,5 +152,7 @@ describe('webMediaSession', () => {
     expect(session.handlers.play).toBeNull();
     expect(session.handlers.pause).toBeNull();
     expect(session.handlers.stop).toBeNull();
+    expect(session.handlers.seekbackward).toBeNull();
+    expect(session.handlers.seekforward).toBeNull();
   });
 });

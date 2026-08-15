@@ -64,8 +64,8 @@ function renderDrawer(
         onCountdownConfigChange={jest.fn()}
         volume={0.5}
         onVolumeChange={jest.fn()}
-        skipSeconds={5}
-        onSkipSecondsChange={jest.fn()}
+        skipPreference={{ mode: 'interval', seconds: 5 }}
+        onSkipPreferenceChange={jest.fn()}
         {...props}
       />,
     );

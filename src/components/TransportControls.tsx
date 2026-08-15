@@ -6,12 +6,19 @@ import { spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
 
-interface TransportControlsProps {
+export interface TransportControlsProps {
   status: PlaybackStatus;
   onPlay: () => void;
   onPause: () => void;
   onSkipBack: () => void;
   onSkipForward: () => void;
+  /**
+   * Accessibility labels for the skip buttons. The icons are identical whatever
+   * the skip preference is, so the label is the only thing that can tell a
+   * screen-reader user whether the button jumps 5 seconds or to the start.
+   */
+  skipBackLabel?: string;
+  skipForwardLabel?: string;
   style?: ViewStyle;
 }
 
@@ -21,6 +28,8 @@ export function TransportControls({
   onPause,
   onSkipBack,
   onSkipForward,
+  skipBackLabel = 'Skip back',
+  skipForwardLabel = 'Skip forward',
   style,
 }: TransportControlsProps) {
   const { theme } = useTheme();
@@ -41,7 +50,7 @@ export function TransportControls({
     <View style={[styles.container, style]}>
       <AccessiblePressable
         accessibilityRole="button"
-        accessibilityLabel="Skip back"
+        accessibilityLabel={skipBackLabel}
         accessibilityState={{ disabled: isDisabled }}
         onPress={onSkipBack}
         disabled={isDisabled}
@@ -78,7 +87,7 @@ export function TransportControls({
 
       <AccessiblePressable
         accessibilityRole="button"
-        accessibilityLabel="Skip forward"
+        accessibilityLabel={skipForwardLabel}
         accessibilityState={{ disabled: isDisabled }}
         onPress={onSkipForward}
         disabled={isDisabled}

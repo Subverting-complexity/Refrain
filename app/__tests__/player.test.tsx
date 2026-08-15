@@ -19,7 +19,8 @@ const mockAudioPlayerState = {
   play: jest.fn(),
   pause: jest.fn(),
   seekTo: jest.fn(),
-  skipBy: jest.fn(),
+  skipBack: jest.fn(),
+  skipForward: jest.fn(),
   setMarkerA: jest.fn(),
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
@@ -89,11 +90,14 @@ jest.mock('@/src/hooks/useWaveformData', () => ({
 
 jest.mock('@/src/hooks/useSkipInterval', () => ({
   useSkipInterval: () => ({
-    skipSeconds: 5,
-    skipMs: 5000,
-    setSkipSeconds: jest.fn(),
+    skipPreference: { mode: 'interval', seconds: 5 },
+    setSkipPreference: jest.fn(),
+    skipBackLabel: 'Skip back 5s',
+    skipForwardLabel: 'Skip forward 5s',
   }),
-  SKIP_PRESETS: [1, 3, 5, 10, 15, 30],
+  formatSkipLabel: (seconds: number) =>
+    seconds < 60 ? `${seconds}s` : `${seconds / 60}m`,
+  SKIP_PRESETS: [1, 3, 5, 10, 15, 30, 60, 300],
 }));
 
 jest.mock('@/src/hooks/useCountdown', () => ({
@@ -237,8 +241,18 @@ jest.mock('@/src/components/SeekBar', () => ({ SeekBar: () => null }));
 jest.mock('@/src/components/VolumeControl', () => ({
   VolumeControl: () => null,
 }));
+// Rendered as nothing, but its props are captured so a test can confirm what
+// the player wires into the transport.
+let mockTransportProps:
+  | import('@/src/components/TransportControls').TransportControlsProps
+  | null = null;
 jest.mock('@/src/components/TransportControls', () => ({
-  TransportControls: () => null,
+  TransportControls: (
+    props: import('@/src/components/TransportControls').TransportControlsProps,
+  ) => {
+    mockTransportProps = props;
+    return null;
+  },
 }));
 
 // Capture the sheet's props so a test can drive its onLoadProfile callback and
@@ -530,6 +544,34 @@ describe('PlayerScreen snippet preview', () => {
     expect(waveform.props.onPreviewMove).toBeUndefined();
     expect(waveform.props.onPreviewEnd).toBeUndefined();
     expect(mockAudioPlayerState.startMonitor).not.toHaveBeenCalled();
+  });
+});
+
+describe('PlayerScreen skip transport', () => {
+  // The buttons must run the engine's semantic skip, which reads the persisted
+  // preference itself — not a delta computed on this screen. That is what keeps
+  // them in step with the lock-screen controls.
+  it('runs the engine skip actions', () => {
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    act(() => mockTransportProps?.onSkipBack());
+    act(() => mockTransportProps?.onSkipForward());
+
+    expect(mockAudioPlayerState.skipBack).toHaveBeenCalledTimes(1);
+    expect(mockAudioPlayerState.skipForward).toHaveBeenCalledTimes(1);
+  });
+
+  // The icons are identical in every mode, so the label is the only thing that
+  // tells a screen-reader user what the button will do.
+  it('labels the buttons with the current preference', () => {
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockTransportProps?.skipBackLabel).toBe('Skip back 5s');
+    expect(mockTransportProps?.skipForwardLabel).toBe('Skip forward 5s');
   });
 });
 

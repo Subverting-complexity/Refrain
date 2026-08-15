@@ -19,7 +19,25 @@ export interface MediaSessionHandlers {
   play: () => void;
   pause: () => void;
   stop: () => void;
+  /**
+   * Skip backwards / forwards by the user's configured amount. The browser may
+   * offer its own `seekOffset` on the action details; we ignore it, because the
+   * whole point is that the OS controls do exactly what the in-app skip buttons
+   * do.
+   */
+  seekBackward: () => void;
+  seekForward: () => void;
 }
+
+// Every action we register, so `setHandlers` and `clear` can never fall out of
+// step and leave a stale handler behind.
+const ACTIONS = [
+  'play',
+  'pause',
+  'stop',
+  'seekbackward',
+  'seekforward',
+] as const;
 
 interface MediaSessionLike {
   metadata: unknown;
@@ -82,10 +100,12 @@ export function setMetadata(metadata: {
 export function setHandlers(handlers: MediaSessionHandlers): void {
   const session = getMediaSession();
   if (!session) return;
-  const map: [string, () => void][] = [
+  const map: [(typeof ACTIONS)[number], () => void][] = [
     ['play', handlers.play],
     ['pause', handlers.pause],
     ['stop', handlers.stop],
+    ['seekbackward', handlers.seekBackward],
+    ['seekforward', handlers.seekForward],
   ];
   for (const [action, handler] of map) {
     try {
@@ -120,7 +140,7 @@ export function clear(): void {
     // best-effort
   }
   setPlaybackState('none');
-  for (const action of ['play', 'pause', 'stop']) {
+  for (const action of ACTIONS) {
     try {
       session.setActionHandler(action, null);
     } catch {
