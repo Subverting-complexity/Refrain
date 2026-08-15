@@ -88,7 +88,8 @@ export default function PlayerScreen() {
     play,
     pause,
     seekTo,
-    skipBy,
+    skipBack,
+    skipForward,
     setMarkerA,
     setMarkerB,
     clearMarkers,
@@ -121,7 +122,8 @@ export default function PlayerScreen() {
 
   usePersistTrackDuration(trackId ?? null, durationMs);
 
-  const { skipSeconds, skipMs, setSkipSeconds } = useSkipInterval();
+  const { skipPreference, setSkipPreference, skipBackLabel, skipForwardLabel } =
+    useSkipInterval();
   const { snippetPreviewEnabled, setSnippetPreviewEnabled } =
     useSnippetPreview();
 
@@ -458,8 +460,8 @@ export default function PlayerScreen() {
               onCountdownConfigChange={setCountdownConfig}
               volume={volume}
               onVolumeChange={setVolume}
-              skipSeconds={skipSeconds}
-              onSkipSecondsChange={setSkipSeconds}
+              skipPreference={skipPreference}
+              onSkipPreferenceChange={setSkipPreference}
               onOpenSegments={
                 trackId ? () => setProfilesVisible(true) : undefined
               }
@@ -470,8 +472,10 @@ export default function PlayerScreen() {
               status={isCounting ? 'playing' : status}
               onPlay={handlePlay}
               onPause={isCounting ? cancelCountdown : pause}
-              onSkipBack={() => skipBy(-skipMs)}
-              onSkipForward={() => skipBy(skipMs)}
+              onSkipBack={skipBack}
+              onSkipForward={skipForward}
+              skipBackLabel={skipBackLabel}
+              skipForwardLabel={skipForwardLabel}
               style={styles.transport}
             />
           </View>

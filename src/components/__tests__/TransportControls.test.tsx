@@ -109,4 +109,34 @@ describe('TransportControls', () => {
       expect.objectContaining({ disabled: true }),
     );
   });
+
+  // The skip icons look the same whatever the skip preference is, so a caller
+  // has to be able to say what the button will actually do.
+  describe('skip labels', () => {
+    it('takes labels describing the configured skip', () => {
+      const tree = renderControls({
+        skipBackLabel: 'Skip to start',
+        skipForwardLabel: 'Skip forward 5m',
+      });
+
+      expect(
+        tree.root.find((n) => n.props.accessibilityLabel === 'Skip to start'),
+      ).toBeDefined();
+      expect(
+        tree.root.find((n) => n.props.accessibilityLabel === 'Skip forward 5m'),
+      ).toBeDefined();
+    });
+
+    it('still presses through a custom label', () => {
+      const onSkipForward = jest.fn();
+      const tree = renderControls({
+        skipForwardLabel: 'Skip to end',
+        onSkipForward,
+      });
+
+      pressByLabel(tree, 'Skip to end');
+
+      expect(onSkipForward).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -45,10 +45,10 @@ export function useAudioPlayer(
   const play = useCallback(() => audioEngine.play(), []);
   const pause = useCallback(() => audioEngine.pause(), []);
   const seekTo = useCallback((ms: number) => audioEngine.seekTo(ms), []);
-  const skipBy = useCallback(
-    (deltaMs: number) => audioEngine.skipBy(deltaMs),
-    [],
-  );
+  // Semantic skips: the engine reads the persisted skip preference itself, so
+  // these take no delta and stay in step with the lock-screen controls.
+  const skipBack = useCallback(() => audioEngine.skipBack(), []);
+  const skipForward = useCallback(() => audioEngine.skipForward(), []);
   const setMarkerA = useCallback(
     (ms: number) => audioEngine.setMarkerA(ms),
     [],
@@ -89,7 +89,8 @@ export function useAudioPlayer(
     play,
     pause,
     seekTo,
-    skipBy,
+    skipBack,
+    skipForward,
     setMarkerA,
     setMarkerB,
     clearMarkers,

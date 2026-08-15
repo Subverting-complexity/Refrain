@@ -10,6 +10,11 @@ import { Platform } from 'react-native';
 
 import * as markerStore from './markerStore';
 import * as settingsStore from './settingsStore';
+import {
+  DEFAULT_SKIP_PREFERENCE,
+  getSkipPreference,
+  SkipPreference,
+} from './skipIntervalStore';
 import * as webAudioGain from './webAudioGain';
 import * as webMediaSession from './webMediaSession';
 import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
@@ -80,6 +85,70 @@ let monitorActive = false;
 let monitorWindow: { start: number; end: number } | null = null;
 // Transport state captured at startMonitor, restored verbatim at stopMonitor.
 let savedTransport: { positionMs: number; isPlaying: boolean } | null = null;
+
+// --- Lock-screen skip interception (native) ---------------------------------
+// expo-audio 56 wires the lock-screen seek buttons entirely in native code: iOS
+// sets `skipForwardCommand.preferredIntervals = [10.0]` and seeks the AVPlayer
+// itself (ios/MediaController.swift); Android seeks by a `SEEK_INTERVAL_MS` of
+// 10000 (service/AudioControlsService.kt). Neither interval is configurable and
+// neither fires a JS callback, so a lock-screen press reaches us only as an
+// unexplained jump in `playbackStatusUpdate`.
+//
+// To honour the user's skip preference — and to keep the playhead inside the
+// A/B region, which the native seek knows nothing about — the engine spots that
+// jump and re-seeks to the position the preference actually asked for. Web does
+// not need any of this: `webMediaSession` registers real seek handlers that run
+// our own skip path.
+const NATIVE_LOCK_SCREEN_SKIP_MS = 10_000;
+
+// How far a reported jump may sit from the native interval and still count as
+// one. Generous enough to absorb a status tick landing mid-seek (the player
+// reports every 100ms) without being wide enough to swallow an ordinary
+// playback advance.
+const LOCK_SCREEN_SKIP_TOLERANCE_MS = 750;
+
+// How many status updates a seek we issued ourselves may take to land before we
+// stop waiting for it. Without a bound, a seek that resolves to a clamped
+// position (track end, a rejected seek) would suppress detection forever.
+const PENDING_SEEK_TICKS = 20;
+
+// The position of the previous status update, used to measure a jump. Null
+// before the first update of a track.
+let lastReportedPositionMs: number | null = null;
+
+// A seek this module issued, tracked so its arrival is never mistaken for a
+// lock-screen press. Cleared once the reported position reaches it, or once the
+// tick budget runs out.
+let pendingSeek: { targetMs: number; ticksRemaining: number } | null = null;
+
+/**
+ * Record a seek we are about to perform, so the resulting jump in
+ * `playbackStatusUpdate` is recognised as ours. Native-only bookkeeping; the
+ * detection it feeds never runs on web.
+ */
+function markInternalSeek(targetMs: number): void {
+  pendingSeek = { targetMs, ticksRemaining: PENDING_SEEK_TICKS };
+}
+
+/** Seek the player and record it as internal. */
+async function seekInternal(targetMs: number): Promise<void> {
+  if (!player) return;
+  markInternalSeek(targetMs);
+  await player.seekTo(msToSec(targetMs));
+}
+
+/**
+ * The persisted skip preference, or the default when storage is unreachable.
+ * A failed settings read must never break the transport — the buttons still
+ * have to move the playhead.
+ */
+function readSkipPreference(): SkipPreference {
+  try {
+    return getSkipPreference();
+  } catch {
+    return DEFAULT_SKIP_PREFERENCE;
+  }
+}
 
 /**
  * The internal `HTMLAudioElement` backing an expo-audio web player, or null when
@@ -157,6 +226,49 @@ function parseStatus(status: AudioStatus): PlaybackState {
   };
 }
 
+/**
+ * Classify the playhead movement in a status update: a jump matching the native
+ * lock-screen interval, with no seek of ours outstanding, is a lock-screen
+ * press. Returns the direction and the position it started from, or null when
+ * the movement is ordinary playback, our own seek, or off-platform.
+ *
+ * Always run, even when the answer is null — it owns the bookkeeping that makes
+ * the next call meaningful.
+ */
+function detectLockScreenSkip(
+  status: AudioStatus,
+  positionMs: number,
+): { direction: 1 | -1; fromMs: number } | null {
+  const previous = lastReportedPositionMs;
+  lastReportedPositionMs = positionMs;
+
+  if (pendingSeek) {
+    const landed =
+      Math.abs(positionMs - pendingSeek.targetMs) <=
+      LOCK_SCREEN_SKIP_TOLERANCE_MS;
+    pendingSeek.ticksRemaining -= 1;
+    if (landed || pendingSeek.ticksRemaining <= 0) pendingSeek = null;
+    // A seek of ours is in flight or has just landed: whatever moved the
+    // playhead, it was us.
+    return null;
+  }
+
+  // Web drives the OS controls through real `mediaSession` handlers, so there
+  // is no unexplained jump to interpret there.
+  if (Platform.OS === 'web') return null;
+  // The monitor re-seeks continuously to follow a dragged marker; those jumps
+  // are the preview working, not a lock-screen press.
+  if (monitorActive) return null;
+  if (!status.isLoaded || status.didJustFinish) return null;
+  if (previous == null) return null;
+
+  const delta = positionMs - previous;
+  const offBy = Math.abs(Math.abs(delta) - NATIVE_LOCK_SCREEN_SKIP_MS);
+  if (offBy > LOCK_SCREEN_SKIP_TOLERANCE_MS) return null;
+
+  return { direction: delta > 0 ? 1 : -1, fromMs: previous };
+}
+
 function onPlaybackStatusUpdate(status: AudioStatus): void {
   if (status.error) {
     currentState = {
@@ -174,6 +286,34 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   }
 
   const newState = parseStatus(status);
+
+  // A lock-screen press reaches us only as an unexplained jump (see the
+  // NATIVE_LOCK_SCREEN_SKIP_MS notes above). Redirect it to the skip the user
+  // actually configured, clamped to the active region.
+  const lockScreenSkip = detectLockScreenSkip(status, newState.positionMs);
+  if (lockScreenSkip && player) {
+    const target = skipTargetMs(
+      lockScreenSkip.direction,
+      lockScreenSkip.fromMs,
+    );
+    // Nothing to correct when the native interval already lands where the
+    // preference asks — a 10s setting inside an ample region.
+    if (Math.abs(target - newState.positionMs) > 1) {
+      seekInternal(target).catch((err) => {
+        currentState = {
+          ...currentState,
+          status: 'error',
+          lastError: errorMessage(err),
+        };
+        notify(currentState);
+      });
+      // Publish the corrected position immediately so the UI never flashes the
+      // native interval's landing spot on the way past.
+      currentState = { ...newState, positionMs: target };
+      notify(currentState);
+      return;
+    }
+  }
 
   if (status.isLoaded && status.didJustFinish) {
     newState.status = 'paused';
@@ -206,6 +346,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     }
 
     // Loop armed (or monitor active): rewind to the start.
+    markInternalSeek(region.a);
     player.seekTo(msToSec(region.a)).catch((err) => {
       currentState = {
         ...currentState,
@@ -317,13 +458,20 @@ async function loadTrackImpl(
     // level; setVolume() handles later live changes.
     newPlayer.volume = volume;
     // Register this player for lock screen / Now Playing controls on native so
-    // the user can play, pause, and seek from the lock screen and Control Centre.
-    // Requires interruptionMode: 'doNotMix' (set above) per expo-audio docs.
+    // the user can play, pause, skip, and seek from the lock screen and Control
+    // Centre. Requires interruptionMode: 'doNotMix' (set above) per expo-audio
+    // docs.
+    //
+    // The seek buttons run expo-audio's own fixed 10s seek; the status handler
+    // catches the resulting jump and redirects it to the configured skip (see
+    // NATIVE_LOCK_SCREEN_SKIP_MS). The buttons are still drawn with a "10"
+    // glyph — iOS renders them from `preferredIntervals`, Android from
+    // ICON_SKIP_*_10 — which nothing on the JS side can change.
     if (Platform.OS !== 'web') {
       newPlayer.setActiveForLockScreen(
         true,
         { title: trackName, artist: 'Refrain' },
-        { showSeekForward: false, showSeekBackward: false },
+        { showSeekForward: true, showSeekBackward: true },
       );
     }
     statusSubscription = newPlayer.addListener(
@@ -364,6 +512,12 @@ async function loadTrackImpl(
         },
         stop: () => {
           void stop();
+        },
+        seekBackward: () => {
+          void skipBack();
+        },
+        seekForward: () => {
+          void skipForward();
         },
       });
       webMediaSession.setPlaybackState('paused');
@@ -421,14 +575,14 @@ export async function play(): Promise<void> {
       currentState.positionMs < region.a ||
       currentState.positionMs >= region.b
     ) {
-      await player.seekTo(msToSec(region.a));
+      await seekInternal(region.a);
     }
   } else if (
     currentState.status === 'paused' &&
     currentState.positionMs >= currentState.durationMs &&
     currentState.durationMs > 0
   ) {
-    await player.seekTo(msToSec(markerA ?? 0));
+    await seekInternal(markerA ?? 0);
   }
   player.play();
   if (Platform.OS === 'web') webMediaSession.setPlaybackState('playing');
@@ -450,6 +604,7 @@ export async function stop(): Promise<void> {
   // surface as an unhandled rejection.
   try {
     outgoing.pause();
+    markInternalSeek(markerA ?? 0);
     await outgoing.seekTo(msToSec(markerA ?? 0));
   } catch {
     // best-effort: the player may have been released mid-stop.
@@ -532,21 +687,59 @@ export async function seekTo(positionMs: number): Promise<void> {
   const target = bounds
     ? Math.max(bounds.a, Math.min(positionMs, bounds.b))
     : positionMs;
-  await player.seekTo(msToSec(target));
+  await seekInternal(target);
 }
 
 /**
- * Skip the playhead by a signed millisecond delta. Movement is clamped to the
- * active A/B region when one is set, otherwise to the full track, so skip works
- * "within A and B" with markers set and across the whole track otherwise.
+ * The range a skip may move within: the active A/B region when one is set,
+ * otherwise the whole track. Shared by every skip path so the in-app buttons
+ * and the lock screen confine the playhead identically.
  */
-export async function skipBy(deltaMs: number): Promise<void> {
-  if (!player) return;
+function skipBounds(): { lo: number; hi: number } {
   const bounds = regionBounds();
-  const lo = bounds ? bounds.a : 0;
-  const hi = bounds ? bounds.b : currentState.durationMs;
-  const next = Math.max(lo, Math.min(currentState.positionMs + deltaMs, hi));
-  await player.seekTo(msToSec(next));
+  return bounds
+    ? { lo: bounds.a, hi: bounds.b }
+    : { lo: 0, hi: currentState.durationMs };
+}
+
+/**
+ * Where a skip in `direction` from `fromMs` should land under the current
+ * preference: the region edge in `full` mode, otherwise the configured
+ * interval away. Always clamped to `skipBounds()`.
+ */
+function skipTargetMs(direction: 1 | -1, fromMs: number): number {
+  const { lo, hi } = skipBounds();
+  const preference = readSkipPreference();
+  const raw =
+    preference.mode === 'full'
+      ? direction < 0
+        ? lo
+        : hi
+      : fromMs + direction * preference.seconds * 1000;
+  return Math.max(lo, Math.min(raw, hi));
+}
+
+async function applySkip(direction: 1 | -1): Promise<void> {
+  if (!player) return;
+  await seekInternal(skipTargetMs(direction, currentState.positionMs));
+}
+
+/**
+ * Skip backwards by the user's configured amount — or to the start of the
+ * active region in `full` mode. Movement is clamped to the active A/B region
+ * when one is set, otherwise to the full track, so skip works "within A and B"
+ * with markers set and across the whole track otherwise.
+ *
+ * The engine reads the preference itself rather than taking a delta, so the
+ * transport buttons and the lock screen cannot drift apart.
+ */
+export function skipBack(): Promise<void> {
+  return applySkip(-1);
+}
+
+/** Skip forwards by the configured amount, or to the end of the active region. */
+export function skipForward(): Promise<void> {
+  return applySkip(1);
 }
 
 /**
@@ -576,7 +769,7 @@ export async function startMonitor(centerMs: number): Promise<void> {
   // Resume the web audio graph on this gesture so the preview isn't left
   // silently suspended by the autoplay policy (mirrors play()).
   if (webGainActive) webAudioGain.resume();
-  await player.seekTo(msToSec(monitorWindow.start));
+  await seekInternal(monitorWindow.start);
   player.play();
 }
 
@@ -607,6 +800,7 @@ export function updateMonitor(centerMs: number): void {
   // and large jumps still keep audio within [center-2s, center+2s].
   const pos = currentState.positionMs;
   if (pos < monitorWindow.start || pos >= monitorWindow.end) {
+    markInternalSeek(monitorWindow.start);
     player.seekTo(msToSec(monitorWindow.start)).catch(() => {
       // Best-effort: a failed follow-seek must not break the drag.
     });
@@ -628,7 +822,7 @@ export async function stopMonitor(): Promise<void> {
   if (!player) return;
 
   // Restore the exact prior playhead, then the prior play/pause state.
-  await player.seekTo(msToSec(saved ? saved.positionMs : 0));
+  await seekInternal(saved ? saved.positionMs : 0);
   if (saved?.isPlaying) {
     player.play();
   } else {
@@ -652,6 +846,10 @@ async function unloadTrackImpl(): Promise<void> {
   // drop the last edit. Must run before currentTrackId is nulled below.
   flushMarkerSave();
   currentTrackId = null;
+  // The next track starts with no movement history, so the first status update
+  // it reports can't be read as a jump from the outgoing track's playhead.
+  lastReportedPositionMs = null;
+  pendingSeek = null;
   if (webGainActive) {
     webAudioGain.detach();
     webGainActive = false;
