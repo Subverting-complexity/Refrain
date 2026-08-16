@@ -1,4 +1,4 @@
-import { SegmentNameDialog } from './SegmentNameDialog';
+import { NameEntryDialog } from './NameEntryDialog';
 
 export interface SegmentRenameDialogProps {
   /** Current name of the segment, pre-filled into the field. */
@@ -11,7 +11,7 @@ export interface SegmentRenameDialogProps {
 
 /**
  * Centred rename dialog for a saved segment. A thin policy wrapper over the
- * shared {@link SegmentNameDialog}: an emptied field means "I changed my mind",
+ * shared {@link NameEntryDialog}: an emptied field means "I changed my mind",
  * so it dismisses rather than saving a nameless segment.
  */
 export function SegmentRenameDialog({
@@ -20,9 +20,10 @@ export function SegmentRenameDialog({
   onCancel,
 }: SegmentRenameDialogProps) {
   return (
-    <SegmentNameDialog
+    <NameEntryDialog
       title="Rename segment"
       initialName={currentName}
+      placeholder="Segment name"
       fieldAccessibilityLabel="Segment name"
       confirmAccessibilityLabel="Confirm rename"
       onConfirm={(name) => (name ? onSave(name) : onCancel())}

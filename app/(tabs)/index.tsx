@@ -21,6 +21,7 @@ import {
   deleteTrack,
   insertTrack,
   loadTracks,
+  renameTrack,
 } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Track } from '@/src/types';
@@ -107,6 +108,27 @@ export default function LibraryScreen() {
         console.error('Failed to save track to library', error);
         showToast('Failed to save track to library', 'error');
         return false;
+      }
+    },
+    [showToast, invalidateLoads],
+  );
+
+  const handleRename = useCallback(
+    async (id: string, filename: string) => {
+      try {
+        await renameTrack(id, filename);
+        // As in addTrack: retire in-flight reads so one that predates the
+        // rename cannot resolve afterwards and restore the old name.
+        invalidateLoads();
+        // Patch only the filename on the existing entry. Rebuilding the track
+        // here would be the one place a rename could quietly lose the duration,
+        // format, size or import time the store just preserved.
+        setTracks((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, filename } : t)),
+        );
+        showToast(`Renamed to ${filename}`, 'success');
+      } catch {
+        showToast('Failed to rename track', 'error');
       }
     },
     [showToast, invalidateLoads],
@@ -215,6 +237,7 @@ export default function LibraryScreen() {
               <TrackListItem
                 track={item}
                 onPress={handleTrackPress}
+                onRename={handleRename}
                 onDelete={handleDelete}
                 style={styles.listItem}
               />
