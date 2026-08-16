@@ -10,11 +10,17 @@ import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
+import { TrackRenameDialog } from './TrackRenameDialog';
 import { Track } from '../types';
 
 interface TrackListItemProps {
   track: Track;
   onPress?: (track: Track) => void;
+  /**
+   * Rename the track to `filename`. Called only with a name that differs from
+   * the current one and still carries the original extension.
+   */
+  onRename?: (id: string, filename: string) => void;
   onDelete?: (id: string) => void;
   style?: ViewStyle;
 }
@@ -28,6 +34,7 @@ function formatFileSize(bytes: number): string {
 export function TrackListItem({
   track,
   onPress,
+  onRename,
   onDelete,
   style,
 }: TrackListItemProps) {
@@ -36,6 +43,7 @@ export function TrackListItem({
   // Delete confirmation uses the app's own dialog rather than Alert.alert:
   // Alert is a no-op on web, which silently made tracks undeletable there.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   function confirmDelete() {
     setConfirmingDelete(true);
@@ -56,25 +64,92 @@ export function TrackListItem({
     confirmDelete();
   }
 
+  function startRename() {
+    setRenaming(true);
+  }
+
+  function handleCancelRename() {
+    setRenaming(false);
+    swipeableRef.current?.close();
+  }
+
+  function handleSaveRename(filename: string) {
+    setRenaming(false);
+    swipeableRef.current?.close();
+    onRename?.(track.id, filename);
+  }
+
+  // Built from the actions actually wired up, so the hint never promises a
+  // gesture the row does not support.
+  function buildHint(): string | undefined {
+    const swipeTargets = [onRename && 'rename', onDelete && 'delete'].filter(
+      Boolean,
+    );
+    const parts: string[] = [];
+    if (onPress) parts.push('Tap to play');
+    if (swipeTargets.length) {
+      parts.push(`swipe left to ${swipeTargets.join(' or ')}`);
+    }
+    if (onDelete) parts.push('long press to delete');
+    if (!parts.length) return undefined;
+    const hint = parts.join(', ');
+    return hint.charAt(0).toUpperCase() + hint.slice(1);
+  }
+
   function renderRightActions() {
     return (
-      <AccessiblePressable
-        accessibilityRole="button"
-        accessibilityLabel={`Delete ${track.filename}`}
-        onPress={confirmDelete}
-        style={[styles.swipeDelete, { backgroundColor: theme.colors.error }]}
-      >
-        <Ionicons
-          name="trash-outline"
-          size={20}
-          color={theme.colors.errorText}
-        />
-        <Text
-          style={[theme.typography.caption, { color: theme.colors.errorText }]}
-        >
-          Delete
-        </Text>
-      </AccessiblePressable>
+      <View style={styles.swipeActions}>
+        {onRename ? (
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`Rename ${track.filename}`}
+            onPress={startRename}
+            style={[
+              styles.swipeAction,
+              { backgroundColor: theme.colors.accent },
+            ]}
+          >
+            <Ionicons
+              name="pencil-outline"
+              size={20}
+              color={theme.colors.accentText}
+            />
+            <Text
+              style={[
+                theme.typography.caption,
+                { color: theme.colors.accentText },
+              ]}
+            >
+              Rename
+            </Text>
+          </AccessiblePressable>
+        ) : null}
+        {onDelete ? (
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${track.filename}`}
+            onPress={confirmDelete}
+            style={[
+              styles.swipeAction,
+              { backgroundColor: theme.colors.error },
+            ]}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={20}
+              color={theme.colors.errorText}
+            />
+            <Text
+              style={[
+                theme.typography.caption,
+                { color: theme.colors.errorText },
+              ]}
+            >
+              Delete
+            </Text>
+          </AccessiblePressable>
+        ) : null}
+      </View>
     );
   }
 
@@ -82,7 +157,9 @@ export function TrackListItem({
     <>
       <ReanimatedSwipeable
         ref={swipeableRef}
-        renderRightActions={onDelete ? renderRightActions : undefined}
+        renderRightActions={
+          onRename || onDelete ? renderRightActions : undefined
+        }
         containerStyle={style}
         friction={2}
         rightThreshold={40}
@@ -90,15 +167,7 @@ export function TrackListItem({
         <AccessiblePressable
           accessibilityRole="button"
           accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
-          accessibilityHint={
-            onPress && onDelete
-              ? 'Tap to play, long press or swipe left to delete'
-              : onDelete
-                ? 'Long press or swipe left to delete'
-                : onPress
-                  ? 'Tap to play'
-                  : undefined
-          }
+          accessibilityHint={buildHint()}
           onLongPress={handleLongPress}
           onPress={() => onPress?.(track)}
           style={[
@@ -137,6 +206,16 @@ export function TrackListItem({
           </View>
         </AccessiblePressable>
       </ReanimatedSwipeable>
+
+      {/* Mounted per open so the rename field re-seeds from the current
+          filename each time — see NameEntryDialog's remount contract. */}
+      {renaming ? (
+        <TrackRenameDialog
+          currentFilename={track.filename}
+          onSave={handleSaveRename}
+          onCancel={handleCancelRename}
+        />
+      ) : null}
 
       {confirmingDelete ? (
         <CenteredDialog
@@ -185,11 +264,16 @@ const styles = StyleSheet.create({
   filename: {
     marginBottom: spacing.xs,
   },
-  swipeDelete: {
+  swipeActions: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    marginLeft: spacing.xs,
+    gap: spacing.xs,
+  },
+  swipeAction: {
     width: 80,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'stretch',
-    marginLeft: spacing.xs,
   },
 });

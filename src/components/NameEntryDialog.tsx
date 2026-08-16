@@ -6,11 +6,13 @@ import { radii, spacing } from '../theme';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
 
-export interface SegmentNameDialogProps {
+export interface NameEntryDialogProps {
   /** Dialog heading, e.g. "Rename segment". */
   title: string;
   /** Name pre-filled into the field. See the remount contract below. */
   initialName: string;
+  /** Placeholder shown when the field is empty, e.g. "Segment name". */
+  placeholder: string;
   /** Accessibility label for the name field. */
   fieldAccessibilityLabel: string;
   /** Accessibility label for the Save button. */
@@ -26,26 +28,31 @@ export interface SegmentNameDialogProps {
 }
 
 /**
- * The shared name-entry card behind {@link SegmentRenameDialog} and the
- * new-segment step of {@link SegmentSaveDialog}: a centred dialog wrapping an
- * autofocused name field plus Save and Cancel. Being a centred card (rather
- * than a bottom-anchored sheet) keeps the field clear of the on-screen keyboard
- * so the user can see what they are typing.
+ * The shared name-entry card behind {@link SegmentRenameDialog}, the
+ * new-segment step of {@link SegmentSaveDialog}, and {@link TrackRenameDialog}:
+ * a centred dialog wrapping an autofocused name field plus Save and Cancel.
+ * Being a centred card (rather than a bottom-anchored sheet) keeps the field
+ * clear of the on-screen keyboard so the user can see what they are typing.
+ *
+ * Every caller opens this on a name that already exists — a segment's current
+ * name, the next suggested one, a track's filename — so the field selects its
+ * contents on focus and typing replaces the old name in one go.
  *
  * **Remount contract:** `initialName` seeds the draft once, on mount. Callers
  * must mount this dialog per open — `{visible ? <Dialog … /> : null}`, as the
- * player and the profile sheet both do — so each open starts from a fresh
- * seed. A later `initialName` change on a mounted dialog is ignored by design:
- * re-seeding mid-edit would discard what the user is typing.
+ * player, the profile sheet and the library row all do — so each open starts
+ * from a fresh seed. A later `initialName` change on a mounted dialog is
+ * ignored by design: re-seeding mid-edit would discard what the user is typing.
  */
-export function SegmentNameDialog({
+export function NameEntryDialog({
   title,
   initialName,
+  placeholder,
   fieldAccessibilityLabel,
   confirmAccessibilityLabel,
   onConfirm,
   onCancel,
-}: SegmentNameDialogProps) {
+}: NameEntryDialogProps) {
   const { theme } = useTheme();
   const [draftName, setDraftName] = useState(initialName);
 
@@ -57,7 +64,7 @@ export function SegmentNameDialog({
         accessibilityLabel={fieldAccessibilityLabel}
         value={draftName}
         onChangeText={setDraftName}
-        placeholder="Segment name"
+        placeholder={placeholder}
         placeholderTextColor={theme.colors.textSecondary}
         style={[
           styles.input,
@@ -65,6 +72,7 @@ export function SegmentNameDialog({
           { color: theme.colors.textPrimary, borderColor: theme.colors.border },
         ]}
         autoFocus
+        selectTextOnFocus
         returnKeyType="done"
         onSubmitEditing={confirm}
       />

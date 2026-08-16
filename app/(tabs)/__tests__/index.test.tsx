@@ -8,6 +8,7 @@ import {
   deleteTrack,
   insertTrack,
   loadTracks,
+  renameTrack,
 } from '@/src/services/trackStore';
 import { Track } from '@/src/types';
 
@@ -15,6 +16,7 @@ jest.mock('@/src/services/trackStore', () => ({
   loadTracks: jest.fn(),
   insertTrack: jest.fn(),
   deleteTrack: jest.fn(),
+  renameTrack: jest.fn(),
 }));
 
 jest.mock('@/src/services/fileImport', () => ({
@@ -76,16 +78,19 @@ jest.mock('@/src/components/TrackListItem', () => {
     TrackListItem: ({
       track,
       onPress,
+      onRename,
       onDelete,
     }: {
       track: { id: string };
       onPress: (track: unknown) => void;
+      onRename: (id: string, filename: string) => void;
       onDelete: (id: string) => void;
     }) =>
       ReactLocal.createElement(View, {
         testID: 'track-item',
         onPress: () => onPress(track),
         onDelete: () => onDelete(track.id),
+        onRename: (filename: string) => onRename(track.id, filename),
       }),
   };
 });
@@ -93,6 +98,7 @@ jest.mock('@/src/components/TrackListItem', () => {
 const mockLoadTracks = loadTracks as jest.MockedFunction<typeof loadTracks>;
 const mockDeleteTrack = deleteTrack as jest.MockedFunction<typeof deleteTrack>;
 const mockInsertTrack = insertTrack as jest.MockedFunction<typeof insertTrack>;
+const mockRenameTrack = renameTrack as jest.MockedFunction<typeof renameTrack>;
 const mockPickAndImportFile = pickAndImportFile as jest.MockedFunction<
   typeof pickAndImportFile
 >;
@@ -214,6 +220,7 @@ describe('LibraryScreen stale-load guard', () => {
     mockLoadTracks.mockReset();
     mockInsertTrack.mockReset();
     mockDeleteTrack.mockReset();
+    mockRenameTrack.mockReset();
     mockPickAndImportFile.mockReset();
     mockLoadTracks.mockReturnValue(new Promise<Track[]>(() => {}));
   });
@@ -402,6 +409,138 @@ describe('LibraryScreen visible toast feedback', () => {
     });
 
     expect(toastLabels(renderer)).toContain('Track deleted');
+    act(() => renderer.unmount());
+  });
+
+  it('shows a visible toast when a rename succeeds', async () => {
+    mockLoadTracks.mockResolvedValueOnce([sampleTrack]);
+    const renderer = await renderScreen();
+
+    const trackItem = renderer.root.findByProps({ testID: 'track-item' });
+
+    await act(async () => {
+      await trackItem.props.onRename('Practice take.mp3');
+    });
+
+    expect(mockRenameTrack).toHaveBeenCalledWith(
+      'track-1',
+      'Practice take.mp3',
+    );
+    expect(toastLabels(renderer)).toContain('Renamed to Practice take.mp3');
+    act(() => renderer.unmount());
+  });
+
+  it('shows a visible toast when a rename fails', async () => {
+    mockLoadTracks.mockResolvedValueOnce([sampleTrack]);
+    const renderer = await renderScreen();
+
+    mockRenameTrack.mockImplementationOnce(() => {
+      throw new Error('db write failed');
+    });
+    const trackItem = renderer.root.findByProps({ testID: 'track-item' });
+
+    await act(async () => {
+      await trackItem.props.onRename('Practice take.mp3');
+    });
+
+    expect(toastLabels(renderer)).toContain('Failed to rename track');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('LibraryScreen rename keeps the rest of the row intact', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function listedTracks(renderer: ReactTestRenderer): Track[] {
+    return renderer.root.findByType(FlatList).props.data as Track[];
+  }
+
+  // Rebuilding the entry from anything but the previous one is the one place a
+  // rename could quietly drop the duration, format, size or import time the
+  // store just took care to preserve.
+  it('patches only the filename on the listed track', async () => {
+    const measured: Track = {
+      ...sampleTrack,
+      durationMs: 187_000,
+      durationEstimated: false,
+      fileSizeBytes: 5_242_880,
+      importedAt: 1_700_000_000_000,
+    };
+    mockLoadTracks.mockResolvedValueOnce([measured]);
+    const renderer = await renderScreen();
+
+    const trackItem = renderer.root.findByProps({ testID: 'track-item' });
+    await act(async () => {
+      await trackItem.props.onRename('Practice take.mp3');
+    });
+
+    expect(listedTracks(renderer)).toEqual([
+      { ...measured, filename: 'Practice take.mp3' },
+    ]);
+    act(() => renderer.unmount());
+  });
+
+  it('leaves other tracks in the list untouched', async () => {
+    const other: Track = { ...sampleTrack, id: 'track-2', filename: 'b.wav' };
+    mockLoadTracks.mockResolvedValueOnce([sampleTrack, other]);
+    const renderer = await renderScreen();
+
+    const trackItems = renderer.root.findAllByProps({ testID: 'track-item' });
+    await act(async () => {
+      await trackItems[0].props.onRename('Practice take.mp3');
+    });
+
+    expect(listedTracks(renderer)).toEqual([
+      { ...sampleTrack, filename: 'Practice take.mp3' },
+      other,
+    ]);
+    act(() => renderer.unmount());
+  });
+
+  // Same hazard the import and delete paths guard against: a read that started
+  // before the rename would otherwise land afterwards and restore the old name.
+  it('does not let a load in flight since before the rename restore the old name', async () => {
+    let resolveLoad!: (tracks: Track[]) => void;
+    mockLoadTracks
+      // The focus read settles immediately, seeding the list...
+      .mockReturnValueOnce(Promise.resolve([sampleTrack]))
+      // ...then a refresh read is left in flight across the rename.
+      .mockReturnValueOnce(
+        new Promise<Track[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+      );
+    const renderer = await renderScreen();
+
+    const onRefresh =
+      renderer.root.findByType(FlatList).props.refreshControl.props.onRefresh;
+    let refreshDone!: Promise<void>;
+    await act(async () => {
+      refreshDone = onRefresh();
+    });
+
+    const trackItem = renderer.root.findByProps({ testID: 'track-item' });
+    await act(async () => {
+      await trackItem.props.onRename('Practice take.mp3');
+    });
+
+    await act(async () => {
+      resolveLoad([sampleTrack]);
+      await refreshDone;
+    });
+
+    expect(listedTracks(renderer).map((t) => t.filename)).toEqual([
+      'Practice take.mp3',
+    ]);
     act(() => renderer.unmount());
   });
 });

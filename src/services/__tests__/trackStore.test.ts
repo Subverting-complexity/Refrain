@@ -257,6 +257,58 @@ describe('insertTrack', () => {
   });
 });
 
+describe('renameTrack', () => {
+  it('updates only the filename column', () => {
+    jest.resetModules();
+
+    const { renameTrack } = require('../trackStore');
+    renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockRunSync).toHaveBeenCalledTimes(1);
+    const [sql, ...params] = mockRunSync.mock.calls[0];
+    expect(sql).toBe('UPDATE tracks SET filename = ? WHERE id = ?');
+    expect(params).toEqual(['Practice take.mp3', 'track-1']);
+  });
+
+  // The stored uri is `tracks/<id>.<format>` and never derives from the display
+  // name, so a rename must not go near the file or any other column.
+  it('leaves the audio file and the rest of the row untouched', () => {
+    jest.resetModules();
+
+    const { renameTrack } = require('../trackStore');
+    renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockDelete).not.toHaveBeenCalled();
+    const sql = mockRunSync.mock.calls[0][0] as string;
+    for (const column of [
+      'uri',
+      'format',
+      'durationMs',
+      'durationEstimated',
+      'fileSizeBytes',
+      'importedAt',
+    ]) {
+      expect(sql).not.toContain(column);
+    }
+  });
+
+  it('does not touch the marker or segment-profile rows', () => {
+    jest.resetModules();
+
+    const { renameTrack } = require('../trackStore');
+    renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockRunSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('track_markers'),
+      expect.anything(),
+    );
+    expect(mockRunSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('marker_profiles'),
+      expect.anything(),
+    );
+  });
+});
+
 describe('updateTrackDuration', () => {
   it('updates duration and marks as not estimated', () => {
     jest.resetModules();

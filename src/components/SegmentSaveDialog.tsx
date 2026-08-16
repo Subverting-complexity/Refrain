@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
-import { SegmentNameDialog } from './SegmentNameDialog';
+import { NameEntryDialog } from './NameEntryDialog';
 
 export interface SegmentSaveDialogProps {
   /**
@@ -25,7 +25,7 @@ export interface SegmentSaveDialogProps {
  * The player's Save flow. When a dirty segment is loaded it first offers
  * Override / Save as new / Cancel; otherwise it opens straight to a name field
  * for a brand-new segment. Picking "Save as new" reveals the same name field —
- * the shared {@link SegmentNameDialog}, where an emptied field falls back to
+ * the shared {@link NameEntryDialog}, where an emptied field falls back to
  * the suggested name so a new segment is never left unnamed.
  */
 export function SegmentSaveDialog({
@@ -62,9 +62,10 @@ export function SegmentSaveDialog({
   }
 
   return (
-    <SegmentNameDialog
+    <NameEntryDialog
       title="Save as new segment"
       initialName={suggestedName}
+      placeholder="Segment name"
       fieldAccessibilityLabel="New segment name"
       confirmAccessibilityLabel="Confirm save new segment"
       onConfirm={(name) => onSaveNew(name || suggestedName)}

@@ -8,6 +8,7 @@ import {
   getTrack,
   insertTrack,
   loadTracks,
+  renameTrack,
   updateTrackDuration,
 } from '../trackStore.web';
 
@@ -152,6 +153,54 @@ describe('insertTrack', () => {
       fileSizeBytes: 1_000_000,
       importedAt: 1_700_000_000_000,
     });
+  });
+});
+
+describe('renameTrack', () => {
+  it('re-persists the row with only the filename replaced', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+
+    await renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockPutStoredTrack).toHaveBeenCalledWith({
+      id: 'track-1',
+      filename: 'Practice take.mp3',
+      format: 'mp3',
+      durationMs: 42_000,
+      durationEstimated: true,
+      fileSizeBytes: 1_000_000,
+      importedAt: 1_700_000_000_000,
+    });
+  });
+
+  it('carries an already-measured duration through unchanged', async () => {
+    mockGetStoredTrack.mockResolvedValue(
+      storedRow({ durationMs: 45_000, durationEstimated: false }),
+    );
+
+    await renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockPutStoredTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ durationMs: 45_000, durationEstimated: false }),
+    );
+  });
+
+  it('leaves the audio blob, markers and profiles alone', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+
+    await renameTrack('track-1', 'Practice take.mp3');
+
+    expect(mockDeleteBlob).not.toHaveBeenCalled();
+    expect(mockRevokeObjectUrl).not.toHaveBeenCalled();
+    expect(mockDeleteMarkers).not.toHaveBeenCalled();
+    expect(mockDeleteProfilesForTrack).not.toHaveBeenCalled();
+  });
+
+  // Writing here would create a metadata record with no audio behind it.
+  it('does nothing when the track is absent', async () => {
+    mockGetStoredTrack.mockResolvedValue(null);
+    await renameTrack('missing', 'Practice take.mp3');
+    expect(mockPutStoredTrack).not.toHaveBeenCalled();
   });
 });
 

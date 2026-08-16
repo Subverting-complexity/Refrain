@@ -76,6 +76,23 @@ export async function insertTrack(track: Track): Promise<void> {
   await putStoredTrack(toStored(track));
 }
 
+/**
+ * Renames a track's display filename, leaving every other fact about it
+ * untouched.
+ *
+ * The existing record is read back and spread into the write, so format,
+ * duration, byte size and import time are re-persisted byte-identical rather
+ * than rebuilt. The audio blob is keyed by track id in `webBlobStore.web` and
+ * is not touched at all, as are the marker and segment-profile records. An
+ * unknown id is a no-op rather than an insert — a rename must never conjure a
+ * metadata record with no audio behind it.
+ */
+export async function renameTrack(id: string, filename: string): Promise<void> {
+  const row = await getStoredTrack(id);
+  if (!row) return;
+  await putStoredTrack({ ...row, filename });
+}
+
 export async function updateTrackDuration(
   id: string,
   durationMs: number,

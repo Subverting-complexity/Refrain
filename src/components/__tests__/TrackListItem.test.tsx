@@ -264,6 +264,136 @@ describe('TrackListItem', () => {
     });
   });
 
+  describe('swipe-to-rename action', () => {
+    // The rename dialog's field and Save button, once it is open. Empty
+    // arrays mean the dialog is not shown.
+    function findRenameField(tree: ReactTestRenderer) {
+      return tree.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === 'Track name' &&
+          typeof node.props.onChangeText === 'function',
+      );
+    }
+    function findRenameSave(tree: ReactTestRenderer) {
+      return tree.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === 'Confirm rename song.mp3' &&
+          typeof node.props.onPress === 'function',
+      );
+    }
+
+    function openRename(tree: ReactTestRenderer) {
+      act(() => {
+        tree.root
+          .findByProps({ accessibilityLabel: 'Rename song.mp3' })
+          .props.onPress();
+      });
+    }
+
+    it('renders a swipe rename button when onRename is provided', () => {
+      const tree = renderItem(baseTrack, { onRename: jest.fn() });
+
+      expect(
+        tree.root.findByProps({ accessibilityLabel: 'Rename song.mp3' }),
+      ).toBeDefined();
+    });
+
+    it('renders no rename button when onRename is omitted', () => {
+      const tree = renderItem(baseTrack, { onDelete: jest.fn() });
+
+      expect(
+        tree.root.findAll(
+          (node) => node.props.accessibilityLabel === 'Rename song.mp3',
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('opens the rename dialog seeded with the base name', () => {
+      const tree = renderItem(baseTrack, { onRename: jest.fn() });
+
+      openRename(tree);
+
+      expect(findRenameField(tree)[0].props.value).toBe('song');
+    });
+
+    it('calls onRename with the id and the extension-preserving filename', () => {
+      const onRename = jest.fn();
+      const tree = renderItem(baseTrack, { onRename });
+
+      openRename(tree);
+      act(() => findRenameField(tree)[0].props.onChangeText('Practice take'));
+      act(() => findRenameSave(tree)[0].props.onPress());
+
+      expect(onRename).toHaveBeenCalledWith('track-1', 'Practice take.mp3');
+      // Saving dismisses the dialog.
+      expect(findRenameField(tree)).toHaveLength(0);
+    });
+
+    it('does not call onRename when the dialog is cancelled', () => {
+      const onRename = jest.fn();
+      const tree = renderItem(baseTrack, { onRename });
+
+      openRename(tree);
+      act(() => {
+        tree.root
+          .findAll(
+            (node) =>
+              node.props.accessibilityLabel === 'Cancel' &&
+              typeof node.props.onPress === 'function',
+          )[0]
+          .props.onPress();
+      });
+
+      expect(onRename).not.toHaveBeenCalled();
+      expect(findRenameField(tree)).toHaveLength(0);
+    });
+
+    it('does not call onRename when the name is left unchanged', () => {
+      const onRename = jest.fn();
+      const tree = renderItem(baseTrack, { onRename });
+
+      openRename(tree);
+      act(() => findRenameSave(tree)[0].props.onPress());
+
+      expect(onRename).not.toHaveBeenCalled();
+      expect(findRenameField(tree)).toHaveLength(0);
+    });
+
+    it('re-seeds the field from the current filename on each open', () => {
+      const onRename = jest.fn();
+      const tree = renderItem(baseTrack, { onRename });
+
+      openRename(tree);
+      act(() => findRenameField(tree)[0].props.onChangeText('Discarded edit'));
+      act(() => {
+        tree.root
+          .findAll(
+            (node) =>
+              node.props.accessibilityLabel === 'Cancel' &&
+              typeof node.props.onPress === 'function',
+          )[0]
+          .props.onPress();
+      });
+      openRename(tree);
+
+      expect(findRenameField(tree)[0].props.value).toBe('song');
+    });
+
+    it('offers both actions when rename and delete are wired up', () => {
+      const tree = renderItem(baseTrack, {
+        onRename: jest.fn(),
+        onDelete: jest.fn(),
+      });
+
+      expect(
+        tree.root.findByProps({ accessibilityLabel: 'Rename song.mp3' }),
+      ).toBeDefined();
+      expect(
+        tree.root.findByProps({ accessibilityLabel: 'Delete song.mp3' }),
+      ).toBeDefined();
+    });
+  });
+
   describe('accessibility hint', () => {
     it('includes swipe left in the hint when both onPress and onDelete are given', () => {
       const onDelete = jest.fn();
@@ -286,6 +416,58 @@ describe('TrackListItem', () => {
       });
 
       expect(pressable.props.accessibilityHint).toBe('Tap to play');
+    });
+
+    it('names both swipe targets when rename and delete are wired up', () => {
+      const tree = renderItem(baseTrack, {
+        onPress: jest.fn(),
+        onRename: jest.fn(),
+        onDelete: jest.fn(),
+      });
+
+      const pressable = tree.root.findByProps({
+        accessibilityLabel: ESTIMATED_LABEL,
+      });
+
+      expect(pressable.props.accessibilityHint).toBe(
+        'Tap to play, swipe left to rename or delete, long press to delete',
+      );
+    });
+
+    // The hint must not advertise a gesture the row does not wire up.
+    it('names only rename when delete is not wired up', () => {
+      const tree = renderItem(baseTrack, {
+        onPress: jest.fn(),
+        onRename: jest.fn(),
+      });
+
+      const pressable = tree.root.findByProps({
+        accessibilityLabel: ESTIMATED_LABEL,
+      });
+
+      expect(pressable.props.accessibilityHint).toBe(
+        'Tap to play, swipe left to rename',
+      );
+    });
+
+    it('capitalizes the hint when the row is not tappable', () => {
+      const tree = renderItem(baseTrack, { onRename: jest.fn() });
+
+      const pressable = tree.root.findByProps({
+        accessibilityLabel: ESTIMATED_LABEL,
+      });
+
+      expect(pressable.props.accessibilityHint).toBe('Swipe left to rename');
+    });
+
+    it('omits the hint entirely when no action is wired up', () => {
+      const tree = renderItem(baseTrack);
+
+      const pressable = tree.root.findByProps({
+        accessibilityLabel: ESTIMATED_LABEL,
+      });
+
+      expect(pressable.props.accessibilityHint).toBeUndefined();
     });
   });
 });

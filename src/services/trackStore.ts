@@ -119,6 +119,23 @@ export function insertTrack(track: Track): void {
   );
 }
 
+/**
+ * Renames a track's display filename, leaving every other fact about it
+ * untouched.
+ *
+ * Only the `filename` column is written. The stored `uri` is derived from the
+ * id and format (`tracks/<id>.<format>`) rather than from the display name, so
+ * the audio file on disk keeps its path; format, duration (and whether it is
+ * estimated), byte size and import time are not part of the statement; and the
+ * marker and segment-profile rows are keyed by track id, so they follow the
+ * track rather than its name. A rename is therefore metadata-preserving by
+ * construction, not by convention.
+ */
+export function renameTrack(id: string, filename: string): void {
+  const db = getDatabase();
+  db.runSync('UPDATE tracks SET filename = ? WHERE id = ?', filename, id);
+}
+
 export function updateTrackDuration(id: string, durationMs: number): void {
   const db = getDatabase();
   db.runSync(

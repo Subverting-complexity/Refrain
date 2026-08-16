@@ -1,9 +1,6 @@
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
-import {
-  SegmentNameDialog,
-  SegmentNameDialogProps,
-} from '../SegmentNameDialog';
+import { NameEntryDialog, NameEntryDialogProps } from '../NameEntryDialog';
 
 jest.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -22,13 +19,14 @@ jest.mock('../../hooks/useTheme', () => ({
   }),
 }));
 
-function render(overrides: Partial<SegmentNameDialogProps> = {}) {
+function render(overrides: Partial<NameEntryDialogProps> = {}) {
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
-      <SegmentNameDialog
+      <NameEntryDialog
         title="Rename segment"
         initialName="Chorus"
+        placeholder="Segment name"
         fieldAccessibilityLabel="Segment name"
         confirmAccessibilityLabel="Confirm rename"
         onConfirm={jest.fn()}
@@ -56,7 +54,7 @@ function input(tree: ReactTestRenderer, label = 'Segment name') {
   )[0];
 }
 
-describe('SegmentNameDialog', () => {
+describe('NameEntryDialog', () => {
   it('pre-fills the field with the initial name', () => {
     const tree = render({ initialName: 'Verse' });
     expect(input(tree).props.value).toBe('Verse');
@@ -65,6 +63,18 @@ describe('SegmentNameDialog', () => {
   it('autofocuses the field so the keyboard opens on the name', () => {
     const tree = render();
     expect(input(tree).props.autoFocus).toBe(true);
+  });
+
+  // Every caller seeds an existing name, so typing should replace it whole
+  // rather than append to it.
+  it('selects the pre-filled name on focus', () => {
+    const tree = render();
+    expect(input(tree).props.selectTextOnFocus).toBe(true);
+  });
+
+  it('shows the caller-supplied placeholder', () => {
+    const tree = render({ placeholder: 'Track name' });
+    expect(input(tree).props.placeholder).toBe('Track name');
   });
 
   it('applies the caller-supplied accessibility labels', () => {
@@ -124,9 +134,10 @@ describe('SegmentNameDialog', () => {
     act(() => input(tree).props.onChangeText('My edit'));
     act(() => {
       tree.update(
-        <SegmentNameDialog
+        <NameEntryDialog
           title="Rename segment"
           initialName="Something else"
+          placeholder="Segment name"
           fieldAccessibilityLabel="Segment name"
           confirmAccessibilityLabel="Confirm rename"
           onConfirm={jest.fn()}

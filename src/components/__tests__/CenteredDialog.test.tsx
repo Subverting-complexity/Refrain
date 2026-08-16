@@ -1,5 +1,11 @@
 import React from 'react';
-import { Modal, Text } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+} from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { CenteredDialog } from '../CenteredDialog';
@@ -91,5 +97,42 @@ describe('CenteredDialog', () => {
     expect(modal.props.transparent).toBe(true);
     expect(modal.props.animationType).toBe('fade');
     expect(modal.props.visible).toBe(true);
+  });
+
+  // These dialogs host autofocused text fields, so the card has to stay clear
+  // of the on-screen keyboard and stay reachable once it is up.
+  describe('keyboard avoidance', () => {
+    it('avoids the keyboard with a platform-appropriate behavior', () => {
+      const tree = renderDialog();
+      const avoider = tree.root.findByType(KeyboardAvoidingView);
+      // Under Android's edge-to-edge layout the window is no longer resized
+      // for the IME, so leaving the behavior unset would drop the card behind
+      // the keyboard.
+      expect(avoider.props.behavior).toBe(
+        Platform.OS === 'ios' ? 'padding' : 'height',
+      );
+    });
+
+    it('lets a card taller than the reduced viewport scroll instead of clipping', () => {
+      const tree = renderDialog();
+      const scroll = tree.root.findByType(ScrollView);
+      const style = scroll.props.style;
+      // A ScrollView neither grows nor shrinks by default, so it would
+      // overflow the shrunken overlay rather than scroll within it.
+      expect(style).toEqual(
+        expect.objectContaining({ flexGrow: 0, flexShrink: 1 }),
+      );
+    });
+
+    it('lets the action buttons fire on the first tap while the keyboard is open', () => {
+      const tree = renderDialog();
+      const scroll = tree.root.findByType(ScrollView);
+      expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
+    });
+
+    it('keeps the backdrop covering the status bar area on Android', () => {
+      const tree = renderDialog();
+      expect(tree.root.findByType(Modal).props.statusBarTranslucent).toBe(true);
+    });
   });
 });
