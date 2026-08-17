@@ -129,6 +129,24 @@ export async function updateTrackSortOrder(
   await putStoredTrack({ ...row, sortOrder });
 }
 
+/**
+ * Returns the number of tracks in each folder, keyed by folder id.
+ * Only folders that actually contain tracks appear in the result;
+ * root-level tracks (folderId null) are excluded.
+ */
+export async function getTrackCountsByFolder(): Promise<
+  Record<string, number>
+> {
+  const rows = await getAllStoredTracks();
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.folderId != null) {
+      counts[row.folderId] = (counts[row.folderId] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 export async function deleteTrack(id: string): Promise<void> {
   await deleteStoredTrack(id);
   await deleteMarkers(id);

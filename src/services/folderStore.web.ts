@@ -2,9 +2,11 @@ import { Folder } from '../types';
 import {
   deleteStoredFolder,
   getAllStoredFolders,
+  getAllStoredTracks,
   getStoredFolder,
   getStoredFoldersByParent,
   putStoredFolder,
+  putStoredTrack,
   StoredFolder,
 } from './database.web';
 
@@ -50,14 +52,10 @@ export async function deleteFolder(id: string): Promise<void> {
   const folder = await getStoredFolder(id);
   if (!folder) return;
 
-  const allTracks = await import('./database.web').then((m) =>
-    m.getAllStoredTracks(),
-  );
+  const allTracks = await getAllStoredTracks();
   for (const track of allTracks) {
     if (track.folderId === id) {
-      await import('./database.web').then((m) =>
-        m.putStoredTrack({ ...track, folderId: folder.parentId }),
-      );
+      await putStoredTrack({ ...track, folderId: folder.parentId });
     }
   }
 

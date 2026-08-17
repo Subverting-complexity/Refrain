@@ -171,6 +171,26 @@ export function updateTrackSortOrder(id: string, sortOrder: number): void {
   db.runSync('UPDATE tracks SET sortOrder = ? WHERE id = ?', sortOrder, id);
 }
 
+/**
+ * Returns the number of tracks in each folder, keyed by folder id.
+ * Only folders that actually contain tracks appear in the result;
+ * root-level tracks (folderId IS NULL) are excluded from the map
+ * because the UI never needs a "root count" badge.
+ */
+export function getTrackCountsByFolder(): Record<string, number> {
+  const db = getDatabase();
+  const rows = db.getAllSync<{ folderId: string | null; cnt: number }>(
+    'SELECT folderId, COUNT(*) as cnt FROM tracks WHERE folderId IS NOT NULL GROUP BY folderId',
+  );
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.folderId != null) {
+      counts[row.folderId] = row.cnt;
+    }
+  }
+  return counts;
+}
+
 export function deleteTrack(id: string): void {
   const db = getDatabase();
   const row = db.getFirstSync<{ uri: string }>(

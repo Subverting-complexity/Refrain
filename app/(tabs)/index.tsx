@@ -36,6 +36,7 @@ import {
 import { getSetting, setSetting } from '@/src/services/settingsStore';
 import {
   deleteTrack,
+  getTrackCountsByFolder,
   insertTrack,
   loadTracks,
   renameTrack,
@@ -125,6 +126,7 @@ export default function LibraryScreen() {
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
   const [movingTrack, setMovingTrack] = useState<Track | null>(null);
   const [allFolders, setAllFolders] = useState<Folder[]>([]);
+  const [trackCounts, setTrackCounts] = useState<Record<string, number>>({});
 
   const loadToken = useRef(0);
   const invalidateLoads = useCallback(() => {
@@ -136,13 +138,15 @@ export default function LibraryScreen() {
     async (folderId: string | null) => {
       const token = invalidateLoads();
       try {
-        const [loadedTracks, loadedFolders] = await Promise.all([
+        const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
           loadTracks(folderId),
           loadFolders(folderId),
+          getTrackCountsByFolder(),
         ]);
         if (loadToken.current !== token) return;
         setTracks(loadedTracks);
         setFolders(loadedFolders);
+        setTrackCounts(loadedCounts);
       } catch {
         if (loadToken.current !== token) return;
         showToast('Failed to load library', 'error');
@@ -164,13 +168,15 @@ export default function LibraryScreen() {
     setRefreshing(true);
     const token = invalidateLoads();
     try {
-      const [loadedTracks, loadedFolders] = await Promise.all([
+      const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
         loadTracks(currentFolderId),
         loadFolders(currentFolderId),
+        getTrackCountsByFolder(),
       ]);
       if (loadToken.current !== token) return;
       setTracks(loadedTracks);
       setFolders(loadedFolders);
+      setTrackCounts(loadedCounts);
       AccessibilityInfo.announceForAccessibility('Library refreshed');
     } catch {
       if (loadToken.current !== token) return;
@@ -208,16 +214,6 @@ export default function LibraryScreen() {
     await reloadData(null);
   }, [reloadData]);
 
-  // --- Track counts for folders (for display) ---
-  const folderTrackCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of tracks) {
-      const fid = t.folderId ?? '__root__';
-      counts.set(fid, (counts.get(fid) ?? 0) + 1);
-    }
-    return counts;
-  }, [tracks]);
-
   // --- Search + sort ---
   const filteredItems = useMemo((): ListItem[] => {
     const q = searchQuery.toLowerCase().trim();
@@ -239,14 +235,14 @@ export default function LibraryScreen() {
       items.push({
         type: 'folder',
         folder: f,
-        trackCount: folderTrackCounts.get(f.id) ?? 0,
+        trackCount: trackCounts[f.id] ?? 0,
       });
     }
     for (const t of sortedTracks) {
       items.push({ type: 'track', track: t });
     }
     return items;
-  }, [folders, tracks, searchQuery, sortOption, folderTrackCounts]);
+  }, [folders, tracks, searchQuery, sortOption, trackCounts]);
 
   // --- CRUD ---
   const addTrack = useCallback(
@@ -316,48 +312,53 @@ export default function LibraryScreen() {
     [showToast, invalidateLoads],
   );
 
-  const handleMoveUp = useCallback(
-    async (track: Track) => {
-      const idx = tracks.findIndex((t) => t.id === track.id);
-      if (idx <= 0) return;
-      const prev = tracks[idx - 1];
-      const newOrder = prev.sortOrder - 1;
+  const persistSwap = useCallback(
+    async (reordered: Track[], oldTracks: Track[]) => {
       try {
-        await updateTrackSortOrder(track.id, newOrder);
+        // Persist only the tracks whose sortOrder actually changed.
+        for (let i = 0; i < reordered.length; i++) {
+          if (
+            oldTracks[i]?.sortOrder !== i ||
+            oldTracks[i]?.id !== reordered[i].id
+          ) {
+            await updateTrackSortOrder(reordered[i].id, i);
+          }
+        }
         invalidateLoads();
-        setTracks((current) => {
-          const next = [...current];
-          next[idx] = { ...next[idx], sortOrder: newOrder };
-          next.sort((a, b) => a.sortOrder - b.sortOrder);
-          return next;
-        });
+        setTracks(reordered.map((t, i) => ({ ...t, sortOrder: i })));
       } catch {
         showToast('Failed to reorder', 'error');
       }
     },
-    [tracks, showToast, invalidateLoads],
+    [showToast, invalidateLoads],
+  );
+
+  const handleMoveUp = useCallback(
+    async (track: Track) => {
+      const idx = tracks.findIndex((t) => t.id === track.id);
+      if (idx <= 0) return;
+      const reordered = [...tracks];
+      [reordered[idx - 1], reordered[idx]] = [
+        reordered[idx],
+        reordered[idx - 1],
+      ];
+      await persistSwap(reordered, tracks);
+    },
+    [tracks, persistSwap],
   );
 
   const handleMoveDown = useCallback(
     async (track: Track) => {
       const idx = tracks.findIndex((t) => t.id === track.id);
       if (idx < 0 || idx >= tracks.length - 1) return;
-      const next = tracks[idx + 1];
-      const newOrder = next.sortOrder + 1;
-      try {
-        await updateTrackSortOrder(track.id, newOrder);
-        invalidateLoads();
-        setTracks((current) => {
-          const updated = [...current];
-          updated[idx] = { ...updated[idx], sortOrder: newOrder };
-          updated.sort((a, b) => a.sortOrder - b.sortOrder);
-          return updated;
-        });
-      } catch {
-        showToast('Failed to reorder', 'error');
-      }
+      const reordered = [...tracks];
+      [reordered[idx], reordered[idx + 1]] = [
+        reordered[idx + 1],
+        reordered[idx],
+      ];
+      await persistSwap(reordered, tracks);
     },
-    [tracks, showToast, invalidateLoads],
+    [tracks, persistSwap],
   );
 
   const handleCreateFolder = useCallback(
@@ -714,8 +715,11 @@ export default function LibraryScreen() {
       {actionsTrack ? (
         <TrackActionsSheet
           track={actionsTrack}
-          canMoveUp={tracks.indexOf(actionsTrack) > 0}
-          canMoveDown={tracks.indexOf(actionsTrack) < tracks.length - 1}
+          canMoveUp={tracks.findIndex((t) => t.id === actionsTrack.id) > 0}
+          canMoveDown={
+            tracks.findIndex((t) => t.id === actionsTrack.id) <
+            tracks.length - 1
+          }
           onRename={() => setRenamingTrack(actionsTrack)}
           onMoveUp={() => handleMoveUp(actionsTrack)}
           onMoveDown={() => handleMoveDown(actionsTrack)}

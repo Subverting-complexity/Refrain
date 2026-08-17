@@ -19,6 +19,7 @@ jest.mock('@/src/services/trackStore', () => ({
   renameTrack: jest.fn(),
   moveTrackToFolder: jest.fn(),
   updateTrackSortOrder: jest.fn(),
+  getTrackCountsByFolder: jest.fn().mockReturnValue({}),
 }));
 
 jest.mock('@/src/services/folderStore', () => ({
