@@ -57,6 +57,8 @@ const sampleTrack: Track = {
   durationEstimated: true,
   fileSizeBytes: 1_000_000,
   importedAt: 1_700_000_000_000,
+  folderId: null,
+  sortOrder: 0,
 };
 
 function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -68,6 +70,8 @@ function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
     durationEstimated: true,
     fileSizeBytes: 1_000_000,
     importedAt: 1_700_000_000_000,
+    folderId: null,
+    sortOrder: 0,
     ...overrides,
   };
 }
@@ -152,6 +156,8 @@ describe('insertTrack', () => {
       durationEstimated: true,
       fileSizeBytes: 1_000_000,
       importedAt: 1_700_000_000_000,
+      folderId: null,
+      sortOrder: 0,
     });
   });
 });
@@ -170,6 +176,8 @@ describe('renameTrack', () => {
       durationEstimated: true,
       fileSizeBytes: 1_000_000,
       importedAt: 1_700_000_000_000,
+      folderId: null,
+      sortOrder: 0,
     });
   });
 

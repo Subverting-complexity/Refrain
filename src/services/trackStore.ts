@@ -36,8 +36,8 @@ async function migrateFromJson(): Promise<void> {
     const db = getDatabase();
     for (const track of tracks) {
       db.runSync(
-        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, sortOrder)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         track.id,
         track.filename,
         `tracks/${track.id}.${track.format}`,
@@ -46,6 +46,8 @@ async function migrateFromJson(): Promise<void> {
         track.durationEstimated === false ? 0 : 1,
         track.fileSizeBytes,
         track.importedAt,
+        null,
+        0,
       );
     }
     migrated = true;
@@ -65,6 +67,8 @@ interface TrackRow {
   durationEstimated: number;
   fileSizeBytes: number;
   importedAt: number;
+  folderId: string | null;
+  sortOrder: number;
 }
 
 function rowToTrack(row: TrackRow): Track {
@@ -73,16 +77,26 @@ function rowToTrack(row: TrackRow): Track {
     format: row.format as Track['format'],
     durationEstimated: row.durationEstimated === 1,
     uri: resolveUri(row.uri),
+    folderId: row.folderId ?? null,
+    sortOrder: row.sortOrder ?? 0,
   };
 }
 
-export async function loadTracks(): Promise<Track[]> {
+export async function loadTracks(folderId?: string | null): Promise<Track[]> {
   await migrateFromJson();
   cleanupOrphanFiles();
   const db = getDatabase();
-  const rows = db.getAllSync<TrackRow>(
-    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks ORDER BY importedAt DESC',
-  );
+  const rows =
+    folderId === undefined
+      ? db.getAllSync<TrackRow>('SELECT * FROM tracks ORDER BY importedAt DESC')
+      : folderId === null
+        ? db.getAllSync<TrackRow>(
+            'SELECT * FROM tracks WHERE folderId IS NULL ORDER BY sortOrder ASC, importedAt DESC',
+          )
+        : db.getAllSync<TrackRow>(
+            'SELECT * FROM tracks WHERE folderId = ? ORDER BY sortOrder ASC, importedAt DESC',
+            folderId,
+          );
   return rows.map(rowToTrack);
 }
 
@@ -106,8 +120,8 @@ export async function getTrack(id: string): Promise<Track | null> {
 export function insertTrack(track: Track): void {
   const db = getDatabase();
   db.runSync(
-    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, sortOrder)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     track.id,
     track.filename,
     `tracks/${track.id}.${track.format}`,
@@ -116,6 +130,8 @@ export function insertTrack(track: Track): void {
     track.durationEstimated ? 1 : 0,
     track.fileSizeBytes,
     track.importedAt,
+    track.folderId,
+    track.sortOrder,
   );
 }
 
@@ -143,6 +159,36 @@ export function updateTrackDuration(id: string, durationMs: number): void {
     durationMs,
     id,
   );
+}
+
+export function moveTrackToFolder(id: string, folderId: string | null): void {
+  const db = getDatabase();
+  db.runSync('UPDATE tracks SET folderId = ? WHERE id = ?', folderId, id);
+}
+
+export function updateTrackSortOrder(id: string, sortOrder: number): void {
+  const db = getDatabase();
+  db.runSync('UPDATE tracks SET sortOrder = ? WHERE id = ?', sortOrder, id);
+}
+
+/**
+ * Returns the number of tracks in each folder, keyed by folder id.
+ * Only folders that actually contain tracks appear in the result;
+ * root-level tracks (folderId IS NULL) are excluded from the map
+ * because the UI never needs a "root count" badge.
+ */
+export function getTrackCountsByFolder(): Record<string, number> {
+  const db = getDatabase();
+  const rows = db.getAllSync<{ folderId: string | null; cnt: number }>(
+    'SELECT folderId, COUNT(*) as cnt FROM tracks WHERE folderId IS NOT NULL GROUP BY folderId',
+  );
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.folderId != null) {
+      counts[row.folderId] = row.cnt;
+    }
+  }
+  return counts;
 }
 
 export function deleteTrack(id: string): void {

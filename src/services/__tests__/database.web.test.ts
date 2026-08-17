@@ -33,6 +33,8 @@ const sampleTrack: StoredTrack = {
   durationEstimated: true,
   fileSizeBytes: 1_000_000,
   importedAt: 1_700_000_000_000,
+  folderId: null,
+  sortOrder: 0,
 };
 
 describe('tracks store', () => {

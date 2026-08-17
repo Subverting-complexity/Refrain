@@ -22,6 +22,7 @@ interface TrackListItemProps {
    */
   onRename?: (id: string, filename: string) => void;
   onDelete?: (id: string) => void;
+  onLongPress?: (track: Track) => void;
   style?: ViewStyle;
 }
 
@@ -36,6 +37,7 @@ export function TrackListItem({
   onPress,
   onRename,
   onDelete,
+  onLongPress,
   style,
 }: TrackListItemProps) {
   const { theme } = useTheme();
@@ -60,6 +62,10 @@ export function TrackListItem({
   }
 
   function handleLongPress() {
+    if (onLongPress) {
+      onLongPress(track);
+      return;
+    }
     if (!onDelete) return;
     confirmDelete();
   }

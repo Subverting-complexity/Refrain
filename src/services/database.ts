@@ -37,6 +37,15 @@ export function getDatabase(): SQLite.SQLiteDatabase {
       );
       CREATE INDEX IF NOT EXISTS idx_marker_profiles_trackId
         ON marker_profiles (trackId);
+      CREATE TABLE IF NOT EXISTS folders (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        parentId TEXT,
+        createdAt INTEGER NOT NULL,
+        sortOrder INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_folders_parentId
+        ON folders (parentId);
     `);
     migrateTracksSchema(db);
   }
@@ -66,6 +75,18 @@ function migrateTracksSchema(database: SQLite.SQLiteDatabase): void {
   if (!hasDurationEstimated) {
     database.execSync(
       `ALTER TABLE tracks ADD COLUMN durationEstimated INTEGER NOT NULL DEFAULT 1;`,
+    );
+  }
+  const hasFolderId = columns.some((column) => column.name === 'folderId');
+  if (!hasFolderId) {
+    database.execSync(
+      `ALTER TABLE tracks ADD COLUMN folderId TEXT DEFAULT NULL;`,
+    );
+  }
+  const hasSortOrder = columns.some((column) => column.name === 'sortOrder');
+  if (!hasSortOrder) {
+    database.execSync(
+      `ALTER TABLE tracks ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0;`,
     );
   }
   database.execSync(

@@ -17,6 +17,25 @@ jest.mock('@/src/services/trackStore', () => ({
   insertTrack: jest.fn(),
   deleteTrack: jest.fn(),
   renameTrack: jest.fn(),
+  moveTrackToFolder: jest.fn(),
+  updateTrackSortOrder: jest.fn(),
+  getTrackCountsByFolder: jest.fn().mockReturnValue({}),
+}));
+
+jest.mock('@/src/services/folderStore', () => ({
+  loadFolders: jest.fn().mockResolvedValue([]),
+  insertFolder: jest.fn(),
+  deleteFolder: jest.fn(),
+  renameFolder: jest.fn(),
+}));
+
+jest.mock('@/src/services/settingsStore', () => ({
+  getSetting: jest.fn().mockReturnValue(null),
+  setSetting: jest.fn(),
+}));
+
+jest.mock('@/src/utils/generateId', () => ({
+  generateId: jest.fn().mockReturnValue('test-uuid'),
 }));
 
 jest.mock('@/src/services/fileImport', () => ({
@@ -42,6 +61,11 @@ jest.mock('@/src/hooks/useTheme', () => ({
     },
   }),
 }));
+
+jest.mock('@expo/vector-icons', () => {
+  const { View } = require('react-native');
+  return { Ionicons: (props: Record<string, unknown>) => <View {...props} /> };
+});
 
 const mockPush = jest.fn();
 jest.mock('expo-router', () => {
@@ -95,6 +119,51 @@ jest.mock('@/src/components/TrackListItem', () => {
   };
 });
 
+jest.mock('@/src/components/FolderListItem', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    FolderListItem: () =>
+      ReactLocal.createElement(View, { testID: 'folder-item' }),
+  };
+});
+
+jest.mock('@/src/components/SearchBar', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    SearchBar: () => ReactLocal.createElement(View, { testID: 'search-bar' }),
+  };
+});
+
+jest.mock('@/src/components/SortPicker', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    SortPicker: () => ReactLocal.createElement(View, { testID: 'sort-picker' }),
+  };
+});
+
+jest.mock('@/src/components/CreateFolderDialog', () => ({
+  CreateFolderDialog: () => null,
+}));
+
+jest.mock('@/src/components/TrackRenameDialog', () => ({
+  TrackRenameDialog: () => null,
+}));
+
+jest.mock('@/src/components/NameEntryDialog', () => ({
+  NameEntryDialog: () => null,
+}));
+
+jest.mock('@/src/components/TrackActionsSheet', () => ({
+  TrackActionsSheet: () => null,
+}));
+
+jest.mock('@/src/components/FolderPickerDialog', () => ({
+  FolderPickerDialog: () => null,
+}));
+
 const mockLoadTracks = loadTracks as jest.MockedFunction<typeof loadTracks>;
 const mockDeleteTrack = deleteTrack as jest.MockedFunction<typeof deleteTrack>;
 const mockInsertTrack = insertTrack as jest.MockedFunction<typeof insertTrack>;
@@ -112,6 +181,8 @@ const sampleTrack: Track = {
   durationEstimated: false,
   fileSizeBytes: 2048,
   importedAt: 0,
+  folderId: null,
+  sortOrder: 0,
 };
 
 async function renderScreen(): Promise<ReactTestRenderer> {
@@ -225,13 +296,14 @@ describe('LibraryScreen stale-load guard', () => {
     mockLoadTracks.mockReturnValue(new Promise<Track[]>(() => {}));
   });
 
-  // Read the list straight off the FlatList's `data` prop. Counting rendered
-  // nodes double-counts (each mocked item is a composite plus a host element),
-  // and the empty state renders no FlatList at all.
+  // Read the list straight off the FlatList's `data` prop. The data is now
+  // a ListItem[] union — extract track ids from track items only.
   function trackIds(renderer: ReactTestRenderer): string[] {
     const lists = renderer.root.findAllByType(FlatList);
     if (lists.length === 0) return [];
-    return (lists[0].props.data as Track[]).map((t) => t.id);
+    return (lists[0].props.data as { type: string; track?: Track }[])
+      .filter((item) => item.type === 'track')
+      .map((item) => item.track!.id);
   }
 
   it('keeps an optimistically added track when a load in flight since before the import resolves', async () => {
@@ -461,7 +533,13 @@ describe('LibraryScreen rename keeps the rest of the row intact', () => {
   });
 
   function listedTracks(renderer: ReactTestRenderer): Track[] {
-    return renderer.root.findByType(FlatList).props.data as Track[];
+    const data = renderer.root.findByType(FlatList).props.data as Array<{
+      type: string;
+      track?: Track;
+    }>;
+    return data
+      .filter((item) => item.type === 'track')
+      .map((item) => item.track!);
   }
 
   // Rebuilding the entry from anything but the previous one is the one place a

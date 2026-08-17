@@ -21,15 +21,16 @@
  */
 
 const DB_NAME = 'refrain-meta';
-// v2 adds the `track_markers` store; v3 adds `marker_profiles`. The upgrade
-// handler creates stores conditionally, so bumping the version leaves existing
-// `tracks`/`settings`/`track_markers` data intact.
-const DB_VERSION = 3;
+// v2 adds the `track_markers` store; v3 adds `marker_profiles`; v4 adds
+// `folders`. The upgrade handler creates stores conditionally, so bumping the
+// version leaves existing data intact.
+const DB_VERSION = 4;
 const TRACKS_STORE = 'tracks';
 const SETTINGS_STORE = 'settings';
 const MARKERS_STORE = 'track_markers';
 const PROFILES_STORE = 'marker_profiles';
 const PROFILES_TRACK_INDEX = 'trackId';
+const FOLDERS_STORE = 'folders';
 
 /**
  * Persisted shape of a track. The playable `uri` is intentionally not stored:
@@ -44,6 +45,16 @@ export interface StoredTrack {
   durationEstimated: boolean;
   fileSizeBytes: number;
   importedAt: number;
+  folderId: string | null;
+  sortOrder: number;
+}
+
+export interface StoredFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+  sortOrder: number;
 }
 
 export interface StoredSetting {
@@ -95,6 +106,12 @@ function openDb(): Promise<IDBDatabase> {
         profiles.createIndex(PROFILES_TRACK_INDEX, 'trackId', {
           unique: false,
         });
+      }
+      if (!db.objectStoreNames.contains(FOLDERS_STORE)) {
+        const folders = db.createObjectStore(FOLDERS_STORE, {
+          keyPath: 'id',
+        });
+        folders.createIndex('parentId', 'parentId', { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -246,6 +263,42 @@ export function deleteStoredProfilesByTrack(trackId: string): Promise<void> {
         tx.onabort = () => reject(tx.error);
       }),
   );
+}
+
+// --- Folders --------------------------------------------------------------
+
+export function getAllStoredFolders(): Promise<StoredFolder[]> {
+  return runTransaction<StoredFolder[]>(FOLDERS_STORE, 'readonly', (store) =>
+    store.getAll(),
+  );
+}
+
+export function getStoredFoldersByParent(
+  parentId: string | null,
+): Promise<StoredFolder[]> {
+  return runTransaction<StoredFolder[]>(FOLDERS_STORE, 'readonly', (store) =>
+    store.index('parentId').getAll(parentId),
+  );
+}
+
+export function getStoredFolder(id: string): Promise<StoredFolder | null> {
+  return runTransaction<StoredFolder | undefined>(
+    FOLDERS_STORE,
+    'readonly',
+    (store) => store.get(id),
+  ).then((folder) => folder ?? null);
+}
+
+export function putStoredFolder(folder: StoredFolder): Promise<void> {
+  return runTransaction(FOLDERS_STORE, 'readwrite', (store) =>
+    store.put(folder),
+  ).then(() => undefined);
+}
+
+export function deleteStoredFolder(id: string): Promise<void> {
+  return runTransaction(FOLDERS_STORE, 'readwrite', (store) =>
+    store.delete(id),
+  ).then(() => undefined);
 }
 
 // --- Settings -------------------------------------------------------------
