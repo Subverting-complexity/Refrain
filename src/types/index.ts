@@ -9,7 +9,28 @@ export interface Track {
   durationEstimated: boolean;
   fileSizeBytes: number;
   importedAt: number;
+  folderId: string | null;
+  sortOrder: number;
 }
+
+export interface Folder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+  sortOrder: number;
+}
+
+export type SortOption =
+  | 'name-asc'
+  | 'name-desc'
+  | 'date-asc'
+  | 'date-desc'
+  | 'duration-asc'
+  | 'duration-desc'
+  | 'size-asc'
+  | 'size-desc'
+  | 'manual';
 
 export interface ImportResult {
   success: true;

@@ -95,6 +95,8 @@ export async function importBlob(
       durationEstimated: true,
       fileSizeBytes,
       importedAt: Date.now(),
+      folderId: null,
+      sortOrder: 0,
     };
 
     return { success: true, track };

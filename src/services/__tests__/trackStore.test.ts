@@ -65,6 +65,8 @@ const sampleTrack: Track = {
   durationEstimated: true,
   fileSizeBytes: 1_000_000,
   importedAt: 1700000000000,
+  folderId: null,
+  sortOrder: 0,
 };
 
 beforeEach(() => {
@@ -98,6 +100,8 @@ describe('migration from JSON', () => {
       1,
       sampleTrack.fileSizeBytes,
       sampleTrack.importedAt,
+      null,
+      0,
     );
     expect(mockDelete).toHaveBeenCalled();
   });
@@ -253,6 +257,8 @@ describe('insertTrack', () => {
       1,
       sampleTrack.fileSizeBytes,
       sampleTrack.importedAt,
+      null,
+      0,
     );
   });
 });

@@ -24,8 +24,6 @@ import {
  */
 
 async function rowToTrack(row: StoredTrack): Promise<Track> {
-  // Resolve the playable object URL; fall back to a sentinel if the blob is
-  // missing (orphaned record) so the shape stays valid.
   const uri = (await getObjectUrl(row.id)) ?? `idb://${row.id}`;
   return {
     id: row.id,
@@ -36,6 +34,8 @@ async function rowToTrack(row: StoredTrack): Promise<Track> {
     durationEstimated: row.durationEstimated,
     fileSizeBytes: row.fileSizeBytes,
     importedAt: row.importedAt,
+    folderId: row.folderId ?? null,
+    sortOrder: row.sortOrder ?? 0,
   };
 }
 
@@ -48,16 +48,25 @@ function toStored(track: Track): StoredTrack {
     durationEstimated: track.durationEstimated,
     fileSizeBytes: track.fileSizeBytes,
     importedAt: track.importedAt,
+    folderId: track.folderId,
+    sortOrder: track.sortOrder,
   };
 }
 
-export async function loadTracks(): Promise<Track[]> {
+export async function loadTracks(folderId?: string | null): Promise<Track[]> {
   void cleanupOrphanFiles().catch((e: unknown) => {
     console.warn('orphan cleanup failed', e);
   });
-  const rows = await getAllStoredTracks();
-  // Newest first — IndexedDB getAll returns keys in ascending order.
-  rows.sort((a, b) => b.importedAt - a.importedAt);
+  let rows = await getAllStoredTracks();
+  if (folderId !== undefined) {
+    rows = rows.filter((r) => (r.folderId ?? null) === folderId);
+    rows.sort(
+      (a, b) =>
+        (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || b.importedAt - a.importedAt,
+    );
+  } else {
+    rows.sort((a, b) => b.importedAt - a.importedAt);
+  }
   return Promise.all(rows.map(rowToTrack));
 }
 
@@ -100,6 +109,24 @@ export async function updateTrackDuration(
   const row = await getStoredTrack(id);
   if (!row) return;
   await putStoredTrack({ ...row, durationMs, durationEstimated: false });
+}
+
+export async function moveTrackToFolder(
+  id: string,
+  folderId: string | null,
+): Promise<void> {
+  const row = await getStoredTrack(id);
+  if (!row) return;
+  await putStoredTrack({ ...row, folderId });
+}
+
+export async function updateTrackSortOrder(
+  id: string,
+  sortOrder: number,
+): Promise<void> {
+  const row = await getStoredTrack(id);
+  if (!row) return;
+  await putStoredTrack({ ...row, sortOrder });
 }
 
 export async function deleteTrack(id: string): Promise<void> {
