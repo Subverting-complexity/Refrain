@@ -533,7 +533,13 @@ describe('LibraryScreen rename keeps the rest of the row intact', () => {
   });
 
   function listedTracks(renderer: ReactTestRenderer): Track[] {
-    return renderer.root.findByType(FlatList).props.data as Track[];
+    const data = renderer.root.findByType(FlatList).props.data as Array<{
+      type: string;
+      track?: Track;
+    }>;
+    return data
+      .filter((item) => item.type === 'track')
+      .map((item) => item.track!);
   }
 
   // Rebuilding the entry from anything but the previous one is the one place a
