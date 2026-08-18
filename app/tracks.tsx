@@ -235,12 +235,19 @@ export default function TracksScreen() {
   // no-op and the star is hidden.
   const canFilterFavorites = scope !== 'favorites';
 
-  // Entering a different folder clears the filter. Scoped to the entry being
+  // Entering a different entry clears the filter. Scoped to the entry being
   // viewed rather than to mount, because the screen is reused across
   // navigations.
-  useEffect(() => {
+  //
+  // Adjusted during render rather than in an effect: an effect would paint
+  // one frame of the previous entry's filtered list before clearing it, and
+  // resetting state on a changed input is what this pattern is for.
+  const entryKey = `${scope}:${folderId ?? ''}`;
+  const [filteredEntryKey, setFilteredEntryKey] = useState(entryKey);
+  if (filteredEntryKey !== entryKey) {
+    setFilteredEntryKey(entryKey);
     setFavoritesOnly(false);
-  }, [scope, folderId]);
+  }
 
   const visibleTracks = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -345,21 +352,35 @@ export default function TracksScreen() {
   const handleToggleFavorite = useCallback(
     async (track: Track) => {
       const next = !track.isFavorite;
-      // Optimistic, and retired against the same token the reads use: a load
-      // that started before this toggle holds a snapshot that predates it,
-      // so letting it land would silently restore the old value.
-      invalidateLoads();
-      if (scope === 'favorites' && !next) {
-        // Unstarring inside Favourites takes the row out of the view it is
-        // in. Removing it now, with the toast to say what happened, reads as
-        // the action working; leaving it until the next load reads as the
-        // tap having missed.
-        setTracks((prev) => prev.filter((t) => t.id !== track.id));
-      } else {
+      // Leaves the row out of the list rather than patching it, when the row
+      // no longer belongs in the view it is in.
+      const dropsFromView = scope === 'favorites' && !next;
+
+      const applyLocally = (isFavorite: boolean) => {
+        if (dropsFromView) {
+          // Unstarring inside Favourites takes the row out of the view it is
+          // in. Removing it now, with the toast to say what happened, reads
+          // as the action working; leaving it until the next load reads as
+          // the tap having missed.
+          setTracks((prev) =>
+            isFavorite
+              ? // Restoring: only if the row is not already back. A reload
+                // that landed mid-write may have re-added it, and appending
+                // blind would put two rows with the same key in the list.
+                prev.some((t) => t.id === track.id)
+                ? prev
+                : [...prev, { ...track, isFavorite }]
+              : prev.filter((t) => t.id !== track.id),
+          );
+          return;
+        }
         setTracks((prev) =>
-          prev.map((t) => (t.id === track.id ? { ...t, isFavorite: next } : t)),
+          prev.map((t) => (t.id === track.id ? { ...t, isFavorite } : t)),
         );
-      }
+      };
+
+      invalidateLoads();
+      applyLocally(next);
 
       try {
         await setTrackFavorite(track.id, next);
@@ -367,20 +388,20 @@ export default function TracksScreen() {
         // Put it back the way it was rather than leaving the row showing a
         // state the database does not hold.
         invalidateLoads();
-        if (scope === 'favorites' && !next) {
-          setTracks((prev) =>
-            [...prev, track].sort((a, b) => b.importedAt - a.importedAt),
-          );
-        } else {
-          setTracks((prev) =>
-            prev.map((t) =>
-              t.id === track.id ? { ...t, isFavorite: track.isFavorite } : t,
-            ),
-          );
-        }
+        applyLocally(track.isFavorite);
         showToast('Failed to update favourite', 'error');
         return;
       }
+
+      // Settle the local state a second time, and not only by retiring reads.
+      // On web the write is asynchronous, so a read can begin *during* it and
+      // still see the old value. Bumping the token discards such a read that
+      // has yet to land — but one that already landed has overwritten the
+      // optimistic update, and only re-applying puts it right. Without this,
+      // a refresh timed inside the write leaves the row on screen looking
+      // untouched moments after the toast said otherwise.
+      invalidateLoads();
+      applyLocally(next);
       showToast(
         next ? 'Added to favourites' : 'Removed from favourites',
         'success',

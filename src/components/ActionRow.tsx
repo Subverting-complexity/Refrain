@@ -45,11 +45,14 @@ export function ActionRow({
       ]}
       disabled={disabled}
     >
+      {/* Decorative: the row's own label already names the action. */}
       <Ionicons
         name={icon}
         size={20}
         color={color ?? theme.colors.textPrimary}
         style={styles.icon}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
       />
       <Text
         style={[

@@ -76,6 +76,15 @@ interface TrackSortBarProps {
  * The favourites star sits at the right, deliberately outside the chip
  * group: it filters rather than sorts, and conflating the two would suggest
  * tapping it reorders the list.
+ *
+ * This shares `chipStyles`, `pillColors` and the hit slop with `ChipGroup`
+ * but renders its own chips rather than using it. `ChipGroup` is a
+ * single-select radio group: it hardcodes `accessibilityRole="radio"`,
+ * builds every label from one `${prefix} ${label}` template, and has no room
+ * for a child element. These chips need a button role (tapping the selected
+ * one changes it, which a radio never does), a per-chip label naming both
+ * the direction and what a tap will do, and a chevron inside the pill. The
+ * visual recipe is shared; the behaviour genuinely differs.
  */
 export function TrackSortBar({
   value,
@@ -196,9 +205,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: CHIP_MIN_HEIGHT,
     paddingHorizontal: spacing.sm,
+    // Four chips plus a star is already tight on a 375pt screen, and OS font
+    // scaling makes it tighter. Let them give way rather than overflow the
+    // row and push the star off the end where it cannot be reached.
+    flexShrink: 1,
   },
   chevron: {
-    marginLeft: 2,
+    marginLeft: spacing.xs,
   },
   star: {
     minHeight: CHIP_MIN_HEIGHT,

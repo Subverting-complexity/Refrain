@@ -114,22 +114,29 @@ export default function LibraryScreen() {
    * overwrite it.
    */
   const reloadData = useCallback(
-    async (announceSuccess: boolean, failureMessage: string) => {
+    async (
+      announceSuccess: boolean,
+      failureMessage: string,
+    ): Promise<boolean> => {
       const token = invalidateLoads();
       try {
         const [loadedFolders, loadedCounts] = await Promise.all([
           loadFolders(),
           getTrackCountsByFolder(),
         ]);
-        if (loadToken.current !== token) return;
+        // A read the reader has moved on from reported nothing either way,
+        // so it is not a failure a caller should speak about.
+        if (loadToken.current !== token) return true;
         setFolders(loadedFolders);
         setCounts(loadedCounts);
         if (announceSuccess) {
           AccessibilityInfo.announceForAccessibility('Library refreshed');
         }
+        return true;
       } catch {
-        if (loadToken.current !== token) return;
+        if (loadToken.current !== token) return true;
         showToast(failureMessage, 'error');
+        return false;
       }
     },
     [invalidateLoads, showToast],
@@ -233,16 +240,31 @@ export default function LibraryScreen() {
   const handleCreateFolder = useCallback(
     async (name: string) => {
       try {
+        const createdAt = Date.now();
         const folder: Folder = {
           id: generateId(),
           name,
-          createdAt: Date.now(),
+          createdAt,
           pinOrder: null,
-          lastOpenedAt: null,
+          // Match what the store actually writes: `insertFolder` defaults
+          // this to `createdAt`. Holding null here would claim a value the
+          // database does not have, and would sort the folder to the
+          // never-opened tail until the next reload moved it.
+          lastOpenedAt: createdAt,
         };
         await insertFolder(folder);
         invalidateLoads();
-        setFolders((prev) => [...prev, folder]);
+        // A new folder belongs at the top of the unpinned block, not at the
+        // end of the list — appending would drop it below the pinned block
+        // and every older folder, then jump it upward on the next reload.
+        setFolders((prev) => {
+          const pinnedCount = prev.filter((f) => f.pinOrder !== null).length;
+          return [
+            ...prev.slice(0, pinnedCount),
+            folder,
+            ...prev.slice(pinnedCount),
+          ];
+        });
         showToast(`Created folder "${name}"`, 'success');
       } catch {
         showToast('Failed to create folder', 'error');
@@ -275,8 +297,10 @@ export default function LibraryScreen() {
         showToast(failureMessage, 'error');
         return false;
       }
-      await reloadData(false, 'Failed to load library');
-      return true;
+      // The write landed, but the read back may not have. `reloadData`
+      // reports its own failure, so say nothing further — a success toast on
+      // top of "Failed to load library" would contradict it.
+      return reloadData(false, 'Failed to load library');
     },
     [showToast, reloadData],
   );

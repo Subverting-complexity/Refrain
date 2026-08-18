@@ -533,6 +533,84 @@ describe('track view track actions', () => {
     act(() => renderer.unmount());
   });
 
+  // The Favourites-scope branch is the one that removes the row rather than
+  // patching it, and it is where a rollback can go wrong.
+  describe('unstarring inside the Favourites view', () => {
+    async function renderFavourites() {
+      mockParams = { scope: 'favorites', name: 'Favourites' };
+      mockLoadTracks.mockResolvedValue([{ ...sampleTrack, isFavorite: true }]);
+      return renderScreen();
+    }
+
+    it('takes the row out of the view it no longer belongs in', async () => {
+      const renderer = await renderFavourites();
+      await act(async () => {
+        await trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      expect(mockSetTrackFavorite).toHaveBeenCalledWith('track-1', false);
+      expect(trackIds(renderer)).toEqual([]);
+      expect(toastLabels(renderer)).toContain('Removed from favourites');
+      act(() => renderer.unmount());
+    });
+
+    it('restores exactly one row when the write fails', async () => {
+      mockSetTrackFavorite.mockImplementationOnce(() => {
+        throw new Error('db write failed');
+      });
+      const renderer = await renderFavourites();
+      await act(async () => {
+        await trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      // Restoring by appending blind would put two rows with the same key in
+      // the list if a reload had already re-added it.
+      expect(trackIds(renderer)).toEqual(['track-1']);
+      expect(listedTracks(renderer)[0].isFavorite).toBe(true);
+      expect(toastLabels(renderer)).toContain('Failed to update favourite');
+      act(() => renderer.unmount());
+    });
+
+    it('does not let a read that began during the write undo it', async () => {
+      // The window that matters is *inside* the write, not before it: on web
+      // the write is asynchronous, and a read started while it is in flight
+      // still sees the track as starred. Landing that read would put the row
+      // back moments after the toast said it had gone. Hold the write open
+      // so the reload can start in the middle of it.
+      let commitWrite!: () => void;
+      mockSetTrackFavorite.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            commitWrite = resolve;
+          }) as unknown as void,
+      );
+
+      const renderer = await renderFavourites();
+
+      let togglingDone!: Promise<void>;
+      await act(async () => {
+        togglingDone = trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      // Mid-write: the store still reports the old value.
+      const onRefresh =
+        renderer.root.findByType(FlatList).props.refreshControl.props.onRefresh;
+      let refreshDone!: Promise<void>;
+      await act(async () => {
+        refreshDone = onRefresh();
+      });
+
+      await act(async () => {
+        commitWrite();
+        await togglingDone;
+        await refreshDone;
+      });
+
+      expect(trackIds(renderer)).toEqual([]);
+      act(() => renderer.unmount());
+    });
+  });
+
   it('deletes a track and reports it', async () => {
     mockLoadTracks.mockResolvedValue([sampleTrack]);
 

@@ -82,15 +82,23 @@ export function TrackListItem({
 
   // Built from the actions actually wired up, so the hint never promises a
   // gesture the row does not support.
+  //
+  // Mind the direction. `renderLeftActions` draws the panel on the *left*
+  // edge, which is revealed by dragging the row to the *right*, and vice
+  // versa. Naming these the wrong way round is not a wording quibble: a
+  // screen-reader user told to "swipe left to favourite" would uncover
+  // Delete, which is the one mistake this row must not invite. Delete stays
+  // on the drag-left reveal it has always been on, so existing muscle memory
+  // for the destructive action is unchanged.
   function buildHint(): string | undefined {
     const parts: string[] = [];
     if (onPress) parts.push('Tap to play');
     if (onToggleFavorite) {
       parts.push(
-        `swipe left to ${track.isFavorite ? 'unfavourite' : 'favourite'}`,
+        `swipe right to ${track.isFavorite ? 'unfavourite' : 'favourite'}`,
       );
     }
-    if (onDelete) parts.push('swipe right to delete');
+    if (onDelete) parts.push('swipe left to delete');
     if (onLongPress) parts.push('long press for more');
     else if (onDelete) parts.push('long press to delete');
     if (!parts.length) return undefined;

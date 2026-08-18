@@ -365,6 +365,10 @@ describe('TrackListItem', () => {
         .accessibilityHint;
     }
 
+    // Direction matters more than wording here: `renderLeftActions` draws
+    // the panel on the left edge, which the user reveals by dragging the row
+    // to the RIGHT. A hint that says "swipe left to favourite" would send a
+    // screen-reader user to Delete.
     it('names each swipe direction with the action it carries', () => {
       expect(
         hintFor({
@@ -374,7 +378,7 @@ describe('TrackListItem', () => {
           onLongPress: jest.fn(),
         }),
       ).toBe(
-        'Tap to play, swipe left to favourite, swipe right to delete, long press for more',
+        'Tap to play, swipe right to favourite, swipe left to delete, long press for more',
       );
     });
 
@@ -384,7 +388,7 @@ describe('TrackListItem', () => {
           { onPress: jest.fn(), onToggleFavorite: jest.fn() },
           { ...baseTrack, isFavorite: true },
         ),
-      ).toBe('Tap to play, swipe left to unfavourite');
+      ).toBe('Tap to play, swipe right to unfavourite');
     });
 
     it('sets hint for play only when nothing else is wired up', () => {
@@ -394,13 +398,13 @@ describe('TrackListItem', () => {
     // The hint must not advertise a gesture the row does not wire up.
     it('omits the favourite swipe when it is not wired up', () => {
       expect(hintFor({ onPress: jest.fn(), onDelete: jest.fn() })).toBe(
-        'Tap to play, swipe right to delete, long press to delete',
+        'Tap to play, swipe left to delete, long press to delete',
       );
     });
 
     it('capitalizes the hint when the row is not tappable', () => {
       expect(hintFor({ onToggleFavorite: jest.fn() })).toBe(
-        'Swipe left to favourite',
+        'Swipe right to favourite',
       );
     });
 
