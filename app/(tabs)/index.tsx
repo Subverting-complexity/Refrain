@@ -31,6 +31,7 @@ import {
   deleteFolder,
   insertFolder,
   loadFolders,
+  markFolderOpened,
   renameFolder as renameFolderStore,
 } from '@/src/services/folderStore';
 import { getSetting, setSetting } from '@/src/services/settingsStore';
@@ -41,10 +42,9 @@ import {
   loadTracks,
   renameTrack,
   moveTrackToFolder,
-  updateTrackSortOrder,
 } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
-import { Folder, SortOption, Track } from '@/src/types';
+import { Folder, SortOption, Track, TrackCounts } from '@/src/types';
 import { errorMessage } from '@/src/utils/errorMessage';
 import { generateId } from '@/src/utils/generateId';
 
@@ -53,7 +53,6 @@ type ListItem =
   | { type: 'track'; track: Track };
 
 function sortTracks(tracks: Track[], sort: SortOption): Track[] {
-  if (sort === 'manual') return tracks;
   const sorted = [...tracks];
   switch (sort) {
     case 'name-asc':
@@ -94,7 +93,6 @@ const VALID_SORTS = new Set<SortOption>([
   'duration-desc',
   'size-asc',
   'size-desc',
-  'manual',
 ]);
 
 function readSortSetting(): SortOption {
@@ -126,7 +124,12 @@ export default function LibraryScreen() {
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
   const [movingTrack, setMovingTrack] = useState<Track | null>(null);
   const [allFolders, setAllFolders] = useState<Folder[]>([]);
-  const [trackCounts, setTrackCounts] = useState<Record<string, number>>({});
+  const [trackCounts, setTrackCounts] = useState<TrackCounts>({
+    byFolder: {},
+    all: 0,
+    favorites: 0,
+    unfiled: 0,
+  });
 
   const loadToken = useRef(0);
   const invalidateLoads = useCallback(() => {
@@ -138,9 +141,13 @@ export default function LibraryScreen() {
     async (folderId: string | null) => {
       const token = invalidateLoads();
       try {
+        // Folders no longer nest, so the folder list belongs to the root
+        // of the library and nowhere else.
         const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
-          loadTracks(folderId),
-          loadFolders(folderId),
+          folderId === null
+            ? loadTracks({ scope: 'unfiled' })
+            : loadTracks({ scope: 'folder', folderId }),
+          folderId === null ? loadFolders() : Promise.resolve([]),
           getTrackCountsByFolder(),
         ]);
         if (loadToken.current !== token) return;
@@ -169,8 +176,10 @@ export default function LibraryScreen() {
     const token = invalidateLoads();
     try {
       const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
-        loadTracks(currentFolderId),
-        loadFolders(currentFolderId),
+        currentFolderId === null
+          ? loadTracks({ scope: 'unfiled' })
+          : loadTracks({ scope: 'folder', folderId: currentFolderId }),
+        currentFolderId === null ? loadFolders() : Promise.resolve([]),
         getTrackCountsByFolder(),
       ]);
       if (loadToken.current !== token) return;
@@ -191,6 +200,12 @@ export default function LibraryScreen() {
       setFolderPath((prev) => [...prev, folder]);
       setCurrentFolderId(folder.id);
       setSearchQuery('');
+      try {
+        await markFolderOpened(folder.id, Date.now());
+      } catch {
+        // Ordering hint only — a folder that opens but is not stamped is
+        // still open, so this must never block navigation.
+      }
       await reloadData(folder.id);
     },
     [reloadData],
@@ -235,7 +250,7 @@ export default function LibraryScreen() {
       items.push({
         type: 'folder',
         folder: f,
-        trackCount: trackCounts[f.id] ?? 0,
+        trackCount: trackCounts.byFolder[f.id] ?? 0,
       });
     }
     for (const t of sortedTracks) {
@@ -312,64 +327,15 @@ export default function LibraryScreen() {
     [showToast, invalidateLoads],
   );
 
-  const persistSwap = useCallback(
-    async (reordered: Track[], oldTracks: Track[]) => {
-      try {
-        // Persist only the tracks whose sortOrder actually changed.
-        for (let i = 0; i < reordered.length; i++) {
-          if (
-            oldTracks[i]?.sortOrder !== i ||
-            oldTracks[i]?.id !== reordered[i].id
-          ) {
-            await updateTrackSortOrder(reordered[i].id, i);
-          }
-        }
-        invalidateLoads();
-        setTracks(reordered.map((t, i) => ({ ...t, sortOrder: i })));
-      } catch {
-        showToast('Failed to reorder', 'error');
-      }
-    },
-    [showToast, invalidateLoads],
-  );
-
-  const handleMoveUp = useCallback(
-    async (track: Track) => {
-      const idx = tracks.findIndex((t) => t.id === track.id);
-      if (idx <= 0) return;
-      const reordered = [...tracks];
-      [reordered[idx - 1], reordered[idx]] = [
-        reordered[idx],
-        reordered[idx - 1],
-      ];
-      await persistSwap(reordered, tracks);
-    },
-    [tracks, persistSwap],
-  );
-
-  const handleMoveDown = useCallback(
-    async (track: Track) => {
-      const idx = tracks.findIndex((t) => t.id === track.id);
-      if (idx < 0 || idx >= tracks.length - 1) return;
-      const reordered = [...tracks];
-      [reordered[idx], reordered[idx + 1]] = [
-        reordered[idx + 1],
-        reordered[idx],
-      ];
-      await persistSwap(reordered, tracks);
-    },
-    [tracks, persistSwap],
-  );
-
   const handleCreateFolder = useCallback(
     async (name: string) => {
       try {
         const folder: Folder = {
           id: generateId(),
           name,
-          parentId: currentFolderId,
           createdAt: Date.now(),
-          sortOrder: folders.length,
+          pinOrder: null,
+          lastOpenedAt: null,
         };
         await insertFolder(folder);
         invalidateLoads();
@@ -380,7 +346,7 @@ export default function LibraryScreen() {
       }
       setCreatingFolder(false);
     },
-    [currentFolderId, folders.length, showToast, invalidateLoads],
+    [showToast, invalidateLoads],
   );
 
   const handleDeleteFolder = useCallback(
@@ -435,7 +401,7 @@ export default function LibraryScreen() {
 
   const openMoveToFolder = useCallback(async (track: Track) => {
     try {
-      const all = await loadFolders(null);
+      const all = await loadFolders();
       setAllFolders(all);
     } catch {
       setAllFolders([]);
@@ -715,14 +681,7 @@ export default function LibraryScreen() {
       {actionsTrack ? (
         <TrackActionsSheet
           track={actionsTrack}
-          canMoveUp={tracks.findIndex((t) => t.id === actionsTrack.id) > 0}
-          canMoveDown={
-            tracks.findIndex((t) => t.id === actionsTrack.id) <
-            tracks.length - 1
-          }
           onRename={() => setRenamingTrack(actionsTrack)}
-          onMoveUp={() => handleMoveUp(actionsTrack)}
-          onMoveDown={() => handleMoveDown(actionsTrack)}
           onMoveToFolder={() => openMoveToFolder(actionsTrack)}
           onDelete={() => handleDelete(actionsTrack.id)}
           onDismiss={() => setActionsTrack(null)}

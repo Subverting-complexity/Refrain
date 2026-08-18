@@ -1,4 +1,4 @@
-import { Track } from '../types';
+import { LoadTracksOptions, Track, TrackCounts } from '../types';
 import {
   deleteStoredTrack,
   getAllStoredTracks,
@@ -35,7 +35,8 @@ async function rowToTrack(row: StoredTrack): Promise<Track> {
     fileSizeBytes: row.fileSizeBytes,
     importedAt: row.importedAt,
     folderId: row.folderId ?? null,
-    sortOrder: row.sortOrder ?? 0,
+    isFavorite: row.isFavorite ?? false,
+    lastPlayedAt: row.lastPlayedAt ?? null,
   };
 }
 
@@ -49,24 +50,33 @@ function toStored(track: Track): StoredTrack {
     fileSizeBytes: track.fileSizeBytes,
     importedAt: track.importedAt,
     folderId: track.folderId,
-    sortOrder: track.sortOrder,
+    isFavorite: track.isFavorite,
+    lastPlayedAt: track.lastPlayedAt,
   };
 }
 
-export async function loadTracks(folderId?: string | null): Promise<Track[]> {
+/**
+ * Reads one slice of the library, newest import first.
+ *
+ * IndexedDB has no query language, so the filtering the native store hands
+ * to SQL happens here in memory. Manual ordering is gone, so import time is
+ * the only order the store applies. The default scope is every track.
+ */
+export async function loadTracks(
+  options: LoadTracksOptions = { scope: 'all' },
+): Promise<Track[]> {
   void cleanupOrphanFiles().catch((e: unknown) => {
     console.warn('orphan cleanup failed', e);
   });
   let rows = await getAllStoredTracks();
-  if (folderId !== undefined) {
-    rows = rows.filter((r) => (r.folderId ?? null) === folderId);
-    rows.sort(
-      (a, b) =>
-        (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || b.importedAt - a.importedAt,
-    );
-  } else {
-    rows.sort((a, b) => b.importedAt - a.importedAt);
+  if (options.scope === 'favorites') {
+    rows = rows.filter((r) => r.isFavorite === true);
+  } else if (options.scope === 'unfiled') {
+    rows = rows.filter((r) => (r.folderId ?? null) === null);
+  } else if (options.scope === 'folder') {
+    rows = rows.filter((r) => r.folderId === options.folderId);
   }
+  rows.sort((a, b) => b.importedAt - a.importedAt);
   return Promise.all(rows.map(rowToTrack));
 }
 
@@ -120,31 +130,51 @@ export async function moveTrackToFolder(
   await putStoredTrack({ ...row, folderId });
 }
 
-export async function updateTrackSortOrder(
+/** Stars or unstars a track. An unknown id is a no-op. */
+export async function setTrackFavorite(
   id: string,
-  sortOrder: number,
+  isFavorite: boolean,
 ): Promise<void> {
   const row = await getStoredTrack(id);
   if (!row) return;
-  await putStoredTrack({ ...row, sortOrder });
+  await putStoredTrack({ ...row, isFavorite });
 }
 
 /**
- * Returns the number of tracks in each folder, keyed by folder id.
- * Only folders that actually contain tracks appear in the result;
- * root-level tracks (folderId null) are excluded.
+ * Records that a track was played at `at` (epoch milliseconds). The caller
+ * supplies the timestamp rather than the store reading a clock, so the write
+ * is deterministic in tests and the same moment can be recorded through
+ * either platform implementation.
  */
-export async function getTrackCountsByFolder(): Promise<
-  Record<string, number>
-> {
+export async function markTrackPlayed(id: string, at: number): Promise<void> {
+  const row = await getStoredTrack(id);
+  if (!row) return;
+  await putStoredTrack({ ...row, lastPlayedAt: at });
+}
+
+/**
+ * Every track tally the library root needs, in one pass.
+ *
+ * `byFolder` is keyed by folder id and lists only folders that actually hold
+ * tracks. Alongside it come the three root rows that are not folders: every
+ * track, starred tracks, and tracks that sit in no folder. Unfiled is a view
+ * over a null `folderId` rather than a folder record, so it is counted here
+ * instead of appearing in `byFolder`.
+ */
+export async function getTrackCountsByFolder(): Promise<TrackCounts> {
   const rows = await getAllStoredTracks();
-  const counts: Record<string, number> = {};
+  const byFolder: Record<string, number> = {};
+  let favorites = 0;
+  let unfiled = 0;
   for (const row of rows) {
-    if (row.folderId != null) {
-      counts[row.folderId] = (counts[row.folderId] ?? 0) + 1;
+    if (row.isFavorite) favorites += 1;
+    if (row.folderId == null) {
+      unfiled += 1;
+    } else {
+      byFolder[row.folderId] = (byFolder[row.folderId] ?? 0) + 1;
     }
   }
-  return counts;
+  return { byFolder, all: rows.length, favorites, unfiled };
 }
 
 export async function deleteTrack(id: string): Promise<void> {

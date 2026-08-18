@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { Track } from '../types';
+import { LoadTracksOptions, Track, TrackCounts } from '../types';
 import { getDatabase } from './database';
 import { deleteMarkers, deleteProfilesForTrack } from './markerStore';
 
@@ -36,8 +36,8 @@ async function migrateFromJson(): Promise<void> {
     const db = getDatabase();
     for (const track of tracks) {
       db.runSync(
-        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, sortOrder)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, isFavorite, lastPlayedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         track.id,
         track.filename,
         `tracks/${track.id}.${track.format}`,
@@ -48,6 +48,7 @@ async function migrateFromJson(): Promise<void> {
         track.importedAt,
         null,
         0,
+        null,
       );
     }
     migrated = true;
@@ -57,6 +58,15 @@ async function migrateFromJson(): Promise<void> {
     // next loadTracks() call retries within this session.
   }
 }
+
+/**
+ * The columns every read names explicitly. `SELECT *` would also return
+ * the retired `sortOrder` column, which still exists in the table, and the
+ * spread in `rowToTrack` would then put a field on the returned track that
+ * the `Track` type no longer has.
+ */
+const TRACK_COLUMNS =
+  'id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, isFavorite, lastPlayedAt';
 
 interface TrackRow {
   id: string;
@@ -68,7 +78,8 @@ interface TrackRow {
   fileSizeBytes: number;
   importedAt: number;
   folderId: string | null;
-  sortOrder: number;
+  isFavorite: number;
+  lastPlayedAt: number | null;
 }
 
 function rowToTrack(row: TrackRow): Track {
@@ -78,25 +89,41 @@ function rowToTrack(row: TrackRow): Track {
     durationEstimated: row.durationEstimated === 1,
     uri: resolveUri(row.uri),
     folderId: row.folderId ?? null,
-    sortOrder: row.sortOrder ?? 0,
+    isFavorite: row.isFavorite === 1,
+    lastPlayedAt: row.lastPlayedAt ?? null,
   };
 }
 
-export async function loadTracks(folderId?: string | null): Promise<Track[]> {
+/**
+ * Reads one slice of the library, newest import first.
+ *
+ * Manual track ordering is gone, so `importedAt DESC` is the only order the
+ * store applies; any other order the reader wants is applied in the UI on top
+ * of this. The default scope is every track.
+ */
+export async function loadTracks(
+  options: LoadTracksOptions = { scope: 'all' },
+): Promise<Track[]> {
   await migrateFromJson();
   cleanupOrphanFiles();
   const db = getDatabase();
   const rows =
-    folderId === undefined
-      ? db.getAllSync<TrackRow>('SELECT * FROM tracks ORDER BY importedAt DESC')
-      : folderId === null
+    options.scope === 'all'
+      ? db.getAllSync<TrackRow>(
+          `SELECT ${TRACK_COLUMNS} FROM tracks ORDER BY importedAt DESC`,
+        )
+      : options.scope === 'favorites'
         ? db.getAllSync<TrackRow>(
-            'SELECT * FROM tracks WHERE folderId IS NULL ORDER BY sortOrder ASC, importedAt DESC',
+            `SELECT ${TRACK_COLUMNS} FROM tracks WHERE isFavorite = 1 ORDER BY importedAt DESC`,
           )
-        : db.getAllSync<TrackRow>(
-            'SELECT * FROM tracks WHERE folderId = ? ORDER BY sortOrder ASC, importedAt DESC',
-            folderId,
-          );
+        : options.scope === 'unfiled'
+          ? db.getAllSync<TrackRow>(
+              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId IS NULL ORDER BY importedAt DESC`,
+            )
+          : db.getAllSync<TrackRow>(
+              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId = ? ORDER BY importedAt DESC`,
+              options.folderId,
+            );
   return rows.map(rowToTrack);
 }
 
@@ -111,7 +138,7 @@ export async function getTrack(id: string): Promise<Track | null> {
   await migrateFromJson();
   const db = getDatabase();
   const row = db.getFirstSync<TrackRow>(
-    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt FROM tracks WHERE id = ?',
+    `SELECT ${TRACK_COLUMNS} FROM tracks WHERE id = ?`,
     id,
   );
   return row ? rowToTrack(row) : null;
@@ -120,8 +147,8 @@ export async function getTrack(id: string): Promise<Track | null> {
 export function insertTrack(track: Track): void {
   const db = getDatabase();
   db.runSync(
-    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, sortOrder)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, isFavorite, lastPlayedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     track.id,
     track.filename,
     `tracks/${track.id}.${track.format}`,
@@ -131,7 +158,8 @@ export function insertTrack(track: Track): void {
     track.fileSizeBytes,
     track.importedAt,
     track.folderId,
-    track.sortOrder,
+    track.isFavorite ? 1 : 0,
+    track.lastPlayedAt,
   );
 }
 
@@ -166,29 +194,56 @@ export function moveTrackToFolder(id: string, folderId: string | null): void {
   db.runSync('UPDATE tracks SET folderId = ? WHERE id = ?', folderId, id);
 }
 
-export function updateTrackSortOrder(id: string, sortOrder: number): void {
+/** Stars or unstars a track. An unknown id is a no-op. */
+export function setTrackFavorite(id: string, isFavorite: boolean): void {
   const db = getDatabase();
-  db.runSync('UPDATE tracks SET sortOrder = ? WHERE id = ?', sortOrder, id);
+  db.runSync(
+    'UPDATE tracks SET isFavorite = ? WHERE id = ?',
+    isFavorite ? 1 : 0,
+    id,
+  );
 }
 
 /**
- * Returns the number of tracks in each folder, keyed by folder id.
- * Only folders that actually contain tracks appear in the result;
- * root-level tracks (folderId IS NULL) are excluded from the map
- * because the UI never needs a "root count" badge.
+ * Records that a track was played at `at` (epoch milliseconds). The caller
+ * supplies the timestamp rather than the store reading a clock, so the write
+ * is deterministic in tests and the same moment can be recorded through
+ * either platform implementation.
  */
-export function getTrackCountsByFolder(): Record<string, number> {
+export function markTrackPlayed(id: string, at: number): void {
+  const db = getDatabase();
+  db.runSync('UPDATE tracks SET lastPlayedAt = ? WHERE id = ?', at, id);
+}
+
+/**
+ * Every track tally the library root needs, in one pass.
+ *
+ * `byFolder` is keyed by folder id and lists only folders that actually hold
+ * tracks. Alongside it come the three root rows that are not folders: every
+ * track, starred tracks, and tracks that sit in no folder. Unfiled is a view
+ * over `folderId IS NULL` rather than a folder row, so it is counted here
+ * instead of appearing in `byFolder`.
+ */
+export function getTrackCountsByFolder(): TrackCounts {
   const db = getDatabase();
   const rows = db.getAllSync<{ folderId: string | null; cnt: number }>(
-    'SELECT folderId, COUNT(*) as cnt FROM tracks WHERE folderId IS NOT NULL GROUP BY folderId',
+    'SELECT folderId, COUNT(*) as cnt FROM tracks GROUP BY folderId',
   );
-  const counts: Record<string, number> = {};
+  const byFolder: Record<string, number> = {};
+  let all = 0;
+  let unfiled = 0;
   for (const row of rows) {
-    if (row.folderId != null) {
-      counts[row.folderId] = row.cnt;
+    all += row.cnt;
+    if (row.folderId == null) {
+      unfiled += row.cnt;
+    } else {
+      byFolder[row.folderId] = row.cnt;
     }
   }
-  return counts;
+  const favoriteRow = db.getFirstSync<{ cnt: number }>(
+    'SELECT COUNT(*) as cnt FROM tracks WHERE isFavorite = 1',
+  );
+  return { byFolder, all, favorites: favoriteRow?.cnt ?? 0, unfiled };
 }
 
 export function deleteTrack(id: string): void {

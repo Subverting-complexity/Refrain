@@ -7,8 +7,11 @@ import {
   deleteTrack,
   getTrack,
   insertTrack,
+  getTrackCountsByFolder,
   loadTracks,
+  markTrackPlayed,
   renameTrack,
+  setTrackFavorite,
   updateTrackDuration,
 } from '../trackStore.web';
 
@@ -58,7 +61,8 @@ const sampleTrack: Track = {
   fileSizeBytes: 1_000_000,
   importedAt: 1_700_000_000_000,
   folderId: null,
-  sortOrder: 0,
+  isFavorite: false,
+  lastPlayedAt: null,
 };
 
 function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -71,7 +75,8 @@ function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
     fileSizeBytes: 1_000_000,
     importedAt: 1_700_000_000_000,
     folderId: null,
-    sortOrder: 0,
+    isFavorite: false,
+    lastPlayedAt: null,
     ...overrides,
   };
 }
@@ -157,7 +162,8 @@ describe('insertTrack', () => {
       fileSizeBytes: 1_000_000,
       importedAt: 1_700_000_000_000,
       folderId: null,
-      sortOrder: 0,
+      isFavorite: false,
+      lastPlayedAt: null,
     });
   });
 });
@@ -177,7 +183,8 @@ describe('renameTrack', () => {
       fileSizeBytes: 1_000_000,
       importedAt: 1_700_000_000_000,
       folderId: null,
-      sortOrder: 0,
+      isFavorite: false,
+      lastPlayedAt: null,
     });
   });
 
@@ -272,5 +279,135 @@ describe('cleanupOrphanFiles', () => {
     mockGetStoredTrackIds.mockResolvedValue([]);
     mockListBlobIds.mockRejectedValue(new Error('idb unavailable'));
     expect(await cleanupOrphanFiles()).toBe(0);
+  });
+});
+
+describe('loadTracks scopes', () => {
+  const rows = [
+    storedRow({
+      id: 'a',
+      importedAt: 30,
+      folderId: 'folder-1',
+      isFavorite: true,
+    }),
+    storedRow({ id: 'b', importedAt: 10, folderId: null, isFavorite: false }),
+    storedRow({
+      id: 'c',
+      importedAt: 20,
+      folderId: 'folder-2',
+      isFavorite: true,
+    }),
+  ];
+
+  it('returns every track newest first by default', async () => {
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+
+    const tracks = await loadTracks();
+
+    expect(tracks.map((t) => t.id)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('returns only starred tracks in the favourites scope', async () => {
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+
+    const tracks = await loadTracks({ scope: 'favorites' });
+
+    expect(tracks.map((t) => t.id)).toEqual(['a', 'c']);
+  });
+
+  it('returns tracks in no folder in the unfiled scope', async () => {
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+
+    const tracks = await loadTracks({ scope: 'unfiled' });
+
+    expect(tracks.map((t) => t.id)).toEqual(['b']);
+  });
+
+  it('returns one folder in the folder scope', async () => {
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+
+    const tracks = await loadTracks({ scope: 'folder', folderId: 'folder-2' });
+
+    expect(tracks.map((t) => t.id)).toEqual(['c']);
+  });
+
+  it('defaults the favourite and play-time fields on a pre-migration row', async () => {
+    const legacy = storedRow();
+    delete (legacy as Record<string, unknown>).isFavorite;
+    delete (legacy as Record<string, unknown>).lastPlayedAt;
+    mockGetAllStoredTracks.mockResolvedValue([legacy]);
+
+    const tracks = await loadTracks();
+
+    expect(tracks[0].isFavorite).toBe(false);
+    expect(tracks[0].lastPlayedAt).toBeNull();
+  });
+});
+
+describe('setTrackFavorite', () => {
+  it('re-persists the row with the favourite flag flipped', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+
+    await setTrackFavorite('track-1', true);
+
+    expect(mockPutStoredTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'track-1', isFavorite: true }),
+    );
+  });
+
+  it('is a no-op for an unknown id', async () => {
+    mockGetStoredTrack.mockResolvedValue(null);
+
+    await setTrackFavorite('missing', true);
+
+    expect(mockPutStoredTrack).not.toHaveBeenCalled();
+  });
+});
+
+describe('markTrackPlayed', () => {
+  it('records the timestamp the caller supplies', async () => {
+    mockGetStoredTrack.mockResolvedValue(storedRow());
+
+    await markTrackPlayed('track-1', 1_700_000_900_000);
+
+    expect(mockPutStoredTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ lastPlayedAt: 1_700_000_900_000 }),
+    );
+  });
+
+  it('is a no-op for an unknown id', async () => {
+    mockGetStoredTrack.mockResolvedValue(null);
+
+    await markTrackPlayed('missing', 1);
+
+    expect(mockPutStoredTrack).not.toHaveBeenCalled();
+  });
+});
+
+describe('getTrackCountsByFolder', () => {
+  it('counts per folder alongside all, favourites and unfiled', async () => {
+    mockGetAllStoredTracks.mockResolvedValue([
+      storedRow({ id: 'a', folderId: 'folder-1', isFavorite: true }),
+      storedRow({ id: 'b', folderId: 'folder-1', isFavorite: false }),
+      storedRow({ id: 'c', folderId: null, isFavorite: true }),
+    ]);
+
+    await expect(getTrackCountsByFolder()).resolves.toEqual({
+      byFolder: { 'folder-1': 2 },
+      all: 3,
+      favorites: 2,
+      unfiled: 1,
+    });
+  });
+
+  it('reports zeroes for an empty library', async () => {
+    mockGetAllStoredTracks.mockResolvedValue([]);
+
+    await expect(getTrackCountsByFolder()).resolves.toEqual({
+      byFolder: {},
+      all: 0,
+      favorites: 0,
+      unfiled: 0,
+    });
   });
 });

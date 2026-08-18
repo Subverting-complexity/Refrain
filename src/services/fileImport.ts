@@ -96,7 +96,8 @@ async function importFromFile(
       fileSizeBytes,
       importedAt: Date.now(),
       folderId: null,
-      sortOrder: 0,
+      isFavorite: false,
+      lastPlayedAt: null,
     };
 
     return { success: true, track };

@@ -16,6 +16,33 @@ jest.mock('expo-sqlite', () => ({
   })),
 }));
 
+/**
+ * Columns getDatabase() looks for while migrating. Reporting them all as
+ * present keeps the two schema migrations silent, so a test only ever sees
+ * the query it cares about.
+ */
+const MIGRATED_COLUMNS = [
+  { name: 'durationEstimated' },
+  { name: 'folderId' },
+  { name: 'sortOrder' },
+  { name: 'isFavorite' },
+  { name: 'lastPlayedAt' },
+  { name: 'pinOrder' },
+  { name: 'lastOpenedAt' },
+];
+
+/**
+ * Answers the migrations' PRAGMA reads with the migrated column set and
+ * every other query with the given rows. Both schema migrations run on every
+ * open, so a plain queue of return values would be consumed by them first.
+ */
+function pragmaAware(rows: unknown[]) {
+  return (sql: string) =>
+    typeof sql === 'string' && sql.startsWith('PRAGMA')
+      ? MIGRATED_COLUMNS
+      : rows;
+}
+
 const mockRandomUUID = jest.fn(() => 'profile-uuid');
 jest.mock('expo-crypto', () => ({
   randomUUID: () => mockRandomUUID(),
@@ -26,9 +53,7 @@ beforeEach(() => {
   jest.resetModules();
   mockRandomUUID.mockReturnValue('profile-uuid');
   mockGetFirstSync.mockReturnValue(undefined);
-  // getDatabase() runs the tracks-schema migration, which reads the table's
-  // columns via getAllSync. Report the column as present so no ALTER is issued.
-  mockGetAllSync.mockReturnValue([{ name: 'durationEstimated' }]);
+  mockGetAllSync.mockImplementation(pragmaAware([]));
 });
 
 describe('markerStore', () => {
@@ -128,11 +153,8 @@ describe('markerStore', () => {
 
   describe('listProfiles', () => {
     it('maps rows to profiles ordered by createdAt then id', () => {
-      // First getAllSync call is the schema migration PRAGMA; the second is
-      // the profiles query.
-      mockGetAllSync
-        .mockReturnValueOnce([{ name: 'durationEstimated' }])
-        .mockReturnValueOnce([
+      mockGetAllSync.mockImplementation(
+        pragmaAware([
           {
             id: 'p1',
             trackId: 'track-1',
@@ -151,7 +173,8 @@ describe('markerStore', () => {
             loopEnabled: 0,
             createdAt: 20,
           },
-        ]);
+        ]),
+      );
       const { listProfiles } = require('../markerStore');
 
       expect(listProfiles('track-1')).toEqual([
@@ -181,9 +204,7 @@ describe('markerStore', () => {
     });
 
     it('returns an empty list when a track has no profiles', () => {
-      mockGetAllSync
-        .mockReturnValueOnce([{ name: 'durationEstimated' }])
-        .mockReturnValueOnce([]);
+      mockGetAllSync.mockImplementation(pragmaAware([]));
       const { listProfiles } = require('../markerStore');
 
       expect(listProfiles('track-1')).toEqual([]);

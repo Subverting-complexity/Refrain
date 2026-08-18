@@ -10,15 +10,47 @@ export interface Track {
   fileSizeBytes: number;
   importedAt: number;
   folderId: string | null;
-  sortOrder: number;
+  /** Whether the user has starred this track. */
+  isFavorite: boolean;
+  /** Epoch milliseconds of the last time playback started, null if never. */
+  lastPlayedAt: number | null;
 }
 
 export interface Folder {
   id: string;
   name: string;
-  parentId: string | null;
   createdAt: number;
-  sortOrder: number;
+  /**
+   * Position within the pinned block, or null when the folder is not pinned.
+   * Any non-null value means pinned; the value orders pinned folders against
+   * each other.
+   */
+  pinOrder: number | null;
+  /** Epoch milliseconds of the last time the folder was opened. */
+  lastOpenedAt: number | null;
+}
+
+/**
+ * Which slice of the library `loadTracks` should return. A discriminated
+ * union rather than an optional id, so the folder scope cannot be asked for
+ * without saying which folder.
+ */
+export type LoadTracksOptions =
+  | { scope: 'all' }
+  | { scope: 'favorites' }
+  | { scope: 'unfiled' }
+  | { scope: 'folder'; folderId: string };
+
+/**
+ * Track tallies the library root needs in one pass: per folder, plus the
+ * three views that are not folders (every track, starred tracks, and tracks
+ * that sit in no folder).
+ */
+export interface TrackCounts {
+  byFolder: Record<string, number>;
+  all: number;
+  favorites: number;
+  unfiled: number;
 }
 
 export type SortOption =
@@ -29,8 +61,7 @@ export type SortOption =
   | 'duration-asc'
   | 'duration-desc'
   | 'size-asc'
-  | 'size-desc'
-  | 'manual';
+  | 'size-desc';
 
 export interface ImportResult {
   success: true;
