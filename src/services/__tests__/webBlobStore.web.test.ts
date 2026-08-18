@@ -186,3 +186,85 @@ describe('revokeObjectUrl', () => {
     expect(revoked).toEqual([]);
   });
 });
+
+describe('opening the audio store', () => {
+  it('opens again after a failed open rather than replaying the rejection', async () => {
+    const store = load();
+
+    // The reachable case: in private browsing, or where storage permission
+    // is denied, the open fails. Caching that rejection would fail every
+    // audio load for the rest of the page session with no way to retry, so
+    // a track that imported fine could never be played again.
+    const openSpy = jest.spyOn(indexedDB, 'open').mockImplementationOnce(() => {
+      throw new Error('storage is not available');
+    });
+
+    await expect(store.getBlob('id-1')).rejects.toThrow(
+      'storage is not available',
+    );
+    openSpy.mockRestore();
+
+    await expect(store.getBlob('id-1')).resolves.toBeNull();
+  });
+
+  it('rejects with an explanation when an upgrade is blocked', async () => {
+    const store = load();
+
+    // This store is still at version 1, so `blocked` cannot be provoked
+    // through a genuine upgrade — it becomes reachable the first time the
+    // schema changes. Firing the event directly covers the wiring now, so
+    // that bump does not ship a version where callers wait on a promise
+    // that never settles.
+    const realOpen = indexedDB.open.bind(indexedDB);
+    const openSpy = jest
+      .spyOn(indexedDB, 'open')
+      .mockImplementationOnce((name: string, version?: number) => {
+        const request = realOpen(name, version);
+        queueMicrotask(() => {
+          request.onblocked?.(new Event('blocked') as never);
+        });
+        return request;
+      });
+
+    try {
+      await expect(store.getBlob('id-1')).rejects.toThrow(
+        /open in another tab/,
+      );
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it('closes the connection a blocked open left behind', async () => {
+    const store = load();
+
+    // Rejecting does not cancel the open request. It goes on to succeed and
+    // hands back a connection nothing is waiting for; left open it would sit
+    // there for the rest of the page session, one more for every retry.
+    const realOpen = indexedDB.open.bind(indexedDB);
+    let opened: IDBDatabase | null = null;
+    const openSpy = jest
+      .spyOn(indexedDB, 'open')
+      .mockImplementationOnce((name: string, version?: number) => {
+        const request = realOpen(name, version);
+        request.addEventListener('success', () => {
+          opened = request.result;
+        });
+        queueMicrotask(() => {
+          request.onblocked?.(new Event('blocked') as never);
+        });
+        return request;
+      });
+
+    await expect(store.getBlob('id-1')).rejects.toThrow(/open in another tab/);
+    openSpy.mockRestore();
+
+    // Let the late success land, then check it was not left open.
+    for (let tick = 0; tick < 50 && opened === null; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(opened).not.toBeNull();
+    // A closed fake-indexeddb connection refuses to start a transaction.
+    expect(() => opened!.transaction('blobs', 'readonly')).toThrow();
+  });
+});

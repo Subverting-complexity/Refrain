@@ -143,10 +143,52 @@ function migrateToV5(upgrade: IDBTransaction): void {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+/**
+ * Gives a connection the two handlers it needs to survive the rest of the
+ * page session honestly, before it is ever handed to a caller.
+ *
+ * `versionchange` fires when another tab opens this database at a higher
+ * version. A tab that holds the old version open is exactly what makes the
+ * other tab's upgrade block — the condition this module already refuses to
+ * hang on. Without this handler the module inflicts on other tabs the fault
+ * it defends itself from, so close here and let them proceed.
+ *
+ * `close` fires when the browser force-closes the connection out from under
+ * us: storage cleared, or eviction under memory pressure. The cached promise
+ * then holds a dead handle and every later transaction throws
+ * `InvalidStateError` for the rest of the session. The open path already
+ * refuses to cache a connection it could not make good; the same reasoning
+ * applies after a successful open, so drop the cache and let the next call
+ * reopen.
+ *
+ * Both clear the cache only when it still refers to this connection, so a
+ * handler firing late can never discard a newer one.
+ */
+function attachLifecycleHandlers(
+  db: IDBDatabase,
+  box: { promise?: Promise<IDBDatabase> },
+): void {
+  const clearIfCurrent = () => {
+    if (dbPromise === box.promise) dbPromise = null;
+  };
+  db.onversionchange = () => {
+    db.close();
+    clearIfCurrent();
+  };
+  db.onclose = () => {
+    clearIfCurrent();
+  };
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+  // The promise is held in a box so the lifecycle handlers can compare the
+  // cache against their own connection without a self-referential `const`.
+  // They only ever run after this assignment completes.
+  const box: { promise?: Promise<IDBDatabase> } = {};
+
+  box.promise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = request.result;
@@ -196,7 +238,9 @@ function openDb(): Promise<IDBDatabase> {
         return;
       }
       settled = true;
-      resolve(request.result);
+      const opened = request.result;
+      attachLifecycleHandlers(opened, box);
+      resolve(opened);
     };
     request.onerror = () => {
       settled = true;
@@ -215,12 +259,13 @@ function openDb(): Promise<IDBDatabase> {
       );
     };
   });
+  dbPromise = box.promise;
 
   // A failed open must not be cached: private browsing, a denied storage
   // permission, or a transient error would otherwise reject every later
   // call for the rest of the page session with no way to try again.
   return dbPromise.catch((error: unknown) => {
-    dbPromise = null;
+    if (dbPromise === box.promise) dbPromise = null;
     throw error;
   });
 }
