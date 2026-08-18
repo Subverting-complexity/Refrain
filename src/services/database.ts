@@ -63,7 +63,15 @@ export function getDatabase(): SQLite.SQLiteDatabase {
       migrateTracksSchema(opened);
       migrateFoldersSchema(opened);
     } catch (error) {
-      opened.closeSync();
+      // Close the handle, but never let the close replace the error that
+      // made it necessary. A corrupt database is exactly the case that both
+      // fails the migration and fails to close cleanly, and the migration
+      // error is the one that says what is wrong.
+      try {
+        opened.closeSync();
+      } catch {
+        // Deliberately ignored — see above.
+      }
       throw error;
     }
     db = opened;

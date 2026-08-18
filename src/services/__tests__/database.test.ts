@@ -206,6 +206,21 @@ describe('getDatabase', () => {
     expect(mockOpenDatabaseSync).toHaveBeenCalledTimes(2);
   });
 
+  it('raises the migration error even when closing the handle also throws', () => {
+    mockGetAllSync.mockImplementation(() => {
+      throw new Error('disk I/O error');
+    });
+    // A database corrupt enough to fail the migration is exactly the one
+    // likely to fail the close that follows. The close error says nothing
+    // about what went wrong, so it must not replace the migration error.
+    mockCloseSync.mockImplementationOnce(() => {
+      throw new Error('unable to close due to unfinalized statements');
+    });
+
+    expect(() => getDatabase()).toThrow('disk I/O error');
+    expect(mockCloseSync).toHaveBeenCalledTimes(1);
+  });
+
   it('does not flatten again once the marker row is present', () => {
     getDatabase();
 
