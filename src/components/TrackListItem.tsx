@@ -10,18 +10,14 @@ import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
-import { TrackRenameDialog } from './TrackRenameDialog';
 import { Track } from '../types';
 
 interface TrackListItemProps {
   track: Track;
   onPress?: (track: Track) => void;
-  /**
-   * Rename the track to `filename`. Called only with a name that differs from
-   * the current one and still carries the original extension.
-   */
-  onRename?: (id: string, filename: string) => void;
   onDelete?: (id: string) => void;
+  /** Toggle the track's starred state. Wired to the left swipe. */
+  onToggleFavorite?: (track: Track) => void;
   onLongPress?: (track: Track) => void;
   style?: ViewStyle;
 }
@@ -32,11 +28,21 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * One track in the library list.
+ *
+ * Each swipe direction carries exactly one action, so both targets are
+ * full-height and full-width. The previous two-button reveal made every
+ * target narrow and put a mis-tap next to Delete. Rename is not among them:
+ * it is rare, and it does not deserve a prime gesture slot — it lives in the
+ * long-press sheet, which is also the only place the rename dialog is
+ * mounted, so there is one rename path rather than two.
+ */
 export function TrackListItem({
   track,
   onPress,
-  onRename,
   onDelete,
+  onToggleFavorite,
   onLongPress,
   style,
 }: TrackListItemProps) {
@@ -45,7 +51,6 @@ export function TrackListItem({
   // Delete confirmation uses the app's own dialog rather than Alert.alert:
   // Alert is a no-op on web, which silently made tracks undeletable there.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [renaming, setRenaming] = useState(false);
 
   function confirmDelete() {
     setConfirmingDelete(true);
@@ -70,91 +75,79 @@ export function TrackListItem({
     confirmDelete();
   }
 
-  function startRename() {
-    setRenaming(true);
-  }
-
-  function handleCancelRename() {
-    setRenaming(false);
+  function handleToggleFavorite() {
     swipeableRef.current?.close();
-  }
-
-  function handleSaveRename(filename: string) {
-    setRenaming(false);
-    swipeableRef.current?.close();
-    onRename?.(track.id, filename);
+    onToggleFavorite?.(track);
   }
 
   // Built from the actions actually wired up, so the hint never promises a
   // gesture the row does not support.
   function buildHint(): string | undefined {
-    const swipeTargets = [onRename && 'rename', onDelete && 'delete'].filter(
-      Boolean,
-    );
     const parts: string[] = [];
     if (onPress) parts.push('Tap to play');
-    if (swipeTargets.length) {
-      parts.push(`swipe left to ${swipeTargets.join(' or ')}`);
+    if (onToggleFavorite) {
+      parts.push(
+        `swipe left to ${track.isFavorite ? 'unfavourite' : 'favourite'}`,
+      );
     }
-    if (onDelete) parts.push('long press to delete');
+    if (onDelete) parts.push('swipe right to delete');
+    if (onLongPress) parts.push('long press for more');
+    else if (onDelete) parts.push('long press to delete');
     if (!parts.length) return undefined;
     const hint = parts.join(', ');
     return hint.charAt(0).toUpperCase() + hint.slice(1);
   }
 
+  function renderLeftActions() {
+    return (
+      <View style={styles.swipeActions}>
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel={`${track.isFavorite ? 'Unfavourite' : 'Favourite'} ${track.filename}`}
+          onPress={handleToggleFavorite}
+          style={[styles.swipeAction, { backgroundColor: theme.colors.accent }]}
+        >
+          <Ionicons
+            name={track.isFavorite ? 'star' : 'star-outline'}
+            size={20}
+            color={theme.colors.accentText}
+          />
+          <Text
+            style={[
+              theme.typography.caption,
+              { color: theme.colors.accentText },
+            ]}
+          >
+            {track.isFavorite ? 'Unfavourite' : 'Favourite'}
+          </Text>
+        </AccessiblePressable>
+      </View>
+    );
+  }
+
   function renderRightActions() {
     return (
       <View style={styles.swipeActions}>
-        {onRename ? (
-          <AccessiblePressable
-            accessibilityRole="button"
-            accessibilityLabel={`Rename ${track.filename}`}
-            onPress={startRename}
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${track.filename}`}
+          onPress={confirmDelete}
+          style={[styles.swipeAction, { backgroundColor: theme.colors.error }]}
+        >
+          <Ionicons
+            name="trash-outline"
+            size={20}
+            color={theme.colors.errorText}
+          />
+          <Text
             style={[
-              styles.swipeAction,
-              { backgroundColor: theme.colors.accent },
+              theme.typography.caption,
+              { color: theme.colors.errorText },
             ]}
           >
-            <Ionicons
-              name="pencil-outline"
-              size={20}
-              color={theme.colors.accentText}
-            />
-            <Text
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.accentText },
-              ]}
-            >
-              Rename
-            </Text>
-          </AccessiblePressable>
-        ) : null}
-        {onDelete ? (
-          <AccessiblePressable
-            accessibilityRole="button"
-            accessibilityLabel={`Delete ${track.filename}`}
-            onPress={confirmDelete}
-            style={[
-              styles.swipeAction,
-              { backgroundColor: theme.colors.error },
-            ]}
-          >
-            <Ionicons
-              name="trash-outline"
-              size={20}
-              color={theme.colors.errorText}
-            />
-            <Text
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.errorText },
-              ]}
-            >
-              Delete
-            </Text>
-          </AccessiblePressable>
-        ) : null}
+            Delete
+          </Text>
+        </AccessiblePressable>
       </View>
     );
   }
@@ -163,16 +156,16 @@ export function TrackListItem({
     <>
       <ReanimatedSwipeable
         ref={swipeableRef}
-        renderRightActions={
-          onRename || onDelete ? renderRightActions : undefined
-        }
+        renderLeftActions={onToggleFavorite ? renderLeftActions : undefined}
+        renderRightActions={onDelete ? renderRightActions : undefined}
         containerStyle={style}
         friction={2}
+        leftThreshold={40}
         rightThreshold={40}
       >
         <AccessiblePressable
           accessibilityRole="button"
-          accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}`}
+          accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}${track.isFavorite ? ', favourite' : ''}`}
           accessibilityHint={buildHint()}
           onLongPress={handleLongPress}
           onPress={() => onPress?.(track)}
@@ -210,18 +203,21 @@ export function TrackListItem({
               · {formatFileSize(track.fileSizeBytes)}
             </Text>
           </View>
+          {/* Starred state is visible without swiping, so the list answers
+              "which of these are favourites" at a glance. Decorative: the
+              row's own label already announces it. */}
+          {track.isFavorite ? (
+            <Ionicons
+              name="star"
+              size={16}
+              color={theme.colors.accent}
+              style={styles.star}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+          ) : null}
         </AccessiblePressable>
       </ReanimatedSwipeable>
-
-      {/* Mounted per open so the rename field re-seeds from the current
-          filename each time — see NameEntryDialog's remount contract. */}
-      {renaming ? (
-        <TrackRenameDialog
-          currentFilename={track.filename}
-          onSave={handleSaveRename}
-          onCancel={handleCancelRename}
-        />
-      ) : null}
 
       {confirmingDelete ? (
         <CenteredDialog
@@ -270,16 +266,21 @@ const styles = StyleSheet.create({
   filename: {
     marginBottom: spacing.xs,
   },
+  star: {
+    marginLeft: spacing.sm,
+  },
   swipeActions: {
     flexDirection: 'row',
     alignSelf: 'stretch',
-    marginLeft: spacing.xs,
-    gap: spacing.xs,
+    marginHorizontal: spacing.xs,
   },
+  // One action per direction, so it takes the whole reveal rather than
+  // sharing it with a neighbour a mis-tap could reach.
   swipeAction: {
-    width: 80,
+    width: 96,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'stretch',
+    borderRadius: radii.sm,
   },
 });

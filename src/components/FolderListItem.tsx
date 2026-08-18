@@ -1,4 +1,4 @@
-import { ComponentProps, useRef, useState } from 'react';
+import { ComponentProps, useRef } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -7,8 +7,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
-import { CenteredDialog } from './CenteredDialog';
-import { DialogButton } from './DialogButton';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -39,6 +37,13 @@ export interface FolderListItemProps {
   onPress?: () => void;
   onDelete?: () => void;
   onRename?: () => void;
+  /**
+   * Opens the folder action sheet. Built-in rows do not pass it, which is
+   * what keeps them free of a long-press menu.
+   */
+  onLongPress?: () => void;
+  /** Shows the pin marker. Pinned rows sit above the MRU-ordered ones. */
+  pinned?: boolean;
   style?: ViewStyle;
 }
 
@@ -50,23 +55,19 @@ export function FolderListItem({
   onPress,
   onDelete,
   onRename,
+  onLongPress,
+  pinned = false,
   style,
 }: FolderListItemProps) {
   const { theme } = useTheme();
   const swipeableRef = useRef<SwipeableMethods>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  function confirmDelete() {
-    setConfirmingDelete(true);
-  }
-
-  function handleCancelDelete() {
-    setConfirmingDelete(false);
+  // The delete confirmation belongs to the screen, not to the row. It has to
+  // name where the tracks are going and how many there are, and the tally is
+  // the screen's — keeping one dialog there beats a second copy here that
+  // could only ask a vaguer question.
+  function requestDelete() {
     swipeableRef.current?.close();
-  }
-
-  function handleConfirmDelete() {
-    setConfirmingDelete(false);
     onDelete?.();
   }
 
@@ -97,7 +98,7 @@ export function FolderListItem({
           <AccessiblePressable
             accessibilityRole="button"
             accessibilityLabel={`Delete ${name}`}
-            onPress={confirmDelete}
+            onPress={requestDelete}
             style={[
               styles.swipeAction,
               { backgroundColor: theme.colors.error },
@@ -115,10 +116,19 @@ export function FolderListItem({
   }
 
   const subtitle = trackCount === 1 ? '1 track' : `${trackCount} tracks`;
-  const label =
-    kind === 'folder' ? `${name} folder, ${subtitle}` : `${name}, ${subtitle}`;
+  const label = [
+    kind === 'folder' ? `${name} folder` : name,
+    pinned ? 'pinned' : null,
+    subtitle,
+  ]
+    .filter(Boolean)
+    .join(', ');
   const hint =
-    kind === 'folder' ? 'Tap to open folder' : 'Tap to view these tracks';
+    kind === 'folder'
+      ? onLongPress
+        ? 'Tap to open folder, long press for more'
+        : 'Tap to open folder'
+      : 'Tap to view these tracks';
 
   return (
     <>
@@ -136,6 +146,7 @@ export function FolderListItem({
           accessibilityLabel={label}
           accessibilityHint={hint}
           onPress={() => onPress?.()}
+          onLongPress={onLongPress}
           style={[
             styles.container,
             {
@@ -166,6 +177,16 @@ export function FolderListItem({
             </Text>
             <Text style={theme.typography.caption}>{subtitle}</Text>
           </View>
+          {pinned ? (
+            <Ionicons
+              name="pin"
+              size={14}
+              color={theme.colors.accent}
+              style={styles.pin}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+          ) : null}
           <Ionicons
             name="chevron-forward"
             size={18}
@@ -173,27 +194,6 @@ export function FolderListItem({
           />
         </AccessiblePressable>
       </ReanimatedSwipeable>
-
-      {confirmingDelete ? (
-        <CenteredDialog
-          title="Delete folder?"
-          message={`Remove "${name}"? Tracks inside will be moved out, not deleted.`}
-          onDismiss={handleCancelDelete}
-        >
-          <DialogButton
-            label="Delete"
-            accessibilityLabel={`Confirm delete ${name}`}
-            variant="danger"
-            onPress={handleConfirmDelete}
-          />
-          <DialogButton
-            label="Cancel"
-            accessibilityLabel="Cancel delete"
-            variant="default"
-            onPress={handleCancelDelete}
-          />
-        </CenteredDialog>
-      ) : null}
     </>
   );
 }
@@ -220,6 +220,9 @@ const styles = StyleSheet.create({
   },
   name: {
     marginBottom: spacing.xs,
+  },
+  pin: {
+    marginRight: spacing.xs,
   },
   swipeActions: {
     flexDirection: 'row',

@@ -12,7 +12,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AccessiblePressable } from '@/src/components/AccessiblePressable';
+import { CenteredDialog } from '@/src/components/CenteredDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
+import { DialogButton } from '@/src/components/DialogButton';
+import { FolderActionsSheet } from '@/src/components/FolderActionsSheet';
 import { FolderListItem } from '@/src/components/FolderListItem';
 import { ImportButton } from '@/src/components/ImportButton';
 import { NameEntryDialog } from '@/src/components/NameEntryDialog';
@@ -27,6 +30,7 @@ import {
   insertFolder,
   loadFolders,
   renameFolder as renameFolderStore,
+  reorderPinnedFolders,
 } from '@/src/services/folderStore';
 import { getTrackCountsByFolder } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
@@ -67,6 +71,14 @@ const EMPTY_COUNTS: TrackCounts = {
   unfiled: 0,
 };
 
+/**
+ * Past this many pinned folders the pinned block has effectively become the
+ * whole list and most-recently-used has nothing left to order. It is a hint,
+ * not a limit: pinning a ninth folder still works, because a reader who
+ * wants nine has a reason and being refused would be worse than being told.
+ */
+const PIN_SOFT_CAP = 8;
+
 export default function LibraryScreen() {
   const { theme } = useTheme();
   const router = useRouter();
@@ -82,6 +94,8 @@ export default function LibraryScreen() {
     id: string;
     name: string;
   } | null>(null);
+  const [actionsFolder, setActionsFolder] = useState<Folder | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<Folder | null>(null);
 
   // Retires reads that are still in flight. A load started before an edit
   // holds a snapshot that predates it, so letting it land would silently
@@ -238,6 +252,76 @@ export default function LibraryScreen() {
     [showToast, invalidateLoads],
   );
 
+  // `loadFolders` already returns pinned folders first, in `pinOrder`, so the
+  // pinned ids in list order are just the leading run of pinned rows.
+  const pinnedIds = useMemo(
+    () => folders.filter((f) => f.pinOrder !== null).map((f) => f.id),
+    [folders],
+  );
+
+  /**
+   * Writes a new pinned block and reads the list back.
+   *
+   * Every pin, unpin and move goes through `reorderPinnedFolders`, which
+   * rewrites the whole block in one pass: each listed id takes its index as
+   * its `pinOrder` and everything unlisted is unpinned. Per-row writes would
+   * leave a partial failure showing two folders claiming the same slot.
+   */
+  const writePinnedOrder = useCallback(
+    async (orderedIds: string[], failureMessage: string) => {
+      try {
+        await reorderPinnedFolders(orderedIds);
+      } catch {
+        showToast(failureMessage, 'error');
+        return false;
+      }
+      await reloadData(false, 'Failed to load library');
+      return true;
+    },
+    [showToast, reloadData],
+  );
+
+  const handleTogglePin = useCallback(
+    async (folder: Folder) => {
+      const wasPinned = folder.pinOrder !== null;
+      // Pinning appends to the bottom. Inserting anywhere else would displace
+      // folders the reader has already put in a deliberate order.
+      const nextIds = wasPinned
+        ? pinnedIds.filter((id) => id !== folder.id)
+        : [...pinnedIds, folder.id];
+
+      const ok = await writePinnedOrder(
+        nextIds,
+        wasPinned ? 'Failed to unpin folder' : 'Failed to pin folder',
+      );
+      if (!ok) return;
+
+      if (!wasPinned && nextIds.length > PIN_SOFT_CAP) {
+        // The pin went through, so this reports success and carries the
+        // hint. Refusing the ninth pin would be worse than mentioning it.
+        showToast(
+          `${nextIds.length} folders pinned — a long pinned block leaves little for recent order to do`,
+          'success',
+        );
+      } else {
+        showToast(wasPinned ? 'Folder unpinned' : 'Folder pinned', 'success');
+      }
+    },
+    [pinnedIds, writePinnedOrder, showToast],
+  );
+
+  const handleMovePinned = useCallback(
+    async (folder: Folder, delta: -1 | 1) => {
+      const from = pinnedIds.indexOf(folder.id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= pinnedIds.length) return;
+      const nextIds = [...pinnedIds];
+      [nextIds[from], nextIds[to]] = [nextIds[to], nextIds[from]];
+      await writePinnedOrder(nextIds, 'Failed to reorder folders');
+    },
+    [pinnedIds, writePinnedOrder],
+  );
+
   const handleDeleteFolder = useCallback(
     async (id: string) => {
       try {
@@ -289,16 +373,18 @@ export default function LibraryScreen() {
         <FolderListItem
           name={item.folder.name}
           trackCount={item.trackCount}
+          pinned={item.folder.pinOrder !== null}
           onPress={() => openFolder(item.folder)}
-          onDelete={() => void handleDeleteFolder(item.folder.id)}
+          onDelete={() => setDeletingFolder(item.folder)}
           onRename={() =>
             setRenamingFolder({ id: item.folder.id, name: item.folder.name })
           }
+          onLongPress={() => setActionsFolder(item.folder)}
           style={styles.listItem}
         />
       );
     },
-    [openBuiltin, openFolder, handleDeleteFolder],
+    [openBuiltin, openFolder],
   );
 
   const keyExtractor = useCallback(
@@ -425,6 +511,64 @@ export default function LibraryScreen() {
           }}
           onCancel={() => setRenamingFolder(null)}
         />
+      ) : null}
+
+      {actionsFolder ? (
+        <FolderActionsSheet
+          name={actionsFolder.name}
+          pinned={actionsFolder.pinOrder !== null}
+          canMoveUp={pinnedIds.indexOf(actionsFolder.id) > 0}
+          canMoveDown={
+            pinnedIds.indexOf(actionsFolder.id) >= 0 &&
+            pinnedIds.indexOf(actionsFolder.id) < pinnedIds.length - 1
+          }
+          onTogglePin={() => void handleTogglePin(actionsFolder)}
+          onMoveUp={() => void handleMovePinned(actionsFolder, -1)}
+          onMoveDown={() => void handleMovePinned(actionsFolder, 1)}
+          onRename={() =>
+            setRenamingFolder({
+              id: actionsFolder.id,
+              name: actionsFolder.name,
+            })
+          }
+          onDelete={() => setDeletingFolder(actionsFolder)}
+          onDismiss={() => setActionsFolder(null)}
+        />
+      ) : null}
+
+      {deletingFolder ? (
+        <CenteredDialog
+          title={`Delete ${deletingFolder.name}?`}
+          // Naming the destination and the count is the whole point: the
+          // question a reader needs answered before deleting a folder is
+          // what happens to what is inside it. The audio files themselves
+          // are never touched — only `deleteTrack` removes those.
+          message={
+            (counts.byFolder[deletingFolder.id] ?? 0) === 0
+              ? 'This folder is empty.'
+              : `Its ${counts.byFolder[deletingFolder.id]} ${
+                  counts.byFolder[deletingFolder.id] === 1 ? 'track' : 'tracks'
+                } move to Unfiled.`
+          }
+          onDismiss={() => setDeletingFolder(null)}
+        >
+          <DialogButton
+            label="Delete"
+            accessibilityLabel={`Confirm delete ${deletingFolder.name}`}
+            variant="danger"
+            onPress={() => {
+              const target = deletingFolder;
+              setDeletingFolder(null);
+              void handleDeleteFolder(target.id);
+            }}
+          />
+          <DialogButton
+            label="Cancel"
+            accessibilityLabel="Cancel delete"
+            variant="default"
+            onPress={() => setDeletingFolder(null)}
+          />
+        </CenteredDialog>
       ) : null}
 
       <ToastHost toast={toast} onDismiss={hideToast} />
