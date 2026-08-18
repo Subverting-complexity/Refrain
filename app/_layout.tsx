@@ -30,6 +30,14 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
+          name="tracks"
+          options={{
+            // The title is set by the screen itself, from the library entry
+            // the reader opened.
+            presentation: 'card',
+          }}
+        />
+        <Stack.Screen
           name="player"
           options={{
             title: 'Now Playing',
