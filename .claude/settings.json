@@ -1,0 +1,19 @@
+{
+  "enabledMcpjsonServers": ["fallow"],
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "graphify . --update --no-viz"
+          },
+          {
+            "type": "command",
+            "command": "git status --porcelain | grep -q . && echo '⚠ Uncommitted changes — commit your work before ending the session (see CLAUDE.md).' || true"
+          }
+        ]
+      }
+    ]
+  }
+}

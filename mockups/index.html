@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refrain — App Mockups</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #1c1c2a;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+
+  h1.page-title { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  p.page-subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+
+  /* Top nav */
+  .nav-tabs {
+    display: flex; gap: 8px; margin-bottom: 36px;
+    background: #2a2a3e; padding: 5px; border-radius: 12px;
+  }
+  .nav-tab {
+    padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    color: #888; cursor: pointer; border: none; background: none; transition: all 0.2s;
+  }
+  .nav-tab.active { background: #6cc9a1; color: #fff; }
+  .nav-tab:hover:not(.active) { color: #aaa; }
+
+  /* Layout */
+  .screen-section { display: none; }
+  .screen-section.visible { display: flex; flex-wrap: wrap; gap: 48px; justify-content: center; }
+  .mockup-container { display: flex; flex-direction: column; align-items: center; }
+  .screen-label {
+    font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 14px;
+  }
+
+  /* ===== PHONE FRAME ===== */
+  .phone {
+    width: 375px; height: 812px; border-radius: 44px; overflow: hidden;
+    position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  }
+  .phone.dark {
+    background: #111d1f;
+    border: 3px solid #243d3f;
+  }
+  .phone.light {
+    background: #f2faf7;
+    border: 3px solid #cce8df;
+  }
+
+  .dynamic-island {
+    width: 120px; height: 34px; background: #000; border-radius: 20px;
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+  }
+  .phone.light .dynamic-island { background: #1a1a1a; }
+
+  .status-bar {
+    height: 54px; display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 28px 8px; font-size: 14px; font-weight: 600; position: relative; z-index: 5;
+  }
+
+  /* ===== DARK THEME TOKENS — cool mint/teal ===== */
+  .phone.dark {
+    --bg: #111d1f;
+    --surface: #182a2c;
+    --card: #1e3436;
+    --card-hover: #254042;
+    --accent: #7edbb8;
+    --accent-soft: #6cc9a1;
+    --accent-muted: #4a9e82;
+    --accent-bg: rgba(126, 219, 184, 0.1);
+    --accent-bg-strong: rgba(126, 219, 184, 0.16);
+    --text1: #e0f3ec;
+    --text2: #a3d4c0;
+    --text3: #689e8c;
+    --border: #264042;
+    --wf-bar: #2e5a54;
+    --wf-played: #7edbb8;
+    --marker-a: #f0c48a;
+    --marker-b: #e89a8a;
+    --fab-shadow: rgba(108, 201, 161, 0.3);
+    --overlay: rgba(14, 24, 26, 0.92);
+    --badge-bg: #162c2e;
+  }
+
+  /* ===== LIGHT THEME TOKENS — airy mint/seafoam ===== */
+  .phone.light {
+    --bg: #f2faf7;
+    --surface: #e5f3ee;
+    --card: #ffffff;
+    --card-hover: #f5fcf9;
+    --accent: #3daa80;
+    --accent-soft: #6cc9a1;
+    --accent-muted: #8edaba;
+    --accent-bg: rgba(61, 170, 128, 0.07);
+    --accent-bg-strong: rgba(61, 170, 128, 0.12);
+    --text1: #14302a;
+    --text2: #3d7568;
+    --text3: #88b5a8;
+    --border: #cce8df;
+    --wf-bar: #c2e0d6;
+    --wf-played: #3daa80;
+    --marker-a: #d4943a;
+    --marker-b: #c46050;
+    --fab-shadow: rgba(61, 170, 128, 0.22);
+    --overlay: rgba(242, 250, 247, 0.94);
+    --badge-bg: #e5f3ee;
+  }
+
+  .status-bar .time { color: var(--text1); }
+  .status-bar .icons { display: flex; gap: 6px; color: var(--text1); font-size: 12px; }
+
+  /* ===== SHARED COMPONENT STYLES ===== */
+
+  /* Library */
+  .library-screen { display: flex; flex-direction: column; height: calc(100% - 54px); }
+  .library-header { padding: 16px 20px 10px; }
+  .library-header h2 { font-size: 30px; font-weight: 700; color: var(--text1); }
+  .library-header .subtitle { font-size: 13px; color: var(--text3); margin-top: 2px; }
+
+  .search-bar {
+    margin: 6px 20px 14px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 11px 16px; display: flex; align-items: center; gap: 10px;
+  }
+  .search-bar .search-icon, .search-bar .search-text { color: var(--text3); font-size: 14px; }
+
+  .track-list { flex: 1; overflow-y: auto; padding: 0 20px; }
+
+  .track-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  }
+  .track-card:hover { background: var(--card-hover); }
+
+  .track-icon {
+    width: 44px; height: 44px; background: var(--accent-bg-strong); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+    color: var(--accent); flex-shrink: 0;
+  }
+
+  .track-info { flex: 1; min-width: 0; }
+  .track-name {
+    font-size: 14px; font-weight: 600; color: var(--text1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .track-meta { font-size: 11px; color: var(--text3); margin-top: 3px; display: flex; gap: 8px; align-items: center; }
+
+  .format-badge {
+    background: var(--badge-bg); color: var(--accent); font-size: 9px; font-weight: 700;
+    padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); letter-spacing: 0.3px;
+  }
+
+  .track-chevron { color: var(--text3); font-size: 18px; }
+
+  .fab {
+    position: absolute; bottom: 100px; right: 24px; width: 54px; height: 54px;
+    background: var(--accent-soft); border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #fff; font-weight: 300;
+    box-shadow: 0 4px 20px var(--fab-shadow);
+  }
+
+  .tab-bar {
+    height: 78px; background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-around; padding-top: 10px;
+  }
+  .tab-item { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10px; color: var(--text3); }
+  .tab-item.active { color: var(--accent); }
+  .tab-item .tab-icon { font-size: 20px; }
+
+  /* Player */
+  .player-screen { display: flex; flex-direction: column; height: calc(100% - 54px); }
+  .player-nav { display: flex; align-items: center; padding: 10px 20px; }
+  .back-btn { color: var(--accent); font-size: 14px; font-weight: 500; }
+
+  .player-title-area { padding: 2px 20px 16px; }
+  .player-track-name { font-size: 20px; font-weight: 700; color: var(--text1); }
+  .player-track-meta {
+    font-size: 12px; color: var(--text3); margin-top: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Waveform */
+  .waveform-container { padding: 0 20px; margin: 6px 0 4px; position: relative; }
+  .waveform {
+    height: 110px; background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 10px; gap: 2px;
+    position: relative; overflow: hidden;
+  }
+  .waveform-bar { flex: 1; border-radius: 2px; min-width: 2px; }
+  .waveform-bar.played { background: var(--wf-played); }
+  .waveform-bar.unplayed { background: var(--wf-bar); }
+
+  .playhead {
+    position: absolute; width: 2px; height: 100%; background: var(--accent);
+    box-shadow: 0 0 8px var(--fab-shadow); z-index: 5;
+  }
+  .marker { position: absolute; top: 0; height: 100%; width: 2px; z-index: 4; }
+  .marker-a { background: var(--marker-a); left: 28%; }
+  .marker-b { background: var(--marker-b); left: 68%; }
+  .marker-a::after, .marker-b::after {
+    position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700;
+    padding: 1px 5px; border-radius: 4px; background: var(--card);
+  }
+  .marker-a::after { content: 'A'; color: var(--marker-a); border: 1px solid var(--marker-a); }
+  .marker-b::after { content: 'B'; color: var(--marker-b); border: 1px solid var(--marker-b); }
+
+  .loop-region {
+    position: absolute; top: 0; height: 100%; left: 28%; width: 40%;
+    background: var(--accent-bg); z-index: 3;
+  }
+
+  .time-labels {
+    display: flex; justify-content: space-between; padding: 5px 20px 0;
+    font-size: 11px; font-weight: 500; color: var(--text3); font-variant-numeric: tabular-nums;
+  }
+
+  /* A/B Controls */
+  .ab-controls { display: flex; gap: 8px; padding: 14px 20px; justify-content: center; }
+  .ab-btn {
+    padding: 9px 16px; border-radius: 10px; font-size: 12px; font-weight: 600; border: 1.5px solid;
+  }
+  .ab-btn.set-a { background: rgba(240, 196, 138, 0.1); border-color: var(--marker-a); color: var(--marker-a); }
+  .ab-btn.set-b { background: rgba(232, 154, 138, 0.1); border-color: var(--marker-b); color: var(--marker-b); }
+  .ab-btn.clear { background: var(--card); border-color: var(--border); color: var(--text3); }
+  .ab-btn.loop-active { background: var(--accent-bg-strong); border-color: var(--accent-soft); color: var(--accent); }
+
+  /* Lead-in */
+  .leadin-section { padding: 10px 20px; display: flex; align-items: center; gap: 10px; }
+  .leadin-label { font-size: 11px; color: var(--text3); font-weight: 600; }
+  .leadin-chips { display: flex; gap: 5px; }
+  .leadin-chip {
+    padding: 5px 10px; border-radius: 8px; font-size: 11px; font-weight: 600;
+    background: var(--card); border: 1px solid var(--border); color: var(--text2);
+  }
+  .leadin-chip.selected { background: var(--accent-bg-strong); border-color: var(--accent-soft); color: var(--accent); }
+  .leadin-mode { margin-left: auto; display: flex; gap: 5px; }
+  .mode-toggle {
+    padding: 5px 9px; border-radius: 8px; font-size: 10px; font-weight: 600;
+    background: var(--card); border: 1px solid var(--border); color: var(--text3);
+  }
+  .mode-toggle.active { background: var(--accent-bg-strong); border-color: var(--accent-soft); color: var(--accent); }
+
+  /* Volume */
+  .volume-row { display: flex; align-items: center; gap: 10px; padding: 4px 20px 6px; }
+  .volume-icon { color: var(--text3); font-size: 14px; }
+  .volume-slider { flex: 1; height: 4px; background: var(--border); border-radius: 2px; position: relative; }
+  .volume-fill { position: absolute; left: 0; top: 0; height: 100%; width: 75%; background: var(--accent-muted); border-radius: 2px; }
+  .volume-knob {
+    position: absolute; left: 75%; top: 50%; transform: translate(-50%, -50%);
+    width: 14px; height: 14px; background: var(--accent-soft); border-radius: 50%; border: 2px solid var(--bg);
+  }
+
+  /* Transport */
+  .transport {
+    display: flex; align-items: center; justify-content: center; gap: 28px;
+    padding: 16px 20px; margin-top: auto;
+  }
+  .transport-btn {
+    width: 46px; height: 46px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--border); color: var(--text1); font-size: 18px;
+  }
+  .transport-btn.play {
+    width: 68px; height: 68px; background: var(--accent-soft); border: none;
+    color: #fff; font-size: 26px; box-shadow: 0 4px 20px var(--fab-shadow);
+  }
+  .transport-btn.active { border-color: var(--accent-soft); color: var(--accent); }
+
+  /* Countdown overlay */
+  .countdown-overlay {
+    position: absolute; inset: 0; background: var(--overlay);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20;
+  }
+  .countdown-number {
+    font-size: 110px; font-weight: 700; color: var(--accent-soft); line-height: 1;
+    text-shadow: 0 0 50px var(--fab-shadow);
+  }
+  .countdown-label { font-size: 14px; color: var(--text3); margin-top: 14px; font-weight: 500; }
+  .countdown-skip {
+    margin-top: 36px; padding: 10px 22px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--border); color: var(--text2); font-size: 13px; font-weight: 500;
+  }
+
+  /* ===== EMPTY STATE ===== */
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 40px 20px; text-align: center;
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; color: var(--accent-muted); }
+  .empty-title { font-size: 18px; font-weight: 600; color: var(--text1); margin-bottom: 6px; }
+  .empty-desc { font-size: 13px; color: var(--text3); line-height: 1.5; max-width: 240px; }
+  .empty-btn {
+    margin-top: 20px; padding: 12px 28px; border-radius: 12px;
+    background: var(--accent-soft); color: #fff; font-size: 14px; font-weight: 600;
+    border: none; box-shadow: 0 4px 16px var(--fab-shadow);
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">Refrain</h1>
+<p class="page-subtitle">Audio Looper &mdash; Pastel Green &mdash; Dark &amp; Light</p>
+
+<div class="nav-tabs">
+  <button class="nav-tab active" onclick="showSection('library', this)">Library</button>
+  <button class="nav-tab" onclick="showSection('player', this)">Player</button>
+  <button class="nav-tab" onclick="showSection('countdown', this)">Countdown</button>
+  <button class="nav-tab" onclick="showSection('empty', this)">Empty State</button>
+</div>
+
+<!-- ===== LIBRARY ===== -->
+<div id="section-library" class="screen-section visible">
+  <!-- DARK -->
+  <div class="mockup-container">
+    <div class="screen-label">Dark Mode</div>
+    <div class="phone dark">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="library-screen">
+        <div class="library-header"><h2>Library</h2><div class="subtitle">7 tracks</div></div>
+        <div class="search-bar"><span class="search-icon">&#8981;</span><span class="search-text">Search tracks...</span></div>
+        <div class="track-list">
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Bach Cello Suite No. 1</div><div class="track-meta"><span>4:32</span><span class="format-badge">WAV</span><span>24.1 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Scales &mdash; A Minor Practice</div><div class="track-meta"><span>2:18</span><span class="format-badge">MP3</span><span>3.4 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Jazz Standards - Autumn Leaves</div><div class="track-meta"><span>5:47</span><span class="format-badge">AAC</span><span>8.2 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Guitar Riff - Verse Section</div><div class="track-meta"><span>0:48</span><span class="format-badge">WAV</span><span>8.9 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Chopin Nocturne Op. 9 No. 2</div><div class="track-meta"><span>4:55</span><span class="format-badge">MP3</span><span>7.1 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Drum Loop 120 BPM</div><div class="track-meta"><span>0:16</span><span class="format-badge">WAV</span><span>2.8 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Voice Memo - Melody Idea</div><div class="track-meta"><span>1:23</span><span class="format-badge">AAC</span><span>1.9 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+        </div>
+        <div class="fab">+</div>
+        <div class="tab-bar"><div class="tab-item active"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+  <!-- LIGHT -->
+  <div class="mockup-container">
+    <div class="screen-label">Light Mode</div>
+    <div class="phone light">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="library-screen">
+        <div class="library-header"><h2>Library</h2><div class="subtitle">7 tracks</div></div>
+        <div class="search-bar"><span class="search-icon">&#8981;</span><span class="search-text">Search tracks...</span></div>
+        <div class="track-list">
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Bach Cello Suite No. 1</div><div class="track-meta"><span>4:32</span><span class="format-badge">WAV</span><span>24.1 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Scales &mdash; A Minor Practice</div><div class="track-meta"><span>2:18</span><span class="format-badge">MP3</span><span>3.4 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Jazz Standards - Autumn Leaves</div><div class="track-meta"><span>5:47</span><span class="format-badge">AAC</span><span>8.2 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Guitar Riff - Verse Section</div><div class="track-meta"><span>0:48</span><span class="format-badge">WAV</span><span>8.9 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Chopin Nocturne Op. 9 No. 2</div><div class="track-meta"><span>4:55</span><span class="format-badge">MP3</span><span>7.1 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Drum Loop 120 BPM</div><div class="track-meta"><span>0:16</span><span class="format-badge">WAV</span><span>2.8 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+          <div class="track-card"><div class="track-icon">&#9835;</div><div class="track-info"><div class="track-name">Voice Memo - Melody Idea</div><div class="track-meta"><span>1:23</span><span class="format-badge">AAC</span><span>1.9 MB</span></div></div><span class="track-chevron">&#8250;</span></div>
+        </div>
+        <div class="fab">+</div>
+        <div class="tab-bar"><div class="tab-item active"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PLAYER ===== -->
+<div id="section-player" class="screen-section">
+  <!-- DARK -->
+  <div class="mockup-container">
+    <div class="screen-label">Dark Mode</div>
+    <div class="phone dark">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="player-screen">
+        <div class="player-nav"><span class="back-btn">&#8249; Library</span></div>
+        <div class="player-title-area">
+          <div class="player-track-name">Bach Cello Suite No. 1</div>
+          <div class="player-track-meta"><span class="format-badge">WAV</span><span>4:32</span><span>&middot;</span><span>24.1 MB</span></div>
+        </div>
+        <div class="waveform-container"><div class="waveform" id="wf-dark"><div class="loop-region"></div><div class="marker marker-a"></div><div class="marker marker-b"></div><div class="playhead" style="left:42%"></div></div></div>
+        <div class="time-labels"><span>1:54</span><span>4:32</span></div>
+        <div class="ab-controls">
+          <div class="ab-btn set-a">A 1:16</div><div class="ab-btn set-b">B 3:04</div>
+          <div class="ab-btn loop-active">&#8635; Loop</div><div class="ab-btn clear">&#10005; Clear</div>
+        </div>
+        <div class="leadin-section">
+          <span class="leadin-label">Lead-in</span>
+          <div class="leadin-chips"><span class="leadin-chip">Off</span><span class="leadin-chip">1s</span><span class="leadin-chip selected">3s</span><span class="leadin-chip">5s</span></div>
+          <div class="leadin-mode"><span class="mode-toggle">Silent</span><span class="mode-toggle active">&#9834; Click</span></div>
+        </div>
+        <div class="volume-row"><span class="volume-icon">&#9834;</span><div class="volume-slider"><div class="volume-fill"></div><div class="volume-knob"></div></div><span class="volume-icon">&#9835;</span></div>
+        <div class="transport">
+          <div class="transport-btn">&#9198;</div><div class="transport-btn">&#9664;</div>
+          <div class="transport-btn play">&#9646;&#9646;</div>
+          <div class="transport-btn">&#9654;</div><div class="transport-btn active">&#8635;</div>
+        </div>
+        <div class="tab-bar"><div class="tab-item"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+  <!-- LIGHT -->
+  <div class="mockup-container">
+    <div class="screen-label">Light Mode</div>
+    <div class="phone light">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="player-screen">
+        <div class="player-nav"><span class="back-btn">&#8249; Library</span></div>
+        <div class="player-title-area">
+          <div class="player-track-name">Bach Cello Suite No. 1</div>
+          <div class="player-track-meta"><span class="format-badge">WAV</span><span>4:32</span><span>&middot;</span><span>24.1 MB</span></div>
+        </div>
+        <div class="waveform-container"><div class="waveform" id="wf-light"><div class="loop-region"></div><div class="marker marker-a"></div><div class="marker marker-b"></div><div class="playhead" style="left:42%"></div></div></div>
+        <div class="time-labels"><span>1:54</span><span>4:32</span></div>
+        <div class="ab-controls">
+          <div class="ab-btn set-a">A 1:16</div><div class="ab-btn set-b">B 3:04</div>
+          <div class="ab-btn loop-active">&#8635; Loop</div><div class="ab-btn clear">&#10005; Clear</div>
+        </div>
+        <div class="leadin-section">
+          <span class="leadin-label">Lead-in</span>
+          <div class="leadin-chips"><span class="leadin-chip">Off</span><span class="leadin-chip">1s</span><span class="leadin-chip selected">3s</span><span class="leadin-chip">5s</span></div>
+          <div class="leadin-mode"><span class="mode-toggle">Silent</span><span class="mode-toggle active">&#9834; Click</span></div>
+        </div>
+        <div class="volume-row"><span class="volume-icon">&#9834;</span><div class="volume-slider"><div class="volume-fill"></div><div class="volume-knob"></div></div><span class="volume-icon">&#9835;</span></div>
+        <div class="transport">
+          <div class="transport-btn">&#9198;</div><div class="transport-btn">&#9664;</div>
+          <div class="transport-btn play">&#9646;&#9646;</div>
+          <div class="transport-btn">&#9654;</div><div class="transport-btn active">&#8635;</div>
+        </div>
+        <div class="tab-bar"><div class="tab-item"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== COUNTDOWN ===== -->
+<div id="section-countdown" class="screen-section">
+  <!-- DARK -->
+  <div class="mockup-container">
+    <div class="screen-label">Dark Mode</div>
+    <div class="phone dark">
+      <div class="dynamic-island"></div>
+      <div class="status-bar" style="z-index:30;position:relative"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="player-screen" style="position:relative">
+        <div class="player-nav"><span class="back-btn">&#8249; Library</span></div>
+        <div class="player-title-area"><div class="player-track-name">Bach Cello Suite No. 1</div><div class="player-track-meta"><span class="format-badge">WAV</span><span>4:32</span></div></div>
+        <div class="waveform-container"><div class="waveform" id="wf-cd-dark"></div></div>
+        <div class="countdown-overlay">
+          <div class="countdown-number">3</div>
+          <div class="countdown-label">Starting A/B loop in...</div>
+          <div class="countdown-skip">Tap to skip</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- LIGHT -->
+  <div class="mockup-container">
+    <div class="screen-label">Light Mode</div>
+    <div class="phone light">
+      <div class="dynamic-island"></div>
+      <div class="status-bar" style="z-index:30;position:relative"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="player-screen" style="position:relative">
+        <div class="player-nav"><span class="back-btn">&#8249; Library</span></div>
+        <div class="player-title-area"><div class="player-track-name">Bach Cello Suite No. 1</div><div class="player-track-meta"><span class="format-badge">WAV</span><span>4:32</span></div></div>
+        <div class="waveform-container"><div class="waveform" id="wf-cd-light"></div></div>
+        <div class="countdown-overlay">
+          <div class="countdown-number">3</div>
+          <div class="countdown-label">Starting A/B loop in...</div>
+          <div class="countdown-skip">Tap to skip</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== EMPTY STATE ===== -->
+<div id="section-empty" class="screen-section">
+  <!-- DARK -->
+  <div class="mockup-container">
+    <div class="screen-label">Dark Mode</div>
+    <div class="phone dark">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="library-screen">
+        <div class="library-header"><h2>Library</h2><div class="subtitle">0 tracks</div></div>
+        <div class="empty-state">
+          <div class="empty-icon">&#9835;</div>
+          <div class="empty-title">No tracks yet</div>
+          <div class="empty-desc">Import an audio file to start practicing loops and sections.</div>
+          <button class="empty-btn">+ Import Audio</button>
+        </div>
+        <div class="tab-bar"><div class="tab-item active"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+  <!-- LIGHT -->
+  <div class="mockup-container">
+    <div class="screen-label">Light Mode</div>
+    <div class="phone light">
+      <div class="dynamic-island"></div>
+      <div class="status-bar"><span class="time">9:41</span><span class="icons">&#9679;&#9679;&#9679;&#9679; &#9646;</span></div>
+      <div class="library-screen">
+        <div class="library-header"><h2>Library</h2><div class="subtitle">0 tracks</div></div>
+        <div class="empty-state">
+          <div class="empty-icon">&#9835;</div>
+          <div class="empty-title">No tracks yet</div>
+          <div class="empty-desc">Import an audio file to start practicing loops and sections.</div>
+          <button class="empty-btn">+ Import Audio</button>
+        </div>
+        <div class="tab-bar"><div class="tab-item active"><span class="tab-icon">&#9776;</span><span>Library</span></div><div class="tab-item"><span class="tab-icon">&#9881;</span><span>Settings</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function generateWaveform(id, playedPct) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const n = 80;
+    for (let i = 0; i < n; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'waveform-bar ' + (i/n*100 < playedPct ? 'played' : 'unplayed');
+      const h = 15 + Math.random() * 75;
+      const m = Math.sin(i/n * Math.PI) * 0.6 + 0.4;
+      bar.style.height = (h * m) + '%';
+      el.appendChild(bar);
+    }
+  }
+  generateWaveform('wf-dark', 42);
+  generateWaveform('wf-light', 42);
+  generateWaveform('wf-cd-dark', 0);
+  generateWaveform('wf-cd-light', 0);
+
+  function showSection(id, btn) {
+    document.querySelectorAll('.screen-section').forEach(s => s.classList.remove('visible'));
+    document.getElementById('section-' + id).classList.add('visible');
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+</script>
+</body>
+</html>
