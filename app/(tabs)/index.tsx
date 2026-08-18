@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { ComponentProps, useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -14,317 +14,206 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
 import { FolderListItem } from '@/src/components/FolderListItem';
-import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { NameEntryDialog } from '@/src/components/NameEntryDialog';
 import { SearchBar } from '@/src/components/SearchBar';
-import { SortPicker } from '@/src/components/SortPicker';
 import { ToastHost } from '@/src/components/ToastHost';
-import { TrackActionsSheet } from '@/src/components/TrackActionsSheet';
-import { TrackListItem } from '@/src/components/TrackListItem';
-import { TrackRenameDialog } from '@/src/components/TrackRenameDialog';
-import { useShareIntent } from '@/src/hooks/useShareIntent';
+import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
-import { pickAndImportFile } from '@/src/services/fileImport';
+import { useTrackImport } from '@/src/hooks/useTrackImport';
 import {
   deleteFolder,
   insertFolder,
   loadFolders,
-  markFolderOpened,
   renameFolder as renameFolderStore,
 } from '@/src/services/folderStore';
-import { getSetting, setSetting } from '@/src/services/settingsStore';
-import {
-  deleteTrack,
-  getTrackCountsByFolder,
-  insertTrack,
-  loadTracks,
-  renameTrack,
-  moveTrackToFolder,
-} from '@/src/services/trackStore';
+import { getTrackCountsByFolder } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
-import { Folder, SortOption, Track, TrackCounts } from '@/src/types';
-import { errorMessage } from '@/src/utils/errorMessage';
+import { Folder, TrackCounts } from '@/src/types';
 import { generateId } from '@/src/utils/generateId';
 
-type ListItem =
-  | { type: 'folder'; folder: Folder; trackCount: number }
-  | { type: 'track'; track: Track };
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
-function sortTracks(tracks: Track[], sort: SortOption): Track[] {
-  const sorted = [...tracks];
-  switch (sort) {
-    case 'name-asc':
-      sorted.sort((a, b) => a.filename.localeCompare(b.filename));
-      break;
-    case 'name-desc':
-      sorted.sort((a, b) => b.filename.localeCompare(a.filename));
-      break;
-    case 'date-desc':
-      sorted.sort((a, b) => b.importedAt - a.importedAt);
-      break;
-    case 'date-asc':
-      sorted.sort((a, b) => a.importedAt - b.importedAt);
-      break;
-    case 'duration-asc':
-      sorted.sort((a, b) => a.durationMs - b.durationMs);
-      break;
-    case 'duration-desc':
-      sorted.sort((a, b) => b.durationMs - a.durationMs);
-      break;
-    case 'size-asc':
-      sorted.sort((a, b) => a.fileSizeBytes - b.fileSizeBytes);
-      break;
-    case 'size-desc':
-      sorted.sort((a, b) => b.fileSizeBytes - a.fileSizeBytes);
-      break;
-  }
-  return sorted;
+/**
+ * The library root is a list of folders and nothing else — loose tracks never
+ * appear beside them. Above the reader's own folders sit three fixed entries
+ * that are queries rather than records: every track, the starred ones, and
+ * the ones filed nowhere. They keep a distinct glyph and a fixed position so
+ * they do not read as folders that could be renamed or reordered.
+ */
+type BuiltinKey = 'all' | 'favorites' | 'unfiled';
+
+interface BuiltinEntry {
+  key: BuiltinKey;
+  name: string;
+  icon: IoniconName;
 }
 
-const SORT_SETTING_KEY = 'librarySortOrder';
-const VALID_SORTS = new Set<SortOption>([
-  'name-asc',
-  'name-desc',
-  'date-asc',
-  'date-desc',
-  'duration-asc',
-  'duration-desc',
-  'size-asc',
-  'size-desc',
-]);
+const BUILTIN_ENTRIES: readonly BuiltinEntry[] = [
+  { key: 'all', name: 'All tracks', icon: 'albums' },
+  { key: 'favorites', name: 'Favourites', icon: 'star' },
+  { key: 'unfiled', name: 'Unfiled', icon: 'file-tray' },
+];
 
-function readSortSetting(): SortOption {
-  const raw = getSetting(SORT_SETTING_KEY);
-  if (raw && VALID_SORTS.has(raw as SortOption)) return raw as SortOption;
-  return 'date-desc';
-}
+type RootEntry =
+  | { type: 'builtin'; entry: BuiltinEntry; count: number }
+  | { type: 'folder'; folder: Folder; trackCount: number };
+
+const EMPTY_COUNTS: TrackCounts = {
+  byFolder: {},
+  all: 0,
+  favorites: 0,
+  unfiled: 0,
+};
 
 export default function LibraryScreen() {
   const { theme } = useTheme();
   const router = useRouter();
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const focused = useIsScreenFocused();
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<Folder[]>([]);
-  const [importing, setImporting] = useState(false);
+  const [counts, setCounts] = useState<TrackCounts>(EMPTY_COUNTS);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortOption, setSortOption] = useState<SortOption>(readSortSetting);
   const { toast, showToast, hideToast } = useToast();
 
-  // Dialog states
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
   const [renamingFolder, setRenamingFolder] = useState<{
     id: string;
     name: string;
   } | null>(null);
-  const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
-  const [movingTrack, setMovingTrack] = useState<Track | null>(null);
-  const [allFolders, setAllFolders] = useState<Folder[]>([]);
-  const [trackCounts, setTrackCounts] = useState<TrackCounts>({
-    byFolder: {},
-    all: 0,
-    favorites: 0,
-    unfiled: 0,
-  });
 
+  // Retires reads that are still in flight. A load started before an edit
+  // holds a snapshot that predates it, so letting it land would silently
+  // undo the edit the reader just made.
   const loadToken = useRef(0);
   const invalidateLoads = useCallback(() => {
     loadToken.current += 1;
     return loadToken.current;
   }, []);
 
+  /**
+   * Reads the folder list and the tallies together, and reports either
+   * outcome. The token guards both paths, not just the successful one: a read
+   * that fails after the reader has moved on must no more raise an error into
+   * whatever screen they are now looking at than a slow successful one may
+   * overwrite it.
+   */
   const reloadData = useCallback(
-    async (folderId: string | null) => {
+    async (announceSuccess: boolean, failureMessage: string) => {
       const token = invalidateLoads();
       try {
-        // Folders no longer nest, so the folder list belongs to the root
-        // of the library and nowhere else.
-        const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
-          folderId === null
-            ? loadTracks({ scope: 'unfiled' })
-            : loadTracks({ scope: 'folder', folderId }),
-          folderId === null ? loadFolders() : Promise.resolve([]),
+        const [loadedFolders, loadedCounts] = await Promise.all([
+          loadFolders(),
           getTrackCountsByFolder(),
         ]);
         if (loadToken.current !== token) return;
-        setTracks(loadedTracks);
         setFolders(loadedFolders);
-        setTrackCounts(loadedCounts);
+        setCounts(loadedCounts);
+        if (announceSuccess) {
+          AccessibilityInfo.announceForAccessibility('Library refreshed');
+        }
       } catch {
         if (loadToken.current !== token) return;
-        showToast('Failed to load library', 'error');
+        showToast(failureMessage, 'error');
       }
     },
-    [showToast, invalidateLoads],
+    [invalidateLoads, showToast],
   );
 
   useFocusEffect(
     useCallback(() => {
-      reloadData(currentFolderId);
+      void reloadData(false, 'Failed to load library');
       return () => {
         loadToken.current += 1;
       };
-    }, [reloadData, currentFolderId]),
+    }, [reloadData]),
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const token = invalidateLoads();
     try {
-      const [loadedTracks, loadedFolders, loadedCounts] = await Promise.all([
-        currentFolderId === null
-          ? loadTracks({ scope: 'unfiled' })
-          : loadTracks({ scope: 'folder', folderId: currentFolderId }),
-        currentFolderId === null ? loadFolders() : Promise.resolve([]),
-        getTrackCountsByFolder(),
-      ]);
-      if (loadToken.current !== token) return;
-      setTracks(loadedTracks);
-      setFolders(loadedFolders);
-      setTrackCounts(loadedCounts);
-      AccessibilityInfo.announceForAccessibility('Library refreshed');
-    } catch {
-      if (loadToken.current !== token) return;
-      showToast('Failed to refresh library', 'error');
+      await reloadData(true, 'Failed to refresh library');
     } finally {
       setRefreshing(false);
     }
-  }, [currentFolderId, showToast, invalidateLoads]);
-
-  const navigateToFolder = useCallback(
-    async (folder: Folder) => {
-      setFolderPath((prev) => [...prev, folder]);
-      setCurrentFolderId(folder.id);
-      setSearchQuery('');
-      try {
-        await markFolderOpened(folder.id, Date.now());
-      } catch {
-        // Ordering hint only — a folder that opens but is not stamped is
-        // still open, so this must never block navigation.
-      }
-      await reloadData(folder.id);
-    },
-    [reloadData],
-  );
-
-  const navigateUp = useCallback(async () => {
-    setFolderPath((prev) => {
-      const next = prev.slice(0, -1);
-      const parentId = next.length > 0 ? next[next.length - 1].id : null;
-      setCurrentFolderId(parentId);
-      void reloadData(parentId);
-      return next;
-    });
-    setSearchQuery('');
   }, [reloadData]);
 
-  const navigateToRoot = useCallback(async () => {
-    setFolderPath([]);
-    setCurrentFolderId(null);
-    setSearchQuery('');
-    await reloadData(null);
-  }, [reloadData]);
+  // A fresh import lands in Unfiled, which is not a row the root is showing,
+  // so nothing on screen would move without nudging the tallies. The reload
+  // that follows the next focus replaces these with the real numbers.
+  const handleImported = useCallback(() => {
+    invalidateLoads();
+    setCounts((prev) => ({
+      ...prev,
+      all: prev.all + 1,
+      unfiled: prev.unfiled + 1,
+    }));
+  }, [invalidateLoads]);
 
-  // --- Search + sort ---
-  const filteredItems = useMemo((): ListItem[] => {
+  const { importing, importFile } = useTrackImport({
+    destinationFolderId: null,
+    destinationName: 'Unfiled',
+    shareEnabled: focused,
+    onImported: handleImported,
+    showToast,
+  });
+
+  const handleImport = useCallback(() => {
+    void importFile();
+  }, [importFile]);
+
+  // Search covers the reader's own folders. The three built-in entries are
+  // fixed furniture rather than search results, so they stay put whatever is
+  // typed — otherwise a query with no folder matches would leave the reader
+  // on a screen with no way back to their tracks.
+  const matchingFolders = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
+    if (!q) return folders;
+    return folders.filter((f) => f.name.toLowerCase().includes(q));
+  }, [folders, searchQuery]);
 
-    let filteredFolders = folders;
-    let filteredTracks = tracks;
-
-    if (q) {
-      filteredFolders = folders.filter((f) => f.name.toLowerCase().includes(q));
-      filteredTracks = tracks.filter((t) =>
-        t.filename.toLowerCase().includes(q),
-      );
+  const entries = useMemo((): RootEntry[] => {
+    const items: RootEntry[] = [];
+    for (const entry of BUILTIN_ENTRIES) {
+      const count =
+        entry.key === 'all'
+          ? counts.all
+          : entry.key === 'favorites'
+            ? counts.favorites
+            : counts.unfiled;
+      // Unfiled is only meaningful while something is actually unfiled.
+      if (entry.key === 'unfiled' && count === 0) continue;
+      items.push({ type: 'builtin', entry, count });
     }
-
-    const sortedTracks = sortTracks(filteredTracks, sortOption);
-
-    const items: ListItem[] = [];
-    for (const f of filteredFolders) {
+    for (const folder of matchingFolders) {
       items.push({
         type: 'folder',
-        folder: f,
-        trackCount: trackCounts.byFolder[f.id] ?? 0,
+        folder,
+        trackCount: counts.byFolder[folder.id] ?? 0,
       });
     }
-    for (const t of sortedTracks) {
-      items.push({ type: 'track', track: t });
-    }
     return items;
-  }, [folders, tracks, searchQuery, sortOption, trackCounts]);
+  }, [matchingFolders, counts]);
 
-  // --- CRUD ---
-  const addTrack = useCallback(
-    async (track: Track): Promise<boolean> => {
-      try {
-        const trackInFolder = { ...track, folderId: currentFolderId };
-        await insertTrack(trackInFolder);
-        invalidateLoads();
-        setTracks((prev) => [trackInFolder, ...prev]);
-        return true;
-      } catch (error) {
-        console.error('Failed to save track to library', error);
-        showToast('Failed to save track to library', 'error');
-        return false;
-      }
+  const openBuiltin = useCallback(
+    (entry: BuiltinEntry) => {
+      router.push({
+        pathname: '/tracks',
+        params: { scope: entry.key, name: entry.name },
+      });
     },
-    [showToast, invalidateLoads, currentFolderId],
+    [router],
   );
 
-  const handleRename = useCallback(
-    async (id: string, filename: string) => {
-      try {
-        await renameTrack(id, filename);
-        // As in addTrack: retire in-flight reads so one that predates the
-        // rename cannot resolve afterwards and restore the old name.
-        invalidateLoads();
-        // Patch only the filename on the existing entry. Rebuilding the track
-        // here would be the one place a rename could quietly lose the duration,
-        // format, size or import time the store just preserved.
-        setTracks((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, filename } : t)),
-        );
-        showToast(`Renamed to ${filename}`, 'success');
-      } catch {
-        showToast('Failed to rename track', 'error');
-      }
+  const openFolder = useCallback(
+    (folder: Folder) => {
+      router.push({
+        pathname: '/tracks',
+        params: { scope: 'folder', folderId: folder.id, name: folder.name },
+      });
     },
-    [showToast, invalidateLoads],
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      try {
-        await deleteTrack(id);
-        invalidateLoads();
-        setTracks((prev) => prev.filter((t) => t.id !== id));
-        showToast('Track deleted', 'success');
-      } catch {
-        showToast('Failed to delete track', 'error');
-      }
-    },
-    [showToast, invalidateLoads],
-  );
-
-  const handleMoveTrack = useCallback(
-    async (trackId: string, targetFolderId: string | null) => {
-      try {
-        await moveTrackToFolder(trackId, targetFolderId);
-        invalidateLoads();
-        setTracks((prev) => prev.filter((t) => t.id !== trackId));
-        showToast('Track moved', 'success');
-      } catch {
-        showToast('Failed to move track', 'error');
-      }
-      setMovingTrack(null);
-    },
-    [showToast, invalidateLoads],
+    [router],
   );
 
   const handleCreateFolder = useCallback(
@@ -353,14 +242,16 @@ export default function LibraryScreen() {
     async (id: string) => {
       try {
         await deleteFolder(id);
-        invalidateLoads();
-        await reloadData(currentFolderId);
         showToast('Folder deleted', 'success');
       } catch {
         showToast('Failed to delete folder', 'error');
+        return;
       }
+      // Deleting a folder unfiles its tracks, so the tallies move too — read
+      // them back rather than guessing.
+      await reloadData(false, 'Failed to load library');
     },
-    [showToast, invalidateLoads, reloadData, currentFolderId],
+    [showToast, reloadData],
   );
 
   const handleRenameFolder = useCallback(
@@ -380,125 +271,51 @@ export default function LibraryScreen() {
     [showToast, invalidateLoads],
   );
 
-  const handleSortChange = useCallback((opt: SortOption) => {
-    setSortOption(opt);
-    setSetting(SORT_SETTING_KEY, opt);
-  }, []);
-
-  const handleTrackPress = useCallback(
-    (track: Track) => {
-      router.push({
-        pathname: '/player',
-        params: { filename: track.filename, trackId: track.id },
-      });
-    },
-    [router],
-  );
-
-  const handleTrackLongPress = useCallback((track: Track) => {
-    setActionsTrack(track);
-  }, []);
-
-  const openMoveToFolder = useCallback(async (track: Track) => {
-    try {
-      const all = await loadFolders();
-      setAllFolders(all);
-    } catch {
-      setAllFolders([]);
-    }
-    setMovingTrack(track);
-  }, []);
-
-  const handleShareImport = useCallback(
-    async (track: Track) => {
-      if (!(await addTrack(track))) return;
-      showToast(`Received ${track.filename} from share`, 'success');
-    },
-    [addTrack, showToast],
-  );
-
-  const handleShareError = useCallback(
-    (message: string) => {
-      showToast(`Share import failed: ${message}`, 'error');
-    },
-    [showToast],
-  );
-
-  useShareIntent({
-    onTrackImported: handleShareImport,
-    onError: handleShareError,
-  });
-
-  const handleImport = useCallback(async () => {
-    setImporting(true);
-    try {
-      const result = await pickAndImportFile();
-      if (result.success) {
-        if (!(await addTrack(result.track))) return;
-        showToast(`Imported ${result.track.filename} successfully`, 'success');
-      } else if (result.error !== 'cancelled') {
-        showToast(`Import failed: ${result.message}`, 'error');
-      }
-    } catch (error) {
-      showToast(`Import failed: ${errorMessage(error)}`, 'error');
-    } finally {
-      setImporting(false);
-    }
-  }, [addTrack, showToast]);
-
-  const isEmpty = tracks.length === 0 && folders.length === 0;
-  const isRoot = currentFolderId === null;
-
   const renderItem = useCallback(
-    ({ item, index }: { item: ListItem; index: number }) => {
-      if (item.type === 'folder') {
+    ({ item }: { item: RootEntry }) => {
+      if (item.type === 'builtin') {
         return (
           <FolderListItem
-            folder={item.folder}
-            trackCount={item.trackCount}
-            onPress={navigateToFolder}
-            onDelete={handleDeleteFolder}
-            onRename={(id, name) => setRenamingFolder({ id, name })}
+            kind="builtin"
+            name={item.entry.name}
+            icon={item.entry.icon}
+            trackCount={item.count}
+            onPress={() => openBuiltin(item.entry)}
             style={styles.listItem}
           />
         );
       }
       return (
-        <TrackListItem
-          track={item.track}
-          onPress={handleTrackPress}
-          onRename={handleRename}
-          onDelete={handleDelete}
-          onLongPress={handleTrackLongPress}
+        <FolderListItem
+          name={item.folder.name}
+          trackCount={item.trackCount}
+          onPress={() => openFolder(item.folder)}
+          onDelete={() => void handleDeleteFolder(item.folder.id)}
+          onRename={() =>
+            setRenamingFolder({ id: item.folder.id, name: item.folder.name })
+          }
           style={styles.listItem}
         />
       );
     },
-    [
-      navigateToFolder,
-      handleDeleteFolder,
-      handleTrackPress,
-      handleRename,
-      handleDelete,
-      handleTrackLongPress,
-    ],
+    [openBuiltin, openFolder, handleDeleteFolder],
   );
 
   const keyExtractor = useCallback(
-    (item: ListItem) =>
-      item.type === 'folder' ? `f-${item.folder.id}` : `t-${item.track.id}`,
+    (item: RootEntry) =>
+      item.type === 'builtin' ? `b-${item.entry.key}` : `f-${item.folder.id}`,
     [],
   );
 
-  const currentFolderName =
-    folderPath.length > 0 ? folderPath[folderPath.length - 1].name : 'Library';
+  const libraryIsEmpty = counts.all === 0 && folders.length === 0;
+  const searching = searchQuery.trim().length > 0;
 
-  return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-      edges={['bottom']}
-    >
-      {isEmpty && isRoot ? (
+  if (libraryIsEmpty) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.colors.background }]}
+        edges={['bottom']}
+      >
         <View style={styles.emptyState}>
           <Text style={[theme.typography.heading, styles.title]}>Refrain</Text>
           <Text style={[theme.typography.body, styles.subtitle]}>
@@ -513,150 +330,82 @@ export default function LibraryScreen() {
             style={styles.importButton}
           />
         </View>
-      ) : (
-        <View style={styles.listContainer}>
-          {/* Header with navigation */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              {!isRoot ? (
-                <AccessiblePressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Go back"
-                  onPress={navigateUp}
-                  style={styles.backButton}
-                >
-                  <Ionicons
-                    name="chevron-back"
-                    size={22}
-                    color={theme.colors.accent}
-                  />
-                </AccessiblePressable>
-              ) : null}
-              <Text
-                style={theme.typography.heading}
-                numberOfLines={1}
-                onPress={!isRoot ? navigateToRoot : undefined}
-              >
-                {currentFolderName}
-              </Text>
-            </View>
-            <View style={styles.headerRight}>
-              <AccessiblePressable
-                accessibilityRole="button"
-                accessibilityLabel="Create folder"
-                onPress={() => setCreatingFolder(true)}
-                style={styles.headerAction}
-              >
-                <Ionicons
-                  name="folder-open-outline"
-                  size={22}
-                  color={theme.colors.accent}
-                />
-              </AccessiblePressable>
-              <ImportButton onPress={handleImport} loading={importing} />
-            </View>
-          </View>
+        <ToastHost toast={toast} onDismiss={hideToast} />
+      </SafeAreaView>
+    );
+  }
 
-          {/* Search + sort bar */}
-          <View style={styles.toolbar}>
-            <View style={styles.searchWrapper}>
-              <SearchBar value={searchQuery} onChangeText={setSearchQuery} />
-            </View>
-            <SortPicker value={sortOption} onChange={handleSortChange} />
-          </View>
-
-          {/* Breadcrumb path */}
-          {!isRoot ? (
-            <View style={styles.breadcrumb}>
-              <AccessiblePressable
-                accessibilityRole="link"
-                accessibilityLabel="Go to library root"
-                onPress={navigateToRoot}
-              >
-                <Text
-                  style={[
-                    theme.typography.caption,
-                    { color: theme.colors.accent },
-                  ]}
-                >
-                  Library
-                </Text>
-              </AccessiblePressable>
-              {folderPath.map((f, i) => (
-                <View key={f.id} style={styles.breadcrumbSegment}>
-                  <Text style={theme.typography.caption}> / </Text>
-                  {i < folderPath.length - 1 ? (
-                    <AccessiblePressable
-                      accessibilityRole="link"
-                      accessibilityLabel={`Go to ${f.name}`}
-                      onPress={() => {
-                        const newPath = folderPath.slice(0, i + 1);
-                        setFolderPath(newPath);
-                        setCurrentFolderId(f.id);
-                        setSearchQuery('');
-                        void reloadData(f.id);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          theme.typography.caption,
-                          { color: theme.colors.accent },
-                        ]}
-                      >
-                        {f.name}
-                      </Text>
-                    </AccessiblePressable>
-                  ) : (
-                    <Text style={theme.typography.caption}>{f.name}</Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          {/* Empty folder state */}
-          {isEmpty && !isRoot ? (
-            <View style={styles.emptyFolder}>
-              <Text style={theme.typography.body}>This folder is empty.</Text>
-              <Text style={[theme.typography.caption, styles.hint]}>
-                Import tracks or move existing ones here.
-              </Text>
-            </View>
-          ) : null}
-
-          <FlatList
-            data={filteredItems}
-            keyExtractor={keyExtractor}
-            renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor={theme.colors.accent}
-                colors={[theme.colors.accent]}
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      edges={['bottom']}
+    >
+      <View style={styles.listContainer}>
+        <View style={styles.header}>
+          <Text style={theme.typography.heading} numberOfLines={1}>
+            Library
+          </Text>
+          <View style={styles.headerRight}>
+            <AccessiblePressable
+              accessibilityRole="button"
+              accessibilityLabel="Create folder"
+              onPress={() => setCreatingFolder(true)}
+              style={styles.headerAction}
+            >
+              <Ionicons
+                name="folder-open-outline"
+                size={22}
+                color={theme.colors.accent}
               />
-            }
+            </AccessiblePressable>
+            <ImportButton onPress={handleImport} loading={importing} />
+          </View>
+        </View>
+
+        <View style={styles.toolbar}>
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search folders…"
+            accessibilityLabel="Search folders"
           />
         </View>
-      )}
 
-      {/* --- Dialogs --- */}
+        {searching && matchingFolders.length === 0 ? (
+          <View style={styles.notice}>
+            <Text style={theme.typography.body}>No folders match.</Text>
+          </View>
+        ) : null}
+
+        {!searching && folders.length === 0 ? (
+          <View style={styles.notice}>
+            <Text style={theme.typography.body}>No folders yet.</Text>
+            <Text style={[theme.typography.caption, styles.hint]}>
+              Create one to group your tracks.
+            </Text>
+          </View>
+        ) : null}
+
+        <FlatList
+          data={entries}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={theme.colors.accent}
+              colors={[theme.colors.accent]}
+            />
+          }
+        />
+      </View>
+
       {creatingFolder ? (
         <CreateFolderDialog
-          onSave={handleCreateFolder}
+          onSave={(name) => void handleCreateFolder(name)}
           onCancel={() => setCreatingFolder(false)}
-        />
-      ) : null}
-
-      {renamingTrack ? (
-        <TrackRenameDialog
-          currentFilename={renamingTrack.filename}
-          onSave={(filename) => {
-            handleRename(renamingTrack.id, filename);
-            setRenamingTrack(null);
-          }}
-          onCancel={() => setRenamingTrack(null)}
         />
       ) : null}
 
@@ -670,30 +419,11 @@ export default function LibraryScreen() {
           onConfirm={(name) => {
             const trimmed = name.trim();
             if (trimmed && trimmed !== renamingFolder.name) {
-              handleRenameFolder(renamingFolder.id, trimmed);
+              void handleRenameFolder(renamingFolder.id, trimmed);
             }
             setRenamingFolder(null);
           }}
           onCancel={() => setRenamingFolder(null)}
-        />
-      ) : null}
-
-      {actionsTrack ? (
-        <TrackActionsSheet
-          track={actionsTrack}
-          onRename={() => setRenamingTrack(actionsTrack)}
-          onMoveToFolder={() => openMoveToFolder(actionsTrack)}
-          onDelete={() => handleDelete(actionsTrack.id)}
-          onDismiss={() => setActionsTrack(null)}
-        />
-      ) : null}
-
-      {movingTrack ? (
-        <FolderPickerDialog
-          folders={allFolders}
-          currentFolderId={movingTrack.folderId}
-          onSelect={(fid) => handleMoveTrack(movingTrack.id, fid)}
-          onCancel={() => setMovingTrack(null)}
         />
       ) : null}
 
@@ -734,11 +464,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -747,33 +472,13 @@ const styles = StyleSheet.create({
   headerAction: {
     padding: spacing.xs,
   },
-  backButton: {
-    marginRight: spacing.xs,
-  },
   toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
-    gap: spacing.sm,
   },
-  searchWrapper: {
-    flex: 1,
-  },
-  breadcrumb: {
-    flexDirection: 'row',
+  notice: {
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    flexWrap: 'wrap',
-  },
-  breadcrumbSegment: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  emptyFolder: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
   },
   listContent: {
     paddingHorizontal: spacing.lg,

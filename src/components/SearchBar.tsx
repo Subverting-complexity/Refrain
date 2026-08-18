@@ -8,12 +8,19 @@ interface SearchBarProps {
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
+  /**
+   * What the field is called to a screen reader. Defaults to the track
+   * wording; the library root searches folder names instead, so it passes
+   * its own label rather than announcing the wrong thing.
+   */
+  accessibilityLabel?: string;
 }
 
 export function SearchBar({
   value,
   onChangeText,
   placeholder = 'Search tracks…',
+  accessibilityLabel = 'Search tracks',
 }: SearchBarProps) {
   const { theme } = useTheme();
 
@@ -34,7 +41,7 @@ export function SearchBar({
         style={styles.icon}
       />
       <TextInput
-        accessibilityLabel="Search tracks"
+        accessibilityLabel={accessibilityLabel}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}

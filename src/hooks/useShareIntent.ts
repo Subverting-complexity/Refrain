@@ -12,11 +12,20 @@ import { useLatestRef } from './useLatestRef';
 interface UseShareIntentOptions {
   onTrackImported: (track: Track) => void;
   onError?: (message: string) => void;
+  /**
+   * Whether this caller should handle incoming shares. Two library screens
+   * can be mounted at once — the folder list stays alive underneath the
+   * track view pushed on top of it — and a share delivered while both are
+   * listening would be imported twice. Each screen passes its own focus
+   * state here so exactly one of them consumes the share.
+   */
+  enabled?: boolean;
 }
 
 export function useShareIntent({
   onTrackImported,
   onError,
+  enabled = true,
 }: UseShareIntentOptions) {
   // Keep the latest callbacks in refs so the mount-only effect below always
   // calls current handlers without re-subscribing. Writes happen in an effect,
@@ -43,7 +52,7 @@ export function useShareIntent({
   } = useExpoShareIntent();
 
   useEffect(() => {
-    if (!hasShareIntent) return;
+    if (!enabled || !hasShareIntent) return;
     const files = shareIntent.files ?? [];
 
     // Consume the intent before the async import starts: re-renders while
@@ -81,6 +90,7 @@ export function useShareIntent({
     })().catch(() => undefined);
     // The callback refs are stable, so this still re-runs only per share.
   }, [
+    enabled,
     hasShareIntent,
     shareIntent,
     resetShareIntent,
@@ -89,10 +99,11 @@ export function useShareIntent({
   ]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (shareIntentError) {
       onErrorRef.current?.(shareIntentError);
     }
-  }, [shareIntentError, onErrorRef]);
+  }, [enabled, shareIntentError, onErrorRef]);
 
   // "Open with" / "open in place" (Android VIEW intents, iOS document types)
   // still arrive as plain URLs through expo-linking — expo-share-intent only
@@ -102,6 +113,7 @@ export function useShareIntent({
     // unsupported on web. On web, getInitialURL returns the page URL, which
     // would be misread as a shared audio file and crash File import.
     if (Platform.OS === 'web') return;
+    if (!enabled) return;
 
     async function handleUrl(url: string) {
       // Only file/content URLs carry a shared audio file. The app's own deep
@@ -156,6 +168,7 @@ export function useShareIntent({
     });
 
     return () => subscription.remove();
-    // The callback refs are stable, so this stays a mount-only subscription.
-  }, [onTrackImportedRef, onErrorRef]);
+    // The callback refs are stable, so this re-subscribes only when the
+    // caller's enabled state flips.
+  }, [enabled, onTrackImportedRef, onErrorRef]);
 }

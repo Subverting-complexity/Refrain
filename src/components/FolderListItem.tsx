@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { ComponentProps, useRef, useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -6,23 +6,47 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
-import { Folder } from '../types';
 import { AccessiblePressable } from './AccessiblePressable';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
 
-interface FolderListItemProps {
-  folder: Folder;
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
+
+/**
+ * A row on the library root. Two kinds of row share it: a real folder, which
+ * can be renamed and deleted by swiping, and a built-in entry (All tracks,
+ * Favourites, Unfiled), which is a saved query rather than a record and so
+ * offers no actions at all.
+ *
+ * The component is deliberately told its name, count and icon rather than
+ * handed a `Folder`, because the built-in entries have no folder row behind
+ * them to hand over.
+ */
+export interface FolderListItemProps {
+  name: string;
   trackCount: number;
-  onPress?: (folder: Folder) => void;
-  onDelete?: (id: string) => void;
-  onRename?: (id: string, currentName: string) => void;
+  /**
+   * Which sort of row this is. It decides the default icon, how the row
+   * reads to a screen reader, and nothing else — a built-in row is kept
+   * actionless by its caller simply not passing `onRename` or `onDelete`.
+   */
+  kind?: 'folder' | 'builtin';
+  /**
+   * Overrides the default glyph. Built-in entries pass their own so they do
+   * not read as editable folders sitting in the same list.
+   */
+  icon?: IoniconName;
+  onPress?: () => void;
+  onDelete?: () => void;
+  onRename?: () => void;
   style?: ViewStyle;
 }
 
 export function FolderListItem({
-  folder,
+  name,
   trackCount,
+  kind = 'folder',
+  icon,
   onPress,
   onDelete,
   onRename,
@@ -43,7 +67,7 @@ export function FolderListItem({
 
   function handleConfirmDelete() {
     setConfirmingDelete(false);
-    onDelete?.(folder.id);
+    onDelete?.();
   }
 
   function renderRightActions() {
@@ -52,10 +76,10 @@ export function FolderListItem({
         {onRename ? (
           <AccessiblePressable
             accessibilityRole="button"
-            accessibilityLabel={`Rename ${folder.name}`}
+            accessibilityLabel={`Rename ${name}`}
             onPress={() => {
               swipeableRef.current?.close();
-              onRename(folder.id, folder.name);
+              onRename();
             }}
             style={[
               styles.swipeAction,
@@ -72,7 +96,7 @@ export function FolderListItem({
         {onDelete ? (
           <AccessiblePressable
             accessibilityRole="button"
-            accessibilityLabel={`Delete ${folder.name}`}
+            accessibilityLabel={`Delete ${name}`}
             onPress={confirmDelete}
             style={[
               styles.swipeAction,
@@ -91,6 +115,10 @@ export function FolderListItem({
   }
 
   const subtitle = trackCount === 1 ? '1 track' : `${trackCount} tracks`;
+  const label =
+    kind === 'folder' ? `${name} folder, ${subtitle}` : `${name}, ${subtitle}`;
+  const hint =
+    kind === 'folder' ? 'Tap to open folder' : 'Tap to view these tracks';
 
   return (
     <>
@@ -105,9 +133,9 @@ export function FolderListItem({
       >
         <AccessiblePressable
           accessibilityRole="button"
-          accessibilityLabel={`${folder.name} folder, ${subtitle}`}
-          accessibilityHint="Tap to open folder"
-          onPress={() => onPress?.(folder)}
+          accessibilityLabel={label}
+          accessibilityHint={hint}
+          onPress={() => onPress?.()}
           style={[
             styles.container,
             {
@@ -122,7 +150,11 @@ export function FolderListItem({
               { backgroundColor: theme.colors.background },
             ]}
           >
-            <Ionicons name="folder" size={20} color={theme.colors.accent} />
+            <Ionicons
+              name={icon ?? 'folder'}
+              size={20}
+              color={theme.colors.accent}
+            />
           </View>
           <View style={styles.info}>
             <Text
@@ -130,7 +162,7 @@ export function FolderListItem({
               numberOfLines={1}
               ellipsizeMode="tail"
             >
-              {folder.name}
+              {name}
             </Text>
             <Text style={theme.typography.caption}>{subtitle}</Text>
           </View>
@@ -145,12 +177,12 @@ export function FolderListItem({
       {confirmingDelete ? (
         <CenteredDialog
           title="Delete folder?"
-          message={`Remove "${folder.name}"? Tracks inside will be moved out, not deleted.`}
+          message={`Remove "${name}"? Tracks inside will be moved out, not deleted.`}
           onDismiss={handleCancelDelete}
         >
           <DialogButton
             label="Delete"
-            accessibilityLabel={`Confirm delete ${folder.name}`}
+            accessibilityLabel={`Confirm delete ${name}`}
             variant="danger"
             onPress={handleConfirmDelete}
           />

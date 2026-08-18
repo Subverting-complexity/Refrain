@@ -518,3 +518,103 @@ describe('useShareIntent (import throws rather than resolving)', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
+
+// Two library screens are mounted at once as soon as the reader opens a
+// folder: the folder list stays alive underneath the track view. Only the one
+// they are looking at may consume a share, or a single shared file would be
+// imported twice.
+describe('useShareIntent (enabled gate)', () => {
+  let enabledFlag = true;
+
+  function GatedComponent() {
+    useShareIntent({ onTrackImported, onError, enabled: enabledFlag });
+    return null;
+  }
+
+  async function renderGated(): Promise<ReactTestRenderer> {
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(createElement(GatedComponent));
+    });
+    return tree;
+  }
+
+  beforeEach(() => {
+    enabledFlag = true;
+  });
+
+  it('ignores a launch URL while disabled', async () => {
+    enabledFlag = false;
+    mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
+
+    await renderGated();
+    await flushMicrotasks();
+
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+    expect(onTrackImported).not.toHaveBeenCalled();
+  });
+
+  it('leaves a pending share intent unconsumed while disabled', async () => {
+    enabledFlag = false;
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderGated();
+    await flushMicrotasks();
+
+    expect(mockResetShareIntent).not.toHaveBeenCalled();
+    expect(onTrackImported).not.toHaveBeenCalled();
+  });
+
+  it('does not report a share-intent error while disabled', async () => {
+    enabledFlag = false;
+    mockShareState = {
+      hasShareIntent: false,
+      files: null,
+      error: 'share failed',
+    };
+
+    await renderGated();
+    await flushMicrotasks();
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('picks the launch URL up once it becomes enabled', async () => {
+    enabledFlag = false;
+    mockGetInitialURL.mockResolvedValue('file:///shared/song.mp3');
+
+    const tree = await renderGated();
+    await flushMicrotasks();
+    expect(mockImportFromUri).not.toHaveBeenCalled();
+
+    enabledFlag = true;
+    await act(async () => {
+      tree.update(createElement(GatedComponent));
+    });
+    await flushMicrotasks();
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'file:///shared/song.mp3',
+      'song.mp3',
+    );
+    expect(onTrackImported).toHaveBeenCalledWith(track);
+  });
+
+  it('handles a share normally when enabled', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [shareFile()],
+      error: null,
+    };
+
+    await renderGated();
+    await flushMicrotasks();
+
+    expect(mockResetShareIntent).toHaveBeenCalled();
+    expect(onTrackImported).toHaveBeenCalledWith(track);
+  });
+});
