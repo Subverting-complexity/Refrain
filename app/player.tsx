@@ -24,6 +24,7 @@ import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { usePersistTrackDuration } from '@/src/hooks/usePersistTrackDuration';
+import { useStampTrackPlayed } from '@/src/hooks/useStampTrackPlayed';
 import { useSegmentWorkflow } from '@/src/hooks/useSegmentWorkflow';
 import { useSkipInterval } from '@/src/hooks/useSkipInterval';
 import { useSnippetPreview } from '@/src/hooks/useSnippetPreview';
@@ -121,6 +122,7 @@ export default function PlayerScreen() {
   });
 
   usePersistTrackDuration(trackId ?? null, durationMs);
+  useStampTrackPlayed(trackId ?? null, status);
 
   const { skipPreference, setSkipPreference, skipBackLabel, skipForwardLabel } =
     useSkipInterval();

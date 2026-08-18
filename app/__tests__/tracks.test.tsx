@@ -11,6 +11,7 @@ import {
   loadTracks,
   moveTrackToFolder,
   renameTrack,
+  setTrackFavorite,
 } from '@/src/services/trackStore';
 import { Track } from '@/src/types';
 
@@ -20,6 +21,7 @@ jest.mock('@/src/services/trackStore', () => ({
   deleteTrack: jest.fn(),
   renameTrack: jest.fn(),
   moveTrackToFolder: jest.fn(),
+  setTrackFavorite: jest.fn(),
   getTrackCountsByFolder: jest.fn(),
 }));
 
@@ -92,13 +94,13 @@ jest.mock('@/src/components/TrackListItem', () => {
     TrackListItem: ({
       track,
       onPress,
-      onRename,
+      onToggleFavorite,
       onDelete,
       onLongPress,
     }: {
       track: { id: string };
       onPress: (track: unknown) => void;
-      onRename: (id: string, filename: string) => void;
+      onToggleFavorite: (track: unknown) => void;
       onDelete: (id: string) => void;
       onLongPress: (track: unknown) => void;
     }) =>
@@ -106,7 +108,7 @@ jest.mock('@/src/components/TrackListItem', () => {
         testID: 'track-item',
         onPress: () => onPress(track),
         onDelete: () => onDelete(track.id),
-        onRename: (filename: string) => onRename(track.id, filename),
+        onToggleFavorite: () => onToggleFavorite(track),
         onLongPress: () => onLongPress(track),
       }),
   };
@@ -131,26 +133,45 @@ jest.mock('@/src/components/SearchBar', () => {
   };
 });
 
-jest.mock('@/src/components/SortPicker', () => {
+// Stubbed down to the props the screen drives, so a test can change the sort
+// or the favourites filter without going through chip rendering — that is
+// TrackSortBar's own suite's job.
+jest.mock('@/src/components/TrackSortBar', () => {
   const ReactLocal = require('react');
   const { View } = require('react-native');
   return {
-    SortPicker: () => ReactLocal.createElement(View, { testID: 'sort-picker' }),
+    TrackSortBar: (props: Record<string, unknown>) =>
+      ReactLocal.createElement(View, { testID: 'sort-bar', ...props }),
   };
 });
 
-jest.mock('@/src/components/TrackRenameDialog', () => ({
-  TrackRenameDialog: () => null,
-}));
+jest.mock('@/src/components/TrackRenameDialog', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    TrackRenameDialog: ({ onSave }: { onSave: (filename: string) => void }) =>
+      ReactLocal.createElement(View, { testID: 'rename-dialog', onSave }),
+  };
+});
 
 jest.mock('@/src/components/TrackActionsSheet', () => {
   const ReactLocal = require('react');
   const { View } = require('react-native');
   return {
-    TrackActionsSheet: ({ onMoveToFolder }: { onMoveToFolder: () => void }) =>
+    TrackActionsSheet: ({
+      onMoveToFolder,
+      onRename,
+      onToggleFavorite,
+    }: {
+      onMoveToFolder: () => void;
+      onRename: () => void;
+      onToggleFavorite: () => void;
+    }) =>
       ReactLocal.createElement(View, {
         testID: 'track-actions-sheet',
         onMoveToFolder,
+        onRename,
+        onToggleFavorite,
       }),
   };
 });
@@ -173,6 +194,9 @@ const mockDeleteTrack = deleteTrack as jest.MockedFunction<typeof deleteTrack>;
 const mockRenameTrack = renameTrack as jest.MockedFunction<typeof renameTrack>;
 const mockMoveTrack = moveTrackToFolder as jest.MockedFunction<
   typeof moveTrackToFolder
+>;
+const mockSetTrackFavorite = setTrackFavorite as jest.MockedFunction<
+  typeof setTrackFavorite
 >;
 const mockMarkFolderOpened = markFolderOpened as jest.MockedFunction<
   typeof markFolderOpened
@@ -215,6 +239,35 @@ function trackItems(renderer: ReactTestRenderer) {
   return renderer.root
     .findAllByProps({ testID: 'track-item' })
     .filter((node) => typeof node.type !== 'string');
+}
+
+function sheet(renderer: ReactTestRenderer) {
+  return renderer.root
+    .findAllByProps({ testID: 'track-actions-sheet' })
+    .filter((node) => typeof node.type !== 'string')[0];
+}
+
+/**
+ * Renames through the path the app actually offers: long press to open the
+ * sheet, Rename to open the dialog, then save. Rename left the swipe
+ * entirely, and the screen now owns the only rename dialog.
+ */
+async function renameViaSheet(
+  renderer: ReactTestRenderer,
+  filename: string,
+): Promise<void> {
+  await act(async () => {
+    trackItems(renderer)[0].props.onLongPress();
+  });
+  await act(async () => {
+    sheet(renderer).props.onRename();
+  });
+  await act(async () => {
+    await renderer.root
+      .findAllByProps({ testID: 'rename-dialog' })
+      .filter((node) => typeof node.type !== 'string')[0]
+      .props.onSave(filename);
+  });
 }
 
 function toastLabels(renderer: ReactTestRenderer): string[] {
@@ -407,9 +460,7 @@ describe('track view track actions', () => {
     mockLoadTracks.mockResolvedValue([measured]);
 
     const renderer = await renderScreen();
-    await act(async () => {
-      await trackItems(renderer)[0].props.onRename('Practice take.mp3');
-    });
+    await renameViaSheet(renderer, 'Practice take.mp3');
 
     expect(mockRenameTrack).toHaveBeenCalledWith(
       'track-1',
@@ -429,12 +480,135 @@ describe('track view track actions', () => {
     });
 
     const renderer = await renderScreen();
-    await act(async () => {
-      await trackItems(renderer)[0].props.onRename('Practice take.mp3');
-    });
+    await renameViaSheet(renderer, 'Practice take.mp3');
 
     expect(toastLabels(renderer)).toContain('Failed to rename track');
     act(() => renderer.unmount());
+  });
+
+  it('stars a track optimistically and reports it', async () => {
+    mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      await trackItems(renderer)[0].props.onToggleFavorite();
+    });
+
+    expect(mockSetTrackFavorite).toHaveBeenCalledWith('track-1', true);
+    expect(listedTracks(renderer)[0].isFavorite).toBe(true);
+    expect(toastLabels(renderer)).toContain('Added to favourites');
+    act(() => renderer.unmount());
+  });
+
+  it('puts the row back when the favourite write fails', async () => {
+    mockLoadTracks.mockResolvedValue([sampleTrack]);
+    mockSetTrackFavorite.mockImplementationOnce(() => {
+      throw new Error('db write failed');
+    });
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      await trackItems(renderer)[0].props.onToggleFavorite();
+    });
+
+    // Leaving the star showing would claim a state the database does not
+    // hold, which is worse than the toggle appearing not to have worked.
+    expect(listedTracks(renderer)[0].isFavorite).toBe(false);
+    expect(toastLabels(renderer)).toContain('Failed to update favourite');
+    act(() => renderer.unmount());
+  });
+
+  it('toggles the favourite from the long-press sheet too', async () => {
+    mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      trackItems(renderer)[0].props.onLongPress();
+    });
+    await act(async () => {
+      await sheet(renderer).props.onToggleFavorite();
+    });
+
+    expect(mockSetTrackFavorite).toHaveBeenCalledWith('track-1', true);
+    act(() => renderer.unmount());
+  });
+
+  // The Favourites-scope branch is the one that removes the row rather than
+  // patching it, and it is where a rollback can go wrong.
+  describe('unstarring inside the Favourites view', () => {
+    async function renderFavourites() {
+      mockParams = { scope: 'favorites', name: 'Favourites' };
+      mockLoadTracks.mockResolvedValue([{ ...sampleTrack, isFavorite: true }]);
+      return renderScreen();
+    }
+
+    it('takes the row out of the view it no longer belongs in', async () => {
+      const renderer = await renderFavourites();
+      await act(async () => {
+        await trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      expect(mockSetTrackFavorite).toHaveBeenCalledWith('track-1', false);
+      expect(trackIds(renderer)).toEqual([]);
+      expect(toastLabels(renderer)).toContain('Removed from favourites');
+      act(() => renderer.unmount());
+    });
+
+    it('restores exactly one row when the write fails', async () => {
+      mockSetTrackFavorite.mockImplementationOnce(() => {
+        throw new Error('db write failed');
+      });
+      const renderer = await renderFavourites();
+      await act(async () => {
+        await trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      // Restoring by appending blind would put two rows with the same key in
+      // the list if a reload had already re-added it.
+      expect(trackIds(renderer)).toEqual(['track-1']);
+      expect(listedTracks(renderer)[0].isFavorite).toBe(true);
+      expect(toastLabels(renderer)).toContain('Failed to update favourite');
+      act(() => renderer.unmount());
+    });
+
+    it('does not let a read that began during the write undo it', async () => {
+      // The window that matters is *inside* the write, not before it: on web
+      // the write is asynchronous, and a read started while it is in flight
+      // still sees the track as starred. Landing that read would put the row
+      // back moments after the toast said it had gone. Hold the write open
+      // so the reload can start in the middle of it.
+      let commitWrite!: () => void;
+      mockSetTrackFavorite.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            commitWrite = resolve;
+          }) as unknown as void,
+      );
+
+      const renderer = await renderFavourites();
+
+      let togglingDone!: Promise<void>;
+      await act(async () => {
+        togglingDone = trackItems(renderer)[0].props.onToggleFavorite();
+      });
+
+      // Mid-write: the store still reports the old value.
+      const onRefresh =
+        renderer.root.findByType(FlatList).props.refreshControl.props.onRefresh;
+      let refreshDone!: Promise<void>;
+      await act(async () => {
+        refreshDone = onRefresh();
+      });
+
+      await act(async () => {
+        commitWrite();
+        await togglingDone;
+        await refreshDone;
+      });
+
+      expect(trackIds(renderer)).toEqual([]);
+      act(() => renderer.unmount());
+    });
   });
 
   it('deletes a track and reports it', async () => {

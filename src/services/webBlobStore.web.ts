@@ -16,10 +16,37 @@ const STORE = 'blobs';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+/**
+ * The same two lifecycle handlers `database.web` attaches, for the same
+ * reasons: close on `versionchange` so this tab never blocks another tab's
+ * upgrade, and drop the cache on `close` so a connection the browser
+ * force-closes — storage cleared, or eviction under memory pressure — does
+ * not leave every later blob read throwing `InvalidStateError` for the rest
+ * of the page session. Each clears the cache only while it still refers to
+ * this connection.
+ */
+function attachLifecycleHandlers(
+  db: IDBDatabase,
+  box: { promise?: Promise<IDBDatabase> },
+): void {
+  const clearIfCurrent = () => {
+    if (dbPromise === box.promise) dbPromise = null;
+  };
+  db.onversionchange = () => {
+    db.close();
+    clearIfCurrent();
+  };
+  db.onclose = () => {
+    clearIfCurrent();
+  };
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+  const box: { promise?: Promise<IDBDatabase> } = {};
+
+  box.promise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -27,11 +54,50 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(STORE);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    // Rejecting on `blocked` does not cancel the open request: when the other
+    // tab eventually closes, the upgrade goes ahead and `onsuccess` fires
+    // against a promise that has already settled. Nothing would reference
+    // that connection and nothing would close it, so every retry would strand
+    // another one. Track whether the promise is spoken for, and close the
+    // late arrival. (Mirrors `database.web`.)
+    let settled = false;
+    request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      const opened = request.result;
+      attachLifecycleHandlers(opened, box);
+      resolve(opened);
+    };
+    request.onerror = () => {
+      settled = true;
+      reject(request.error);
+    };
+    // This store is still at version 1, so a blocked upgrade is latent rather
+    // than reachable today — it becomes real the first time its schema
+    // changes. Without the handler that first bump would leave callers
+    // waiting on a promise that never settles.
+    request.onblocked = () => {
+      settled = true;
+      reject(
+        new Error(
+          'Refrain is open in another tab using an older version of its audio store. Close the other tab and reload.',
+        ),
+      );
+    };
   });
+  dbPromise = box.promise;
 
-  return dbPromise;
+  // A failed open must not be cached. This one is reachable today: in private
+  // browsing, or where storage permission is denied, caching the rejection
+  // would fail every audio load for the rest of the page session with no way
+  // to retry.
+  return dbPromise.catch((error: unknown) => {
+    if (dbPromise === box.promise) dbPromise = null;
+    throw error;
+  });
 }
 
 function runTransaction<T>(

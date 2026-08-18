@@ -53,15 +53,19 @@ export interface TrackCounts {
   unfiled: number;
 }
 
-export type SortOption =
-  | 'name-asc'
-  | 'name-desc'
-  | 'date-asc'
-  | 'date-desc'
-  | 'duration-asc'
-  | 'duration-desc'
-  | 'size-asc'
-  | 'size-desc';
+/**
+ * What the track list is ordered by. Split from the direction so a chip can
+ * carry a static noun label and invert on its own, rather than the two being
+ * fused into one nine-value string the reader has to pick from a modal.
+ */
+export type SortKey = 'added' | 'played' | 'name' | 'length';
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface SortOption {
+  key: SortKey;
+  direction: SortDirection;
+}
 
 export interface ImportResult {
   success: true;

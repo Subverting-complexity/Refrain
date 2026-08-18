@@ -18,11 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { SearchBar } from '@/src/components/SearchBar';
-import { SortPicker } from '@/src/components/SortPicker';
 import { ToastHost } from '@/src/components/ToastHost';
 import { TrackActionsSheet } from '@/src/components/TrackActionsSheet';
 import { TrackListItem } from '@/src/components/TrackListItem';
 import { TrackRenameDialog } from '@/src/components/TrackRenameDialog';
+import { TrackSortBar } from '@/src/components/TrackSortBar';
 import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
@@ -34,9 +34,16 @@ import {
   loadTracks,
   moveTrackToFolder,
   renameTrack,
+  setTrackFavorite,
 } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Folder, LoadTracksOptions, SortOption, Track } from '@/src/types';
+import {
+  parseSortOption,
+  serializeSortOption,
+  sortTracks,
+  unplayedBoundary,
+} from '@/src/utils/librarySort';
 
 /**
  * Tracks belonging to one library entry, and only tracks — a folder row can
@@ -59,53 +66,12 @@ const SCOPE_KINDS: readonly ScopeKind[] = [
   'folder',
 ];
 
+// The stored value is global and survives restart: one ordering for every
+// folder, so moving between them never silently re-sorts the list.
 const SORT_SETTING_KEY = 'librarySortOrder';
-const VALID_SORTS = new Set<SortOption>([
-  'name-asc',
-  'name-desc',
-  'date-asc',
-  'date-desc',
-  'duration-asc',
-  'duration-desc',
-  'size-asc',
-  'size-desc',
-]);
 
 function readSortSetting(): SortOption {
-  const raw = getSetting(SORT_SETTING_KEY);
-  if (raw && VALID_SORTS.has(raw as SortOption)) return raw as SortOption;
-  return 'date-desc';
-}
-
-function sortTracks(tracks: Track[], sort: SortOption): Track[] {
-  const sorted = [...tracks];
-  switch (sort) {
-    case 'name-asc':
-      sorted.sort((a, b) => a.filename.localeCompare(b.filename));
-      break;
-    case 'name-desc':
-      sorted.sort((a, b) => b.filename.localeCompare(a.filename));
-      break;
-    case 'date-desc':
-      sorted.sort((a, b) => b.importedAt - a.importedAt);
-      break;
-    case 'date-asc':
-      sorted.sort((a, b) => a.importedAt - b.importedAt);
-      break;
-    case 'duration-asc':
-      sorted.sort((a, b) => a.durationMs - b.durationMs);
-      break;
-    case 'duration-desc':
-      sorted.sort((a, b) => b.durationMs - a.durationMs);
-      break;
-    case 'size-asc':
-      sorted.sort((a, b) => a.fileSizeBytes - b.fileSizeBytes);
-      break;
-    case 'size-desc':
-      sorted.sort((a, b) => b.fileSizeBytes - a.fileSizeBytes);
-      break;
-  }
-  return sorted;
+  return parseSortOption(getSetting(SORT_SETTING_KEY));
 }
 
 /** Route parameters arrive as a string or a repeated string; take the first. */
@@ -151,6 +117,10 @@ export default function TracksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>(readSortSetting);
+  // Deliberately not persisted, and reset on entering any folder below. A
+  // filter that survives navigation hides rows rather than reordering them,
+  // so a forgotten one reads as data loss rather than as a filter.
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const { toast, showToast, hideToast } = useToast();
 
   const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
@@ -261,13 +231,34 @@ export default function TracksScreen() {
     void importFile();
   }, [importFile]);
 
+  // Inside Favourites every row is already starred, so the filter would be a
+  // no-op and the star is hidden.
+  const canFilterFavorites = scope !== 'favorites';
+
+  // Entering a different entry clears the filter. Scoped to the entry being
+  // viewed rather than to mount, because the screen is reused across
+  // navigations.
+  //
+  // Adjusted during render rather than in an effect: an effect would paint
+  // one frame of the previous entry's filtered list before clearing it, and
+  // resetting state on a changed input is what this pattern is for.
+  const entryKey = `${scope}:${folderId ?? ''}`;
+  const [filteredEntryKey, setFilteredEntryKey] = useState(entryKey);
+  if (filteredEntryKey !== entryKey) {
+    setFilteredEntryKey(entryKey);
+    setFavoritesOnly(false);
+  }
+
   const visibleTracks = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const filtered = q
+    let filtered = q
       ? tracks.filter((t) => t.filename.toLowerCase().includes(q))
       : tracks;
+    if (favoritesOnly && canFilterFavorites) {
+      filtered = filtered.filter((t) => t.isFavorite);
+    }
     return sortTracks(filtered, sortOption);
-  }, [tracks, searchQuery, sortOption]);
+  }, [tracks, searchQuery, sortOption, favoritesOnly, canFilterFavorites]);
 
   const handleRename = useCallback(
     async (id: string, filename: string) => {
@@ -355,21 +346,124 @@ export default function TracksScreen() {
 
   const handleSortChange = useCallback((opt: SortOption) => {
     setSortOption(opt);
-    setSetting(SORT_SETTING_KEY, opt);
+    setSetting(SORT_SETTING_KEY, serializeSortOption(opt));
   }, []);
 
+  const handleToggleFavorite = useCallback(
+    async (track: Track) => {
+      const next = !track.isFavorite;
+      // Leaves the row out of the list rather than patching it, when the row
+      // no longer belongs in the view it is in.
+      const dropsFromView = scope === 'favorites' && !next;
+
+      const applyLocally = (isFavorite: boolean) => {
+        if (dropsFromView) {
+          // Unstarring inside Favourites takes the row out of the view it is
+          // in. Removing it now, with the toast to say what happened, reads
+          // as the action working; leaving it until the next load reads as
+          // the tap having missed.
+          setTracks((prev) =>
+            isFavorite
+              ? // Restoring: only if the row is not already back. A reload
+                // that landed mid-write may have re-added it, and appending
+                // blind would put two rows with the same key in the list.
+                //
+                // This is the one path that re-inserts the captured track
+                // rather than patching a live one, because there is no live
+                // one left to patch. A rename landing in the same window
+                // would be reverted on screen until the next read; narrow
+                // enough to accept, and the alternative is leaving the row
+                // out of a view it belongs in.
+                prev.some((t) => t.id === track.id)
+                ? prev
+                : [...prev, { ...track, isFavorite }]
+              : prev.filter((t) => t.id !== track.id),
+          );
+          return;
+        }
+        setTracks((prev) =>
+          prev.map((t) => (t.id === track.id ? { ...t, isFavorite } : t)),
+        );
+      };
+
+      invalidateLoads();
+      applyLocally(next);
+
+      try {
+        await setTrackFavorite(track.id, next);
+      } catch {
+        // Put it back the way it was rather than leaving the row showing a
+        // state the database does not hold.
+        invalidateLoads();
+        applyLocally(track.isFavorite);
+        showToast('Failed to update favourite', 'error');
+        return;
+      }
+
+      // Settle the local state a second time, and not only by retiring reads.
+      // On web the write is asynchronous, so a read can begin *during* it and
+      // still see the old value. Bumping the token discards such a read that
+      // has yet to land — but one that already landed has overwritten the
+      // optimistic update, and only re-applying puts it right. Without this,
+      // a refresh timed inside the write leaves the row on screen looking
+      // untouched moments after the toast said otherwise.
+      invalidateLoads();
+      applyLocally(next);
+      showToast(
+        next ? 'Added to favourites' : 'Removed from favourites',
+        'success',
+      );
+    },
+    [scope, invalidateLoads, showToast],
+  );
+
+  // Where the never-played tracks begin, under the Played sort. Marking the
+  // boundary is what makes their fixed position read as deliberate — an
+  // unlabelled block that ignores the direction you just reversed reads as
+  // the sort having failed.
+  const unplayedAt = useMemo(
+    () => unplayedBoundary(visibleTracks, sortOption),
+    [visibleTracks, sortOption],
+  );
+
   const renderItem = useCallback(
-    ({ item }: { item: Track }) => (
-      <TrackListItem
-        track={item}
-        onPress={handleTrackPress}
-        onRename={(id, filename) => void handleRename(id, filename)}
-        onDelete={(id) => void handleDelete(id)}
-        onLongPress={handleTrackLongPress}
-        style={styles.listItem}
-      />
+    ({ item, index }: { item: Track; index: number }) => (
+      <>
+        {index === unplayedAt ? (
+          <View style={styles.divider}>
+            <View
+              style={[
+                styles.dividerLine,
+                { backgroundColor: theme.colors.border },
+              ]}
+            />
+            <Text style={theme.typography.caption}>Not played yet</Text>
+            <View
+              style={[
+                styles.dividerLine,
+                { backgroundColor: theme.colors.border },
+              ]}
+            />
+          </View>
+        ) : null}
+        <TrackListItem
+          track={item}
+          onPress={handleTrackPress}
+          onDelete={(id) => void handleDelete(id)}
+          onToggleFavorite={(track) => void handleToggleFavorite(track)}
+          onLongPress={handleTrackLongPress}
+          style={styles.listItem}
+        />
+      </>
     ),
-    [handleTrackPress, handleRename, handleDelete, handleTrackLongPress],
+    [
+      handleTrackPress,
+      handleDelete,
+      handleToggleFavorite,
+      handleTrackLongPress,
+      unplayedAt,
+      theme,
+    ],
   );
 
   const keyExtractor = useCallback((item: Track) => item.id, []);
@@ -391,10 +485,17 @@ export default function TracksScreen() {
       </View>
 
       <View style={styles.toolbar}>
-        <View style={styles.searchWrapper}>
-          <SearchBar value={searchQuery} onChangeText={setSearchQuery} />
-        </View>
-        <SortPicker value={sortOption} onChange={handleSortChange} />
+        <SearchBar value={searchQuery} onChangeText={setSearchQuery} />
+      </View>
+
+      <View style={styles.sortBar}>
+        <TrackSortBar
+          value={sortOption}
+          onChange={handleSortChange}
+          favoritesOnly={favoritesOnly}
+          onToggleFavorites={() => setFavoritesOnly((on) => !on)}
+          showFavoritesFilter={canFilterFavorites}
+        />
       </View>
 
       {visibleTracks.length === 0 ? (
@@ -435,6 +536,7 @@ export default function TracksScreen() {
         <TrackActionsSheet
           track={actionsTrack}
           onRename={() => setRenamingTrack(actionsTrack)}
+          onToggleFavorite={() => void handleToggleFavorite(actionsTrack)}
           onMoveToFolder={() => void openMoveToFolder(actionsTrack)}
           onDelete={() => void handleDelete(actionsTrack.id)}
           onDismiss={() => setActionsTrack(null)}
@@ -468,14 +570,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
-    gap: spacing.sm,
   },
-  searchWrapper: {
-    flex: 1,
+  sortBar: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   notice: {
     alignItems: 'center',
@@ -487,5 +587,15 @@ const styles = StyleSheet.create({
   },
   listItem: {
     marginBottom: spacing.sm,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
   },
 });

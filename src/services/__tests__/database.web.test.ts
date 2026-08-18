@@ -117,6 +117,212 @@ describe('transaction lifecycle', () => {
       putSpy.mockRestore();
     }
   });
+
+  // The three rejection paths below share a failure mode worth naming: a
+  // rejection that never fires does not surface as an error, it leaves the
+  // caller waiting on a promise that never settles. That is the same class
+  // of fault as the missing `blocked` handler, and it is invisible to a
+  // suite that only ever exercises the successful path.
+  //
+  // Each drives the wrapper against a stand-in transaction rather than a
+  // real one. The events under test — a request that errors without
+  // aborting, a transaction that errors, a cascade that aborts — are all
+  // awkward to provoke genuinely, and provoking them through
+  // fake-indexeddb's own event machinery would test that machinery as much
+  // as the wiring. What is uncovered here is the wiring: whether each
+  // handler is attached and settles the promise.
+
+  interface StubRequest {
+    onsuccess: (() => void) | null;
+    onerror: (() => void) | null;
+    error: Error;
+    result: unknown;
+  }
+
+  interface StubTransaction {
+    oncomplete: (() => void) | null;
+    onerror: (() => void) | null;
+    onabort: (() => void) | null;
+    error: Error;
+    objectStore: () => unknown;
+  }
+
+  /**
+   * Replaces the next `db.transaction(...)` with a stand-in whose handlers
+   * the test fires by hand. Every store method returns the same request
+   * stub, so it serves whichever wrapper is under test.
+   */
+  function stubNextTransaction(
+    fire: (tx: StubTransaction, request: StubRequest) => void,
+  ): jest.SpyInstance {
+    const request: StubRequest = {
+      onsuccess: null,
+      onerror: null,
+      error: new Error('request failed'),
+      result: undefined,
+    };
+    const store = {
+      put: () => request,
+      get: () => request,
+      getAll: () => request,
+      getAllKeys: () => request,
+      delete: () => request,
+      index: () => ({ getAllKeys: () => request }),
+    };
+    const tx: StubTransaction = {
+      oncomplete: null,
+      onerror: null,
+      onabort: null,
+      error: new Error('transaction failed'),
+      objectStore: () => store,
+    };
+    return jest
+      .spyOn(FDBDatabase.prototype, 'transaction')
+      .mockImplementationOnce(() => {
+        // Fires after the wrapper has attached its handlers, which it does
+        // synchronously in the promise executor.
+        queueMicrotask(() => fire(tx, request));
+        return tx as unknown as IDBTransaction;
+      });
+  }
+
+  it('rejects when the request errors', async () => {
+    const db = load();
+    await db.getAllStoredTracks(); // open before the spy goes on
+
+    const txSpy = stubNextTransaction((_tx, request) => request.onerror?.());
+    try {
+      await expect(db.putStoredTrack(sampleTrack)).rejects.toThrow(
+        'request failed',
+      );
+    } finally {
+      txSpy.mockRestore();
+    }
+  });
+
+  it('rejects when the transaction errors', async () => {
+    const db = load();
+    await db.getAllStoredTracks();
+
+    const txSpy = stubNextTransaction((tx) => tx.onerror?.());
+    try {
+      await expect(db.putStoredTrack(sampleTrack)).rejects.toThrow(
+        'transaction failed',
+      );
+    } finally {
+      txSpy.mockRestore();
+    }
+  });
+
+  it('rejects when the profile-delete cascade errors', async () => {
+    const db = load();
+    await db.getAllStoredTracks();
+
+    // `deleteStoredProfilesByTrack` builds its own transaction rather than
+    // going through `runTransaction`, so its handlers are a separate path
+    // with their own way of failing to settle.
+    const txSpy = stubNextTransaction((tx) => tx.onerror?.());
+    try {
+      await expect(db.deleteStoredProfilesByTrack('track-1')).rejects.toThrow(
+        'transaction failed',
+      );
+    } finally {
+      txSpy.mockRestore();
+    }
+  });
+
+  it('rejects when the profile-delete cascade aborts', async () => {
+    const db = load();
+    await db.getAllStoredTracks();
+
+    const txSpy = stubNextTransaction((tx) => tx.onabort?.());
+    try {
+      await expect(db.deleteStoredProfilesByTrack('track-1')).rejects.toThrow(
+        'transaction failed',
+      );
+    } finally {
+      txSpy.mockRestore();
+    }
+  });
+});
+
+describe('connection lifecycle', () => {
+  /**
+   * Returns the connection the module opens on its next read, or null if it
+   * reused a cached one. Capturing it through the open request keeps the
+   * module free of a test-only export.
+   */
+  async function captureConnection(
+    db: DatabaseModule,
+  ): Promise<IDBDatabase | null> {
+    let captured: IDBDatabase | null = null;
+    const realOpen = indexedDB.open.bind(indexedDB);
+    const openSpy = jest
+      .spyOn(indexedDB, 'open')
+      .mockImplementationOnce((name: string, version?: number) => {
+        const request = realOpen(name, version);
+        request.addEventListener('success', () => {
+          captured = request.result;
+        });
+        return request;
+      });
+    try {
+      await db.getAllStoredTracks();
+    } finally {
+      openSpy.mockRestore();
+    }
+    return captured;
+  }
+
+  it('closes and drops the cache when another tab needs a higher version', async () => {
+    const db = load();
+    const connection = await captureConnection(db);
+    expect(connection).not.toBeNull();
+
+    // A tab holding the old version open is precisely what makes another
+    // tab's upgrade block — the condition this module refuses to hang on.
+    // Without this handler it inflicts on other tabs the fault it defends
+    // itself from.
+    expect(typeof connection!.onversionchange).toBe('function');
+    const closeSpy = jest.spyOn(connection!, 'close');
+    connection!.onversionchange!(new Event('versionchange') as never);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    closeSpy.mockRestore();
+
+    // The cache went with it, so the next read opens a fresh connection
+    // rather than handing back the one just closed.
+    const reopened = await captureConnection(db);
+    expect(reopened).not.toBeNull();
+    expect(reopened).not.toBe(connection);
+  });
+
+  it('reopens after the browser force-closes the connection', async () => {
+    const db = load();
+    const connection = await captureConnection(db);
+    expect(connection).not.toBeNull();
+
+    // Storage cleared, or eviction under memory pressure, closes the
+    // connection out from under us. A cached dead handle would throw
+    // `InvalidStateError` on every later transaction for the rest of the
+    // page session.
+    expect(typeof connection!.onclose).toBe('function');
+    connection!.onclose!(new Event('close'));
+
+    const reopened = await captureConnection(db);
+    expect(reopened).not.toBeNull();
+    expect(reopened).not.toBe(connection);
+  });
+
+  it('keeps serving the cached connection while it is healthy', async () => {
+    const db = load();
+    const connection = await captureConnection(db);
+    expect(connection).not.toBeNull();
+
+    // The counterweight to the two tests above: nothing has gone wrong, so
+    // the cache must survive. Without this, a handler that cleared eagerly
+    // would reopen on every read and still pass both of them.
+    expect(await captureConnection(db)).toBeNull();
+  });
 });
 
 describe('markers store', () => {
@@ -199,6 +405,25 @@ describe('settings store', () => {
 });
 
 /**
+ * The version-4 schema, in one place. Both helpers below build a v4 database
+ * and must build the same one: the blocked tests only stand in for the
+ * release they represent while the version they hold open matches the
+ * version the seeded database was written at. Two independent copies of
+ * these five stores and two indexes would drift.
+ */
+function createV4Stores(db: IDBDatabase): void {
+  db.createObjectStore('tracks', { keyPath: 'id' });
+  db.createObjectStore('settings', { keyPath: 'key' });
+  db.createObjectStore('track_markers', { keyPath: 'trackId' });
+  const profiles = db.createObjectStore('marker_profiles', {
+    keyPath: 'id',
+  });
+  profiles.createIndex('trackId', 'trackId', { unique: false });
+  const folders = db.createObjectStore('folders', { keyPath: 'id' });
+  folders.createIndex('parentId', 'parentId', { unique: false });
+}
+
+/**
  * Builds a v4 database by hand — the shape this release upgrades from —
  * seeds it with nested folders and pre-favourite tracks, then closes it so
  * the module under test opens it at v5 and runs the upgrade.
@@ -207,16 +432,7 @@ function seedV4(): Promise<void> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open('refrain-meta', 4);
     open.onupgradeneeded = () => {
-      const db = open.result;
-      db.createObjectStore('tracks', { keyPath: 'id' });
-      db.createObjectStore('settings', { keyPath: 'key' });
-      db.createObjectStore('track_markers', { keyPath: 'trackId' });
-      const profiles = db.createObjectStore('marker_profiles', {
-        keyPath: 'id',
-      });
-      profiles.createIndex('trackId', 'trackId', { unique: false });
-      const folders = db.createObjectStore('folders', { keyPath: 'id' });
-      folders.createIndex('parentId', 'parentId', { unique: false });
+      createV4Stores(open.result);
     };
     open.onsuccess = () => {
       const db = open.result;
@@ -373,25 +589,32 @@ describe('upgrade from v4', () => {
     await db.getAllStoredFolders();
     const txSpy = jest.spyOn(FDBDatabase.prototype, 'transaction');
 
-    await db.putStoredFolders([
-      {
-        id: 'parent',
-        name: 'Gigs',
-        createdAt: 100,
-        pinOrder: 1,
-        lastOpenedAt: 100,
-      },
-      {
-        id: 'child',
-        name: 'March',
-        createdAt: 200,
-        pinOrder: 0,
-        lastOpenedAt: 200,
-      },
-    ]);
+    // Restore in a `finally`. Jest is not configured with `restoreMocks`, so
+    // a failed assertion here would otherwise leave the spy installed on the
+    // shared prototype for the rest of the file, and one failure would
+    // cascade into misleading results in every later test.
+    try {
+      await db.putStoredFolders([
+        {
+          id: 'parent',
+          name: 'Gigs',
+          createdAt: 100,
+          pinOrder: 1,
+          lastOpenedAt: 100,
+        },
+        {
+          id: 'child',
+          name: 'March',
+          createdAt: 200,
+          pinOrder: 0,
+          lastOpenedAt: 200,
+        },
+      ]);
 
-    expect(txSpy).toHaveBeenCalledTimes(1);
-    txSpy.mockRestore();
+      expect(txSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      txSpy.mockRestore();
+    }
 
     const folders = await db.getAllStoredFolders();
     expect(folders.find((f) => f.id === 'parent')?.pinOrder).toBe(1);
@@ -485,16 +708,7 @@ function holdV4Connection(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open('refrain-meta', 4);
     open.onupgradeneeded = () => {
-      const db = open.result;
-      db.createObjectStore('tracks', { keyPath: 'id' });
-      db.createObjectStore('settings', { keyPath: 'key' });
-      db.createObjectStore('track_markers', { keyPath: 'trackId' });
-      const profiles = db.createObjectStore('marker_profiles', {
-        keyPath: 'id',
-      });
-      profiles.createIndex('trackId', 'trackId', { unique: false });
-      const folders = db.createObjectStore('folders', { keyPath: 'id' });
-      folders.createIndex('parentId', 'parentId', { unique: false });
+      createV4Stores(open.result);
     };
     open.onsuccess = () => resolve(open.result);
     open.onerror = () => reject(open.error);
@@ -515,24 +729,42 @@ function versionOf(name: string): Promise<number> {
 }
 
 /**
- * Lets fake-indexeddb work through its queued events. Used where the thing
- * under test happens after the promise has already settled, so there is no
- * promise left to await.
+ * Lets fake-indexeddb work through its queued events until `done` reports
+ * the awaited thing has happened. Used where the thing under test happens
+ * after the promise has already settled, so there is no promise left to
+ * await.
+ *
+ * The budget is tied to the condition rather than to a fixed tick count, so
+ * a loaded runner or a larger seed cannot turn a passing assertion into a
+ * failing one. The cap only bounds the wait when the condition never comes
+ * true, which is the failure the caller is about to assert on anyway.
  */
-async function flushEvents(): Promise<void> {
-  for (let tick = 0; tick < 10; tick += 1) {
+async function flushUntil(done: () => boolean, maxTicks = 50): Promise<void> {
+  for (let tick = 0; tick < maxTicks && !done(); tick += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
 describe('opening the database', () => {
-  it('aborts the upgrade when there is no version-change transaction', async () => {
+  it('rolls the version back when the migration cannot run', async () => {
     await seedV4();
 
-    // The specification guarantees a transaction here, so the guard can only
-    // be reached by taking it away. Without the guard the version would
-    // reach 5 with unmigrated records, and the version is itself what stops
-    // the migration ever running again.
+    // Note what this does and does not prove. It asserts the property in its
+    // name: a migration that cannot run leaves the database at 4 with its
+    // records intact, rather than at 5 with records the migration never
+    // touched. It does not prove the explicit `throw` is what achieves that
+    // — dereferencing a null transaction aborts the upgrade in exactly the
+    // same way, and both surface a bare `AbortError`, so nothing reachable
+    // from here tells the two apart.
+    //
+    // The guard throws rather than returns because returning would let the
+    // upgrade commit: the version would reach 5 with unmigrated records, and
+    // the version is itself what stops the migration ever running again.
+    // Making the test discriminate would need an injectable seam around
+    // `migrateToV5`, which is a larger change than the distinction is worth.
+    //
+    // The specification guarantees a transaction here, so the path can only
+    // be reached by taking it away.
     const realOpen = indexedDB.open.bind(indexedDB);
     const openSpy = jest
       .spyOn(indexedDB, 'open')
@@ -589,7 +821,7 @@ describe('opening the database', () => {
     holder.close();
     const closeSpy = jest.spyOn(FDBDatabase.prototype, 'close');
     try {
-      await flushEvents();
+      await flushUntil(() => closeSpy.mock.calls.length > 0);
       expect(closeSpy).toHaveBeenCalledTimes(1);
     } finally {
       closeSpy.mockRestore();

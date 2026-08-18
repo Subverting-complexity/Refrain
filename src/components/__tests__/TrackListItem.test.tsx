@@ -11,20 +11,26 @@ jest.mock('react-native-gesture-handler/ReanimatedSwipeable', () => {
     (
       {
         children,
+        renderLeftActions,
         renderRightActions,
         containerStyle,
       }: {
         children?: unknown;
+        renderLeftActions?: () => unknown;
         renderRightActions?: () => unknown;
         containerStyle?: unknown;
         friction?: number;
+        leftThreshold?: number;
         rightThreshold?: number;
       },
       ref: unknown,
     ) => {
       useImperativeHandle(ref, () => ({ close: jest.fn() }));
+      // Both reveals are rendered unconditionally so a test can reach either
+      // without simulating the drag itself.
       return (
         <View style={containerStyle}>
+          {renderLeftActions?.()}
           {children}
           {renderRightActions?.()}
         </View>
@@ -267,210 +273,143 @@ describe('TrackListItem', () => {
     });
   });
 
-  describe('swipe-to-rename action', () => {
-    // The rename dialog's field and Save button, once it is open. Empty
-    // arrays mean the dialog is not shown.
-    function findRenameField(tree: ReactTestRenderer) {
+  describe('swipe-to-favourite action', () => {
+    function findFavouriteButton(tree: ReactTestRenderer, label: string) {
       return tree.root.findAll(
         (node) =>
-          node.props.accessibilityLabel === 'Track name' &&
-          typeof node.props.onChangeText === 'function',
-      );
-    }
-    function findRenameSave(tree: ReactTestRenderer) {
-      return tree.root.findAll(
-        (node) =>
-          node.props.accessibilityLabel === 'Confirm rename song.mp3' &&
+          node.props.accessibilityLabel === label &&
           typeof node.props.onPress === 'function',
       );
     }
 
-    function openRename(tree: ReactTestRenderer) {
-      act(() => {
-        tree.root
-          .findByProps({ accessibilityLabel: 'Rename song.mp3' })
-          .props.onPress();
-      });
-    }
-
-    it('renders a swipe rename button when onRename is provided', () => {
-      const tree = renderItem(baseTrack, { onRename: jest.fn() });
+    it('renders a favourite button when onToggleFavorite is provided', () => {
+      const tree = renderItem(baseTrack, { onToggleFavorite: jest.fn() });
+      act(() => tree.root.props.children);
 
       expect(
-        tree.root.findByProps({ accessibilityLabel: 'Rename song.mp3' }),
-      ).toBeDefined();
+        findFavouriteButton(tree, 'Favourite song.mp3').length,
+      ).toBeGreaterThan(0);
     });
 
-    it('renders no rename button when onRename is omitted', () => {
+    it('renders no favourite button when onToggleFavorite is omitted', () => {
       const tree = renderItem(baseTrack, { onDelete: jest.fn() });
+
+      expect(findFavouriteButton(tree, 'Favourite song.mp3')).toHaveLength(0);
+    });
+
+    it('labels the action by the state the tap produces', () => {
+      // The label names the outcome, not the current state, so a reader
+      // knows what the button does rather than what it is describing.
+      const tree = renderItem(
+        { ...baseTrack, isFavorite: true },
+        { onToggleFavorite: jest.fn() },
+      );
+
+      expect(
+        findFavouriteButton(tree, 'Unfavourite song.mp3').length,
+      ).toBeGreaterThan(0);
+      expect(findFavouriteButton(tree, 'Favourite song.mp3')).toHaveLength(0);
+    });
+
+    it('calls onToggleFavorite with the track', () => {
+      const onToggleFavorite = jest.fn();
+      const tree = renderItem(baseTrack, { onToggleFavorite });
+
+      act(() => {
+        findFavouriteButton(tree, 'Favourite song.mp3')[0].props.onPress();
+      });
+
+      expect(onToggleFavorite).toHaveBeenCalledWith(baseTrack);
+    });
+
+    it('shows a star in the row for a favourited track', () => {
+      const starred = renderItem(
+        { ...baseTrack, isFavorite: true },
+        { onPress: jest.fn() },
+      );
+      const plain = renderItem(baseTrack, { onPress: jest.fn() });
+
+      // Visible without swiping, so the list answers "which of these are
+      // favourites" at a glance. Neither row wires up the favourite swipe,
+      // so the only star either could show is the row's own.
+      expect(
+        starred.root.findAll((n) => n.props.name === 'star').length,
+      ).toBeGreaterThan(0);
+      expect(plain.root.findAll((n) => n.props.name === 'star')).toHaveLength(
+        0,
+      );
+    });
+
+    it('announces the favourite state in the row label', () => {
+      const tree = renderItem(
+        { ...baseTrack, isFavorite: true },
+        { onPress: jest.fn() },
+      );
 
       expect(
         tree.root.findAll(
-          (node) => node.props.accessibilityLabel === 'Rename song.mp3',
-        ),
-      ).toHaveLength(0);
-    });
-
-    it('opens the rename dialog seeded with the base name', () => {
-      const tree = renderItem(baseTrack, { onRename: jest.fn() });
-
-      openRename(tree);
-
-      expect(findRenameField(tree)[0].props.value).toBe('song');
-    });
-
-    it('calls onRename with the id and the extension-preserving filename', () => {
-      const onRename = jest.fn();
-      const tree = renderItem(baseTrack, { onRename });
-
-      openRename(tree);
-      act(() => findRenameField(tree)[0].props.onChangeText('Practice take'));
-      act(() => findRenameSave(tree)[0].props.onPress());
-
-      expect(onRename).toHaveBeenCalledWith('track-1', 'Practice take.mp3');
-      // Saving dismisses the dialog.
-      expect(findRenameField(tree)).toHaveLength(0);
-    });
-
-    it('does not call onRename when the dialog is cancelled', () => {
-      const onRename = jest.fn();
-      const tree = renderItem(baseTrack, { onRename });
-
-      openRename(tree);
-      act(() => {
-        tree.root
-          .findAll(
-            (node) =>
-              node.props.accessibilityLabel === 'Cancel' &&
-              typeof node.props.onPress === 'function',
-          )[0]
-          .props.onPress();
-      });
-
-      expect(onRename).not.toHaveBeenCalled();
-      expect(findRenameField(tree)).toHaveLength(0);
-    });
-
-    it('does not call onRename when the name is left unchanged', () => {
-      const onRename = jest.fn();
-      const tree = renderItem(baseTrack, { onRename });
-
-      openRename(tree);
-      act(() => findRenameSave(tree)[0].props.onPress());
-
-      expect(onRename).not.toHaveBeenCalled();
-      expect(findRenameField(tree)).toHaveLength(0);
-    });
-
-    it('re-seeds the field from the current filename on each open', () => {
-      const onRename = jest.fn();
-      const tree = renderItem(baseTrack, { onRename });
-
-      openRename(tree);
-      act(() => findRenameField(tree)[0].props.onChangeText('Discarded edit'));
-      act(() => {
-        tree.root
-          .findAll(
-            (node) =>
-              node.props.accessibilityLabel === 'Cancel' &&
-              typeof node.props.onPress === 'function',
-          )[0]
-          .props.onPress();
-      });
-      openRename(tree);
-
-      expect(findRenameField(tree)[0].props.value).toBe('song');
-    });
-
-    it('offers both actions when rename and delete are wired up', () => {
-      const tree = renderItem(baseTrack, {
-        onRename: jest.fn(),
-        onDelete: jest.fn(),
-      });
-
-      expect(
-        tree.root.findByProps({ accessibilityLabel: 'Rename song.mp3' }),
-      ).toBeDefined();
-      expect(
-        tree.root.findByProps({ accessibilityLabel: 'Delete song.mp3' }),
-      ).toBeDefined();
+          (n) => n.props.accessibilityLabel === `${ESTIMATED_LABEL}, favourite`,
+        ).length,
+      ).toBeGreaterThan(0);
     });
   });
 
   describe('accessibility hint', () => {
-    it('includes swipe left in the hint when both onPress and onDelete are given', () => {
-      const onDelete = jest.fn();
-      const onPress = jest.fn();
-      const tree = renderItem(baseTrack, { onDelete, onPress });
+    function hintFor(
+      props: Partial<React.ComponentProps<typeof TrackListItem>>,
+      track: Track = baseTrack,
+    ) {
+      const tree = renderItem(track, props);
+      const label = `${ESTIMATED_LABEL}${track.isFavorite ? ', favourite' : ''}`;
+      return tree.root.findByProps({ accessibilityLabel: label }).props
+        .accessibilityHint;
+    }
 
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toContain('swipe left');
-    });
-
-    it('sets hint for play only when no onDelete is given', () => {
-      const onPress = jest.fn();
-      const tree = renderItem(baseTrack, { onPress });
-
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toBe('Tap to play');
-    });
-
-    it('names both swipe targets when rename and delete are wired up', () => {
-      const tree = renderItem(baseTrack, {
-        onPress: jest.fn(),
-        onRename: jest.fn(),
-        onDelete: jest.fn(),
-      });
-
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toBe(
-        'Tap to play, swipe left to rename or delete, long press to delete',
+    // Direction matters more than wording here: `renderLeftActions` draws
+    // the panel on the left edge, which the user reveals by dragging the row
+    // to the RIGHT. A hint that says "swipe left to favourite" would send a
+    // screen-reader user to Delete.
+    it('names each swipe direction with the action it carries', () => {
+      expect(
+        hintFor({
+          onPress: jest.fn(),
+          onToggleFavorite: jest.fn(),
+          onDelete: jest.fn(),
+          onLongPress: jest.fn(),
+        }),
+      ).toBe(
+        'Tap to play, swipe right to favourite, swipe left to delete, long press for more',
       );
     });
 
+    it('reflects the state the favourite swipe would produce', () => {
+      expect(
+        hintFor(
+          { onPress: jest.fn(), onToggleFavorite: jest.fn() },
+          { ...baseTrack, isFavorite: true },
+        ),
+      ).toBe('Tap to play, swipe right to unfavourite');
+    });
+
+    it('sets hint for play only when nothing else is wired up', () => {
+      expect(hintFor({ onPress: jest.fn() })).toBe('Tap to play');
+    });
+
     // The hint must not advertise a gesture the row does not wire up.
-    it('names only rename when delete is not wired up', () => {
-      const tree = renderItem(baseTrack, {
-        onPress: jest.fn(),
-        onRename: jest.fn(),
-      });
-
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toBe(
-        'Tap to play, swipe left to rename',
+    it('omits the favourite swipe when it is not wired up', () => {
+      expect(hintFor({ onPress: jest.fn(), onDelete: jest.fn() })).toBe(
+        'Tap to play, swipe left to delete, long press to delete',
       );
     });
 
     it('capitalizes the hint when the row is not tappable', () => {
-      const tree = renderItem(baseTrack, { onRename: jest.fn() });
-
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toBe('Swipe left to rename');
+      expect(hintFor({ onToggleFavorite: jest.fn() })).toBe(
+        'Swipe right to favourite',
+      );
     });
 
     it('omits the hint entirely when no action is wired up', () => {
-      const tree = renderItem(baseTrack);
-
-      const pressable = tree.root.findByProps({
-        accessibilityLabel: ESTIMATED_LABEL,
-      });
-
-      expect(pressable.props.accessibilityHint).toBeUndefined();
+      expect(hintFor({})).toBeUndefined();
     });
   });
 });

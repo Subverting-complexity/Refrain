@@ -303,4 +303,21 @@ describe('closeDatabase', () => {
     closeDatabase();
     expect(mockCloseSync).not.toHaveBeenCalled();
   });
+
+  it('does not strand the handle when the close itself fails', () => {
+    getDatabase();
+    mockCloseSync.mockImplementationOnce(() => {
+      throw new Error('disk I/O error');
+    });
+
+    // The caller asked for a close and did not get one, so the error is
+    // theirs to see.
+    expect(() => closeDatabase()).toThrow('disk I/O error');
+
+    // What must not happen is the stale handle staying cached: every later
+    // call would then be handed a database that is already gone, for the
+    // rest of the process. Reopening proves the reference was dropped.
+    getDatabase();
+    expect(mockOpenDatabaseSync).toHaveBeenCalledTimes(2);
+  });
 });

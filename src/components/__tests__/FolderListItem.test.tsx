@@ -151,9 +151,11 @@ describe('FolderListItem as a folder', () => {
     act(() => renderer.unmount());
   });
 
-  // Deleting a folder is not reversible, and it moves every track inside it,
-  // so the row asks before it acts.
-  it('asks before deleting, and only then calls back', () => {
+  // Deleting a folder is not reversible and it moves every track inside it,
+  // so it is still confirmed — but the confirmation belongs to the screen,
+  // which is the only place that knows how many tracks are about to move and
+  // where they are going. The row asks for the delete and no more.
+  it('raises the delete request rather than confirming it here', () => {
     const onDelete = jest.fn();
     const renderer = render(
       <FolderListItem name="Scales" trackCount={2} onDelete={onDelete} />,
@@ -164,40 +166,70 @@ describe('FolderListItem as a folder', () => {
         .findByProps({ accessibilityLabel: 'Delete Scales' })
         .props.onPress();
     });
-    expect(onDelete).not.toHaveBeenCalled();
 
-    act(() => {
-      renderer.root
-        .findByProps({ accessibilityLabel: 'Confirm delete Scales' })
-        .props.onPress();
-    });
     expect(onDelete).toHaveBeenCalledTimes(1);
-    act(() => renderer.unmount());
-  });
-
-  it('cancels the delete without calling back', () => {
-    const onDelete = jest.fn();
-    const renderer = render(
-      <FolderListItem name="Scales" trackCount={2} onDelete={onDelete} />,
-    );
-
-    act(() => {
-      renderer.root
-        .findByProps({ accessibilityLabel: 'Delete Scales' })
-        .props.onPress();
-    });
-    act(() => {
-      renderer.root
-        .findByProps({ accessibilityLabel: 'Cancel delete' })
-        .props.onPress();
-    });
-
-    expect(onDelete).not.toHaveBeenCalled();
     expect(
       renderer.root.findAllByProps({
         accessibilityLabel: 'Confirm delete Scales',
       }),
     ).toHaveLength(0);
+    act(() => renderer.unmount());
+  });
+
+  it('opens the action sheet on long press', () => {
+    const onLongPress = jest.fn();
+    const renderer = render(
+      <FolderListItem
+        name="Scales"
+        trackCount={2}
+        onPress={jest.fn()}
+        onLongPress={onLongPress}
+      />,
+    );
+
+    const row = renderer.root.findByProps({
+      accessibilityLabel: 'Scales folder, 2 tracks',
+    });
+    act(() => row.props.onLongPress());
+
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(row.props.accessibilityHint).toBe(
+      'Tap to open folder, long press for more',
+    );
+    act(() => renderer.unmount());
+  });
+
+  it('announces and marks a pinned folder', () => {
+    const renderer = render(
+      <FolderListItem
+        name="Scales"
+        trackCount={2}
+        pinned
+        onPress={jest.fn()}
+      />,
+    );
+
+    // Pinned rows sit above the recently-used ones, so the row has to say it
+    // is pinned or its position looks arbitrary.
+    expect(
+      renderer.root.findAllByProps({
+        accessibilityLabel: 'Scales folder, pinned, 2 tracks',
+      }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      renderer.root.findAll((n) => n.props.name === 'pin').length,
+    ).toBeGreaterThan(0);
+    act(() => renderer.unmount());
+  });
+
+  it('shows no pin marker when the folder is not pinned', () => {
+    const renderer = render(
+      <FolderListItem name="Scales" trackCount={2} onPress={jest.fn()} />,
+    );
+
+    expect(renderer.root.findAll((n) => n.props.name === 'pin')).toHaveLength(
+      0,
+    );
     act(() => renderer.unmount());
   });
 });

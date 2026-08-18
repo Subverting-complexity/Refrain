@@ -9,6 +9,7 @@ import {
   insertFolder,
   loadFolders,
   renameFolder,
+  reorderPinnedFolders,
 } from '@/src/services/folderStore';
 import { getTrackCountsByFolder, insertTrack } from '@/src/services/trackStore';
 import { Folder, Track, TrackCounts } from '@/src/types';
@@ -112,6 +113,8 @@ jest.mock('@/src/components/FolderListItem', () => {
       onPress,
       onDelete,
       onRename,
+      onLongPress,
+      pinned,
     }: {
       name: string;
       trackCount: number;
@@ -120,6 +123,8 @@ jest.mock('@/src/components/FolderListItem', () => {
       onPress?: () => void;
       onDelete?: () => void;
       onRename?: () => void;
+      onLongPress?: () => void;
+      pinned?: boolean;
     }) =>
       ReactLocal.createElement(View, {
         testID: 'root-entry',
@@ -130,6 +135,20 @@ jest.mock('@/src/components/FolderListItem', () => {
         onPress,
         onDelete,
         onRename,
+        onLongPress,
+        pinned: pinned ?? false,
+      }),
+  };
+});
+
+jest.mock('@/src/components/FolderActionsSheet', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    FolderActionsSheet: (props: Record<string, unknown>) =>
+      ReactLocal.createElement(View, {
+        testID: 'folder-actions-sheet',
+        ...props,
       }),
   };
 });
@@ -190,6 +209,9 @@ const mockRenameFolder = renameFolder as jest.MockedFunction<
 const mockCounts = getTrackCountsByFolder as jest.MockedFunction<
   typeof getTrackCountsByFolder
 >;
+const mockReorderPinned = reorderPinnedFolders as jest.MockedFunction<
+  typeof reorderPinnedFolders
+>;
 const mockInsertTrack = insertTrack as jest.MockedFunction<typeof insertTrack>;
 const mockPickAndImportFile = pickAndImportFile as jest.MockedFunction<
   typeof pickAndImportFile
@@ -199,8 +221,12 @@ function counts(overrides: Partial<TrackCounts> = {}): TrackCounts {
   return { byFolder: {}, all: 0, favorites: 0, unfiled: 0, ...overrides };
 }
 
-function folder(id: string, name: string): Folder {
-  return { id, name, createdAt: 0, pinOrder: null, lastOpenedAt: null };
+function folder(
+  id: string,
+  name: string,
+  pinOrder: number | null = null,
+): Folder {
+  return { id, name, createdAt: 0, pinOrder, lastOpenedAt: null };
 }
 
 const sampleTrack: Track = {
@@ -233,6 +259,8 @@ interface EntryProps {
   onPress?: () => void;
   onDelete?: () => void;
   onRename?: () => void;
+  onLongPress?: () => void;
+  pinned?: boolean;
 }
 
 // findAllByProps matches both the mock element and the host view it renders
@@ -508,6 +536,58 @@ describe('library root folder management', () => {
 
   // Deleting a folder unfiles its tracks, so the counts on the built-in rows
   // move too — the screen has to read them back rather than guess.
+  // The row raises the request; the screen asks the question, because only
+  // the screen knows how many tracks are about to move and where to.
+  async function confirmDelete(
+    renderer: ReactTestRenderer,
+    name: string,
+  ): Promise<void> {
+    await act(async () => {
+      renderer.root
+        .findByProps({ accessibilityLabel: `Confirm delete ${name}` })
+        .props.onPress();
+    });
+  }
+
+  it('names the destination and the count before deleting a folder', async () => {
+    mockCounts.mockReturnValue(counts({ all: 2, byFolder: { 'f-1': 24 } }));
+    mockLoadFolders.mockResolvedValue([folder('f-1', 'Scales')]);
+
+    const renderer = await renderScreen();
+    const scales = entries(renderer).find((e) => e.entryName === 'Scales')!;
+    await act(async () => {
+      await scales.onDelete?.();
+    });
+
+    // Nothing has been deleted yet, and the question says what will happen
+    // to what is inside.
+    expect(mockDeleteFolder).not.toHaveBeenCalled();
+    const dialogText = renderer.root
+      .findAll((n) => typeof n.props.children === 'string')
+      .map((n) => n.props.children as string);
+    expect(dialogText).toContain('Delete Scales?');
+    expect(dialogText).toContain('Its 24 tracks move to Unfiled.');
+    act(() => renderer.unmount());
+  });
+
+  it('says an empty folder is empty rather than moving no tracks', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0, byFolder: { 'f-1': 0 } }));
+    mockLoadFolders.mockResolvedValue([folder('f-1', 'Scales')]);
+
+    const renderer = await renderScreen();
+    const scales = entries(renderer).find((e) => e.entryName === 'Scales')!;
+    await act(async () => {
+      await scales.onDelete?.();
+    });
+
+    expect(
+      renderer.root
+        .findAll((n) => typeof n.props.children === 'string')
+        .map((n) => n.props.children as string),
+    ).toContain('This folder is empty.');
+    act(() => renderer.unmount());
+  });
+
   it('re-reads the library after deleting a folder', async () => {
     mockCounts.mockReturnValue(counts({ all: 2, byFolder: { 'f-1': 2 } }));
     mockLoadFolders.mockResolvedValue([folder('f-1', 'Scales')]);
@@ -520,6 +600,7 @@ describe('library root folder management', () => {
     await act(async () => {
       await scales.onDelete?.();
     });
+    await confirmDelete(renderer, 'Scales');
 
     expect(mockDeleteFolder).toHaveBeenCalledWith('f-1');
     expect(toastLabels(renderer)).toContain('Folder deleted');
@@ -543,9 +624,225 @@ describe('library root folder management', () => {
     await act(async () => {
       await scales.onDelete?.();
     });
+    await confirmDelete(renderer, 'Scales');
 
     expect(toastLabels(renderer)).toContain('Failed to delete folder');
     expect(entryNames(renderer)).toContain('Scales');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('library root new folder placement', () => {
+  // #240: a new folder belongs at the top of the unpinned block. Appending
+  // would drop it below every existing folder and then jump it upward on the
+  // next reload, which is the behaviour the requirement exists to prevent.
+  it('inserts a new folder above the unpinned folders and below the pinned', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('p', 'Pinned', 0),
+      folder('u', 'Unpinned'),
+    ]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Create folder' })
+        .props.onPress();
+    });
+    await act(async () => {
+      await renderer.root
+        .findAllByProps({ testID: 'create-folder-dialog' })
+        .filter((node) => typeof node.type !== 'string')[0]
+        .props.onSave('Fresh');
+    });
+
+    expect(entryNames(renderer)).toEqual([
+      'All tracks',
+      'Favourites',
+      'Pinned',
+      'Fresh',
+      'Unpinned',
+    ]);
+    act(() => renderer.unmount());
+  });
+
+  it('stamps the new folder the way the store will store it', async () => {
+    // Non-empty, so the screen shows the library rather than the empty state
+    // (which has no Create folder button).
+    mockCounts.mockReturnValue(counts({ all: 1, unfiled: 1 }));
+    mockLoadFolders.mockResolvedValue([]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Create folder' })
+        .props.onPress();
+    });
+    await act(async () => {
+      await renderer.root
+        .findAllByProps({ testID: 'create-folder-dialog' })
+        .filter((node) => typeof node.type !== 'string')[0]
+        .props.onSave('Fresh');
+    });
+
+    // insertFolder defaults lastOpenedAt to createdAt. Holding null locally
+    // would claim a value the database does not have and sort the folder to
+    // the never-opened tail.
+    const written = mockInsertFolder.mock.calls[0][0];
+    expect(written.lastOpenedAt).toBe(written.createdAt);
+    act(() => renderer.unmount());
+  });
+});
+
+describe('library root folder pinning', () => {
+  // Every pin, unpin and move goes through reorderPinnedFolders, which
+  // rewrites the whole block in one pass. Per-row writes could leave two
+  // folders claiming the same slot after a partial failure.
+  function openSheet(renderer: ReactTestRenderer, name: string) {
+    const entry = entries(renderer).find((e) => e.entryName === name)!;
+    act(() => entry.onLongPress?.());
+    return renderer.root
+      .findAllByProps({ testID: 'folder-actions-sheet' })
+      .filter((node) => typeof node.type !== 'string')[0];
+  }
+
+  it('appends a newly pinned folder to the bottom of the block', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('a', 'Alpha', 0),
+      folder('b', 'Beta', 1),
+      folder('c', 'Gamma'),
+    ]);
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Gamma');
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    // Pinning a third folder must not displace the two already in a
+    // deliberate order.
+    expect(mockReorderPinned).toHaveBeenCalledWith(['a', 'b', 'c']);
+    act(() => renderer.unmount());
+  });
+
+  it('closes the gap when a folder is unpinned', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('a', 'Alpha', 0),
+      folder('b', 'Beta', 1),
+      folder('c', 'Gamma', 2),
+    ]);
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Beta');
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    expect(mockReorderPinned).toHaveBeenCalledWith(['a', 'c']);
+    act(() => renderer.unmount());
+  });
+
+  it('swaps neighbours within the pinned block', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('a', 'Alpha', 0),
+      folder('b', 'Beta', 1),
+      folder('c', 'Gamma', 2),
+    ]);
+
+    const renderer = await renderScreen();
+    const up = openSheet(renderer, 'Beta');
+    await act(async () => {
+      await up.props.onMoveUp();
+    });
+    expect(mockReorderPinned).toHaveBeenLastCalledWith(['b', 'a', 'c']);
+
+    const down = openSheet(renderer, 'Beta');
+    await act(async () => {
+      await down.props.onMoveDown();
+    });
+    expect(mockReorderPinned).toHaveBeenLastCalledWith(['a', 'c', 'b']);
+    act(() => renderer.unmount());
+  });
+
+  it('marks the pinned rows so their position does not read as arbitrary', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('a', 'Alpha', 0),
+      folder('c', 'Gamma'),
+    ]);
+
+    const renderer = await renderScreen();
+
+    expect(entries(renderer).find((e) => e.entryName === 'Alpha')?.pinned).toBe(
+      true,
+    );
+    expect(entries(renderer).find((e) => e.entryName === 'Gamma')?.pinned).toBe(
+      false,
+    );
+    act(() => renderer.unmount());
+  });
+
+  // A soft cap: the ninth pin still works, because a reader who wants nine
+  // has a reason and being refused would be worse than being told.
+  it('pins past the soft cap and says why it may not help', async () => {
+    const pinned = Array.from({ length: 8 }, (_, i) =>
+      folder(`p${i}`, `Pinned ${i}`, i),
+    );
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    // Listed first only so it falls inside FlatList's initial window; the
+    // pinned block's own order comes from pinOrder, not from this array.
+    mockLoadFolders.mockResolvedValue([folder('x', 'Extra'), ...pinned]);
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Extra');
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    expect(mockReorderPinned).toHaveBeenCalledWith([
+      ...pinned.map((f) => f.id),
+      'x',
+    ]);
+    expect(toastLabels(renderer).join(' ')).toContain('9 folders pinned');
+    act(() => renderer.unmount());
+  });
+
+  it('says nothing reassuring when the pin lands but the read back fails', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([folder('c', 'Gamma')]);
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Gamma');
+    mockLoadFolders.mockRejectedValueOnce(new Error('db read failed'));
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    // "Folder pinned" on top of "Failed to load library" would contradict
+    // itself. The write did land, so neither is a lie — but only one of them
+    // tells the reader something they can act on.
+    expect(toastLabels(renderer)).toContain('Failed to load library');
+    expect(toastLabels(renderer)).not.toContain('Folder pinned');
+    act(() => renderer.unmount());
+  });
+
+  it('reports a failed pin without claiming it worked', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([folder('c', 'Gamma')]);
+    mockReorderPinned.mockImplementationOnce(() => {
+      throw new Error('db write failed');
+    });
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Gamma');
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    expect(toastLabels(renderer)).toContain('Failed to pin folder');
     act(() => renderer.unmount());
   });
 });

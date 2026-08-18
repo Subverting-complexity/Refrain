@@ -214,8 +214,14 @@ function migrateFoldersSchema(database: SQLite.SQLiteDatabase): void {
 }
 
 export function closeDatabase(): void {
-  if (db) {
-    db.closeSync();
-    db = null;
-  }
+  if (!db) return;
+  const opened = db;
+  // Drop the handle before closing, not after. A close that throws would
+  // otherwise leave the stale handle cached for the rest of the process, and
+  // every later `getDatabase` call would hand back a database that is already
+  // gone. This is the mirror of the open path above, which likewise refuses
+  // to cache a handle it could not make good. The error still reaches the
+  // caller — they asked for a close and did not get one.
+  db = null;
+  opened.closeSync();
 }

@@ -2,6 +2,9 @@
   "name": "refrain",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22.13"
+  },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "expo": "~56.0.12",
