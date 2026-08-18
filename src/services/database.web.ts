@@ -183,18 +183,37 @@ function openDb(): Promise<IDBDatabase> {
         migrateToV5(upgrade);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    // Rejecting on `blocked` does not cancel the open request: when the
+    // other tab eventually closes, the upgrade goes ahead and `onsuccess`
+    // fires against a promise that has already settled. Nothing would ever
+    // reference that connection, and nothing would ever close it, so each
+    // retry would leave another one open for the rest of the page session.
+    // Track whether the promise is spoken for, and close the late arrival.
+    let settled = false;
+    request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      settled = true;
+      reject(request.error);
+    };
     // Without this, an upgrade held up by another tab still holding the
     // old version fires neither handler, and the caller waits on a promise
     // that never settles. This release bumps the version, so that path is
     // newly reachable for anyone with the app open twice.
-    request.onblocked = () =>
+    request.onblocked = () => {
+      settled = true;
       reject(
         new Error(
           'Refrain is open in another tab using an older version of its database. Close the other tab and reload.',
         ),
       );
+    };
   });
 
   // A failed open must not be cached: private browsing, a denied storage

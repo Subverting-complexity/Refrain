@@ -5,10 +5,14 @@
  * Web metadata persistence, backed by IndexedDB. Exercised against
  * `fake-indexeddb` so the real object-store logic (not a mock) is covered.
  */
-// `IDBObjectStore` re-exported here is fake-indexeddb's concrete store class
-// (`FDBObjectStore`); spying on its prototype lets the abort test intercept a
-// real `put`.
-import { IDBFactory, IDBObjectStore as FDBObjectStore } from 'fake-indexeddb';
+// The classes re-exported here are fake-indexeddb's concrete implementations
+// (`FDBObjectStore`, `FDBDatabase`); spying on their prototypes lets a test
+// intercept a real `put`, count real transactions, or watch a real `close`.
+import {
+  IDBDatabase as FDBDatabase,
+  IDBFactory,
+  IDBObjectStore as FDBObjectStore,
+} from 'fake-indexeddb';
 
 import type { StoredTrack } from '../database.web';
 
@@ -362,6 +366,12 @@ describe('upgrade from v4', () => {
   it('writes a rearranged pinned block in one transaction', async () => {
     await seedV4();
     const db = load();
+    // Open the database before the spy goes on, so the only transaction it
+    // counts is the batch's own. Asserting that the records simply arrived
+    // would pass just as well against a write-each-folder-separately
+    // version, which is the implementation this test exists to rule out.
+    await db.getAllStoredFolders();
+    const txSpy = jest.spyOn(FDBDatabase.prototype, 'transaction');
 
     await db.putStoredFolders([
       {
@@ -380,9 +390,62 @@ describe('upgrade from v4', () => {
       },
     ]);
 
+    expect(txSpy).toHaveBeenCalledTimes(1);
+    txSpy.mockRestore();
+
     const folders = await db.getAllStoredFolders();
     expect(folders.find((f) => f.id === 'parent')?.pinOrder).toBe(1);
     expect(folders.find((f) => f.id === 'child')?.pinOrder).toBe(0);
+  });
+
+  it('moves no folder at all when the batch aborts partway through', async () => {
+    await seedV4();
+    const db = load();
+
+    // The point of the single transaction is that a rearrangement lands
+    // whole or not at all. Abort on the second write and confirm the first
+    // rolled back with it, rather than leaving a mix of old and new
+    // positions behind — the state that produces duplicate pin slots.
+    const realPut = FDBObjectStore.prototype.put;
+    let writes = 0;
+    const putSpy = jest
+      .spyOn(FDBObjectStore.prototype, 'put')
+      .mockImplementation(function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        const request = realPut.call(this, value, key);
+        writes += 1;
+        if (writes === 2) this.transaction.abort();
+        return request;
+      });
+
+    try {
+      await expect(
+        db.putStoredFolders([
+          {
+            id: 'parent',
+            name: 'Gigs',
+            createdAt: 100,
+            pinOrder: 1,
+            lastOpenedAt: 100,
+          },
+          {
+            id: 'child',
+            name: 'March',
+            createdAt: 200,
+            pinOrder: 0,
+            lastOpenedAt: 200,
+          },
+        ]),
+      ).rejects.toBeDefined();
+    } finally {
+      putSpy.mockRestore();
+    }
+
+    const folders = await db.getAllStoredFolders();
+    expect(folders.map((f) => f.pinOrder)).toEqual([null, null]);
   });
 
   it('writing an empty batch touches nothing', async () => {
@@ -409,5 +472,145 @@ describe('upgrade from v4', () => {
       importedAt: 1_700_000_000_000,
       folderId: null,
     });
+  });
+});
+
+/**
+ * Opens the v4 database and leaves the connection open, standing in for a
+ * second browser tab still running the previous release. An upgrade to v5
+ * cannot proceed while that connection is held, which is what makes the
+ * open request fire `blocked`.
+ */
+function holdV4Connection(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('refrain-meta', 4);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      db.createObjectStore('tracks', { keyPath: 'id' });
+      db.createObjectStore('settings', { keyPath: 'key' });
+      db.createObjectStore('track_markers', { keyPath: 'trackId' });
+      const profiles = db.createObjectStore('marker_profiles', {
+        keyPath: 'id',
+      });
+      profiles.createIndex('trackId', 'trackId', { unique: false });
+      const folders = db.createObjectStore('folders', { keyPath: 'id' });
+      folders.createIndex('parentId', 'parentId', { unique: false });
+    };
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+}
+
+/** Reads a database's current version without upgrading it. */
+function versionOf(name: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(name);
+    open.onsuccess = () => {
+      const { version } = open.result;
+      open.result.close();
+      resolve(version);
+    };
+    open.onerror = () => reject(open.error);
+  });
+}
+
+/**
+ * Lets fake-indexeddb work through its queued events. Used where the thing
+ * under test happens after the promise has already settled, so there is no
+ * promise left to await.
+ */
+async function flushEvents(): Promise<void> {
+  for (let tick = 0; tick < 10; tick += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+describe('opening the database', () => {
+  it('aborts the upgrade when there is no version-change transaction', async () => {
+    await seedV4();
+
+    // The specification guarantees a transaction here, so the guard can only
+    // be reached by taking it away. Without the guard the version would
+    // reach 5 with unmigrated records, and the version is itself what stops
+    // the migration ever running again.
+    const realOpen = indexedDB.open.bind(indexedDB);
+    const openSpy = jest
+      .spyOn(indexedDB, 'open')
+      .mockImplementationOnce((name: string, version?: number) => {
+        const request = realOpen(name, version);
+        // A no-op setter as well as the getter: fake-indexeddb assigns the
+        // real transaction here on its way into the upgrade, and a
+        // getter-only property makes that assignment throw inside the
+        // library rather than inside the code under test.
+        Object.defineProperty(request, 'transaction', {
+          configurable: true,
+          get: () => null,
+          set: () => {},
+        });
+        return request;
+      });
+
+    const db = load();
+    try {
+      await expect(db.getAllStoredTracks()).rejects.toBeDefined();
+    } finally {
+      openSpy.mockRestore();
+    }
+
+    // The aborted upgrade rolls the version back, so the records are still
+    // there in their v4 shape rather than half migrated.
+    expect(await versionOf('refrain-meta')).toBe(4);
+  });
+
+  it('rejects with an explanation when another tab holds the old version open', async () => {
+    const holder = await holdV4Connection();
+    const db = load();
+
+    try {
+      await expect(db.getAllStoredTracks()).rejects.toThrow(
+        /open in another tab/,
+      );
+    } finally {
+      holder.close();
+    }
+  });
+
+  it('closes the connection a blocked upgrade left behind', async () => {
+    const holder = await holdV4Connection();
+    const db = load();
+    await expect(db.getAllStoredTracks()).rejects.toThrow(
+      /open in another tab/,
+    );
+
+    // Rejecting did not cancel the open request. Once the other tab closes,
+    // the upgrade goes ahead and hands back a connection nothing is waiting
+    // for; left open it would sit there for the rest of the page session,
+    // one more for every retry.
+    holder.close();
+    const closeSpy = jest.spyOn(FDBDatabase.prototype, 'close');
+    try {
+      await flushEvents();
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      closeSpy.mockRestore();
+    }
+  });
+
+  it('opens again after a failed open rather than replaying the rejection', async () => {
+    const db = load();
+
+    // Private browsing or a denied storage permission fails the open. A
+    // cached rejection would then fail every later call for the rest of the
+    // page session, with no way to try again.
+    const openSpy = jest.spyOn(indexedDB, 'open').mockImplementationOnce(() => {
+      throw new Error('storage is not available');
+    });
+
+    await expect(db.getAllStoredTracks()).rejects.toThrow(
+      'storage is not available',
+    );
+    openSpy.mockRestore();
+
+    await expect(db.getAllStoredTracks()).resolves.toEqual([]);
   });
 });
