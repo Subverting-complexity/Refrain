@@ -73,9 +73,12 @@ const sampleTrack: Track = {
 /**
  * Opening the database runs both schema migrations, which read the table
  * columns and check whether the one-off folder flatten has already run.
- * Answering both here keeps that machinery out of the way: no ALTER is
- * issued and the flatten is treated as done, so a test only sees the
- * statements it is actually about. Tests that care override these.
+ *
+ * Reporting no columns means every ALTER is issued, against a mocked
+ * `execSync` that does nothing with them; what matters is that the flatten
+ * is treated as already done, because that is the part of the migration
+ * that writes through `runSync` and would otherwise show up in the
+ * statement assertions below. Tests that care override these.
  */
 beforeEach(() => {
   jest.clearAllMocks();
@@ -502,8 +505,13 @@ describe('loadTracks scopes', () => {
     const { loadTracks } = require('../trackStore');
     await loadTracks();
 
+    // Columns are named rather than starred, so the retired sortOrder column
+    // cannot ride along onto the returned track.
     expect(mockGetAllSync).toHaveBeenCalledWith(
-      'SELECT * FROM tracks ORDER BY importedAt DESC',
+      expect.stringContaining('SELECT id, filename, uri'),
+    );
+    expect(mockGetAllSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('SELECT *'),
     );
   });
 

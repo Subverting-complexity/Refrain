@@ -56,7 +56,9 @@ describe('loadFolders', () => {
       'CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END ASC',
     );
     expect(sql).toContain('lastOpenedAt DESC');
-    expect(sql).toContain('name ASC');
+    // Byte order would put every capital before every lowercase letter,
+    // which is not what the web implementation does.
+    expect(sql).toContain('name COLLATE NOCASE ASC');
   });
 
   it('maps rows to folders, defaulting the pin and open-time fields', () => {
@@ -146,6 +148,21 @@ describe('insertFolder', () => {
     const sql = mockRunSync.mock.calls[0][0] as string;
     expect(sql).not.toContain('parentId');
     expect(sql).not.toContain('sortOrder');
+  });
+
+  // The column list and its placeholders are derived from one array, so they
+  // cannot drift apart when a sixth column is added later.
+  it('binds one placeholder, and one argument, per column', () => {
+    const { insertFolder } = require('../folderStore');
+    insertFolder(sampleFolder);
+
+    const [sql, ...params] = mockRunSync.mock.calls[0];
+    const groups = /\(([^)]*)\)[^(]*\(([^)]*)\)/.exec(sql as string);
+    expect(groups).not.toBeNull();
+    const columnCount = groups![1].split(',').length;
+
+    expect(groups![2].split(',')).toHaveLength(columnCount);
+    expect(params).toHaveLength(columnCount);
   });
 });
 

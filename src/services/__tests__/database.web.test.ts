@@ -252,6 +252,67 @@ function seedV4(): Promise<void> {
   });
 }
 
+/**
+ * Builds a v3 database — before the folders store existed at all — with a
+ * track record that predates `folderId`. This is the riskier upgrade route:
+ * the migration reads a folders store created moments earlier in the same
+ * version-change transaction, and track records missing fields it defaults.
+ */
+function seedV3(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('refrain-meta', 3);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      db.createObjectStore('tracks', { keyPath: 'id' });
+      db.createObjectStore('settings', { keyPath: 'key' });
+      db.createObjectStore('track_markers', { keyPath: 'trackId' });
+      const profiles = db.createObjectStore('marker_profiles', {
+        keyPath: 'id',
+      });
+      profiles.createIndex('trackId', 'trackId', { unique: false });
+    };
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('tracks', 'readwrite');
+      tx.objectStore('tracks').put({
+        id: 'legacy-1',
+        filename: 'old.mp3',
+        format: 'mp3',
+        durationMs: 1_000,
+        durationEstimated: true,
+        fileSizeBytes: 10,
+        importedAt: 1,
+      });
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+    open.onerror = () => reject(open.error);
+  });
+}
+
+describe('upgrade from v3', () => {
+  it('creates the folders store empty rather than failing', async () => {
+    await seedV3();
+    const db = load();
+
+    await expect(db.getAllStoredFolders()).resolves.toEqual([]);
+  });
+
+  it('defaults the fields a v3 track record never had', async () => {
+    await seedV3();
+    const db = load();
+
+    const track = await db.getStoredTrack('legacy-1');
+
+    expect(track?.folderId).toBeNull();
+    expect(track?.isFavorite).toBe(false);
+    expect(track?.lastPlayedAt).toBeNull();
+  });
+});
+
 describe('upgrade from v4', () => {
   it('promotes every nested folder to the top level, keeping its name', async () => {
     await seedV4();
@@ -296,6 +357,40 @@ describe('upgrade from v4', () => {
     expect(track?.isFavorite).toBe(false);
     expect(track?.lastPlayedAt).toBeNull();
     expect(track).not.toHaveProperty('sortOrder');
+  });
+
+  it('writes a rearranged pinned block in one transaction', async () => {
+    await seedV4();
+    const db = load();
+
+    await db.putStoredFolders([
+      {
+        id: 'parent',
+        name: 'Gigs',
+        createdAt: 100,
+        pinOrder: 1,
+        lastOpenedAt: 100,
+      },
+      {
+        id: 'child',
+        name: 'March',
+        createdAt: 200,
+        pinOrder: 0,
+        lastOpenedAt: 200,
+      },
+    ]);
+
+    const folders = await db.getAllStoredFolders();
+    expect(folders.find((f) => f.id === 'parent')?.pinOrder).toBe(1);
+    expect(folders.find((f) => f.id === 'child')?.pinOrder).toBe(0);
+  });
+
+  it('writing an empty batch touches nothing', async () => {
+    await seedV4();
+    const db = load();
+
+    await expect(db.putStoredFolders([])).resolves.toBeUndefined();
+    await expect(db.getAllStoredFolders()).resolves.toHaveLength(2);
   });
 
   it('leaves the rest of a track record byte-identical', async () => {

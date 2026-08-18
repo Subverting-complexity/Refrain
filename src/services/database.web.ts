@@ -172,15 +172,38 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(FOLDERS_STORE)) {
         db.createObjectStore(FOLDERS_STORE, { keyPath: 'id' });
       }
-      if (oldVersion > 0 && oldVersion < 5 && upgrade) {
+      if (oldVersion > 0 && oldVersion < 5) {
+        if (!upgrade) {
+          // Cannot happen per the specification, but if it ever did the
+          // version would reach 5 with unmigrated records and the version
+          // itself is the guard, so the migration could never run again.
+          // Throwing aborts the upgrade and rolls the version back.
+          throw new Error('No version-change transaction to migrate in');
+        }
         migrateToV5(upgrade);
       }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    // Without this, an upgrade held up by another tab still holding the
+    // old version fires neither handler, and the caller waits on a promise
+    // that never settles. This release bumps the version, so that path is
+    // newly reachable for anyone with the app open twice.
+    request.onblocked = () =>
+      reject(
+        new Error(
+          'Refrain is open in another tab using an older version of its database. Close the other tab and reload.',
+        ),
+      );
   });
 
-  return dbPromise;
+  // A failed open must not be cached: private browsing, a denied storage
+  // permission, or a transient error would otherwise reject every later
+  // call for the rest of the page session with no way to try again.
+  return dbPromise.catch((error: unknown) => {
+    dbPromise = null;
+    throw error;
+  });
 }
 
 function runTransaction<T>(
@@ -347,6 +370,30 @@ export function putStoredFolder(folder: StoredFolder): Promise<void> {
   return runTransaction(FOLDERS_STORE, 'readwrite', (store) =>
     store.put(folder),
   ).then(() => undefined);
+}
+
+/**
+ * Writes several folder records in a single transaction, so a rearranged
+ * pinned block lands whole or not at all. Writing them one at a time would
+ * leave a mix of old and new positions behind an interruption, including
+ * duplicates — which is what the native implementation avoids by wrapping
+ * its rewrite in a transaction.
+ */
+export function putStoredFolders(folders: StoredFolder[]): Promise<void> {
+  if (folders.length === 0) return Promise.resolve();
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(FOLDERS_STORE, 'readwrite');
+        const store = tx.objectStore(FOLDERS_STORE);
+        for (const folder of folders) {
+          store.put(folder);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      }),
+  );
 }
 
 export function deleteStoredFolder(id: string): Promise<void> {

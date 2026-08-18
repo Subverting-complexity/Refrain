@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { StoredFolder } from '../database.web';
 import {
   deleteFolder,
   getFolder,
@@ -15,6 +16,7 @@ import {
 const mockGetAllStoredFolders = jest.fn();
 const mockGetStoredFolder = jest.fn();
 const mockPutStoredFolder = jest.fn<Promise<void>, unknown[]>();
+const mockPutStoredFolders = jest.fn<Promise<void>, [StoredFolder[]]>();
 const mockDeleteStoredFolder = jest.fn<Promise<void>, [string]>();
 const mockGetAllStoredTracks = jest.fn();
 const mockPutStoredTrack = jest.fn<Promise<void>, unknown[]>();
@@ -23,6 +25,7 @@ jest.mock('../database.web', () => ({
   getAllStoredFolders: () => mockGetAllStoredFolders(),
   getStoredFolder: (id: string) => mockGetStoredFolder(id),
   putStoredFolder: (folder: unknown) => mockPutStoredFolder(folder),
+  putStoredFolders: (folders: StoredFolder[]) => mockPutStoredFolders(folders),
   deleteStoredFolder: (id: string) => mockDeleteStoredFolder(id),
   getAllStoredTracks: () => mockGetAllStoredTracks(),
   putStoredTrack: (track: unknown) => mockPutStoredTrack(track),
@@ -44,6 +47,7 @@ beforeEach(() => {
   mockGetAllStoredFolders.mockResolvedValue([]);
   mockGetStoredFolder.mockResolvedValue(null);
   mockPutStoredFolder.mockResolvedValue(undefined);
+  mockPutStoredFolders.mockResolvedValue(undefined);
   mockDeleteStoredFolder.mockResolvedValue(undefined);
   mockGetAllStoredTracks.mockResolvedValue([]);
   mockPutStoredTrack.mockResolvedValue(undefined);
@@ -95,6 +99,29 @@ describe('loadFolders', () => {
     const folders = await loadFolders();
 
     expect(folders.map((f) => f.id)).toEqual(['a', 'b']);
+  });
+
+  it('falls through to open time when two folders share a pin position', async () => {
+    // `setFolderPinned` lets a caller assign a duplicate position, so this
+    // state is reachable and must not fall back to storage order.
+    mockGetAllStoredFolders.mockResolvedValue([
+      storedFolder({
+        id: 'older',
+        name: 'Older',
+        pinOrder: 0,
+        lastOpenedAt: 10,
+      }),
+      storedFolder({
+        id: 'newer',
+        name: 'Newer',
+        pinOrder: 0,
+        lastOpenedAt: 20,
+      }),
+    ]);
+
+    const folders = await loadFolders();
+
+    expect(folders.map((f) => f.id)).toEqual(['newer', 'older']);
   });
 
   it('defaults the pin and open-time fields on a pre-migration record', async () => {
@@ -202,10 +229,28 @@ describe('deleteFolder', () => {
     expect(mockDeleteStoredFolder).toHaveBeenCalledWith('folder-1');
   });
 
-  it('is a no-op for an unknown id', async () => {
+  it('re-homes stranded tracks even when the folder record is already gone', async () => {
+    mockGetStoredFolder.mockResolvedValue(null);
+    mockGetAllStoredTracks.mockResolvedValue([
+      { id: 'track-1', folderId: 'folder-1' },
+    ]);
+
+    await deleteFolder('folder-1');
+
+    // Without this the track shows up nowhere: its folder id is not null so
+    // it is not unfiled, and there is no folder left to open.
+    expect(mockPutStoredTrack).toHaveBeenCalledWith({
+      id: 'track-1',
+      folderId: null,
+    });
+    expect(mockDeleteStoredFolder).toHaveBeenCalledWith('folder-1');
+  });
+
+  it('touches nothing when no track points at the folder', async () => {
+    mockGetStoredFolder.mockResolvedValue(null);
+
     await deleteFolder('missing');
 
-    expect(mockDeleteStoredFolder).not.toHaveBeenCalled();
     expect(mockPutStoredTrack).not.toHaveBeenCalled();
   });
 });
@@ -248,14 +293,15 @@ describe('reorderPinnedFolders', () => {
 
     await reorderPinnedFolders(['b', 'a']);
 
-    expect(mockPutStoredFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'b', pinOrder: 0 }),
-    );
-    expect(mockPutStoredFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'a', pinOrder: 1 }),
-    );
-    expect(mockPutStoredFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'dropped', pinOrder: null }),
+    // One batch, so a rearranged block lands whole or not at all.
+    expect(mockPutStoredFolders).toHaveBeenCalledTimes(1);
+    const written = mockPutStoredFolders.mock.calls[0][0];
+    expect(written).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'b', pinOrder: 0 }),
+        expect.objectContaining({ id: 'a', pinOrder: 1 }),
+        expect.objectContaining({ id: 'dropped', pinOrder: null }),
+      ]),
     );
   });
 
@@ -267,7 +313,7 @@ describe('reorderPinnedFolders', () => {
 
     await reorderPinnedFolders(['a']);
 
-    expect(mockPutStoredFolder).not.toHaveBeenCalled();
+    expect(mockPutStoredFolders).toHaveBeenCalledWith([]);
   });
 });
 

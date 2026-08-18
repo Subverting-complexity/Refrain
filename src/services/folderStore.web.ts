@@ -5,6 +5,7 @@ import {
   getAllStoredTracks,
   getStoredFolder,
   putStoredFolder,
+  putStoredFolders,
   putStoredTrack,
   StoredFolder,
 } from './database.web';
@@ -47,7 +48,9 @@ export async function loadFolders(): Promise<Folder[]> {
     const aPinned = a.pinOrder !== null;
     const bPinned = b.pinOrder !== null;
     if (aPinned !== bPinned) return aPinned ? -1 : 1;
-    if (aPinned && bPinned) return a.pinOrder! - b.pinOrder!;
+    if (aPinned && bPinned && a.pinOrder !== b.pinOrder) {
+      return a.pinOrder! - b.pinOrder!;
+    }
     const aOpened = a.lastOpenedAt !== null;
     const bOpened = b.lastOpenedAt !== null;
     if (aOpened !== bOpened) return aOpened ? -1 : 1;
@@ -90,9 +93,11 @@ export async function renameFolder(id: string, name: string): Promise<void> {
  * deleting a folder loses the grouping, never the recordings.
  */
 export async function deleteFolder(id: string): Promise<void> {
-  const folder = await getStoredFolder(id);
-  if (!folder) return;
-
+  // The tracks are re-homed whether or not the folder record is still
+  // there. Returning early on a missing folder would strand any track that
+  // still carried its id: such a track shows up in no view at all, since
+  // its folder id is not null so it is not unfiled, and there is no folder
+  // left to open. The native implementation re-homes unconditionally too.
   const allTracks = await getAllStoredTracks();
   for (const track of allTracks) {
     if (track.folderId === id) {
@@ -125,11 +130,13 @@ export async function reorderPinnedFolders(
 ): Promise<void> {
   const rows = await getAllStoredFolders();
   const position = new Map(orderedIds.map((id, index) => [id, index]));
+  const changed: StoredFolder[] = [];
   for (const row of rows) {
     const pinOrder = position.get(row.id) ?? null;
     if ((row.pinOrder ?? null) === pinOrder) continue;
-    await putStoredFolder({ ...row, pinOrder });
+    changed.push({ ...row, pinOrder });
   }
+  await putStoredFolders(changed);
 }
 
 /**

@@ -33,6 +33,8 @@ const ALTER_PIN_ORDER =
 const ALTER_LAST_OPENED =
   'ALTER TABLE folders ADD COLUMN lastOpenedAt INTEGER DEFAULT NULL;';
 const FLATTEN_SQL = 'UPDATE folders SET parentId = NULL;';
+const BACKFILL_OPENED_SQL =
+  'UPDATE folders SET lastOpenedAt = createdAt WHERE lastOpenedAt IS NULL;';
 
 /** Columns present on a current-schema `tracks` table. */
 const FRESH_COLUMNS = [
@@ -170,6 +172,38 @@ describe('getDatabase', () => {
       FLATTEN_KEY,
       '1',
     );
+  });
+
+  it('gives folders that predate the column an open time', () => {
+    mockGetFirstSync.mockReturnValue(undefined);
+
+    getDatabase();
+
+    // Without this every folder a person already had would land in the
+    // never-opened tail on native while the web upgrade puts the same
+    // folders in the opened block — one library, two orderings.
+    expect(mockExecSync).toHaveBeenCalledWith(BACKFILL_OPENED_SQL);
+  });
+
+  it('does not backfill again once the marker row is present', () => {
+    getDatabase();
+
+    expect(mockExecSync).not.toHaveBeenCalledWith(BACKFILL_OPENED_SQL);
+  });
+
+  it('does not cache the handle when a migration throws', () => {
+    mockGetAllSync.mockImplementation(() => {
+      throw new Error('disk I/O error');
+    });
+
+    expect(() => getDatabase()).toThrow('disk I/O error');
+    expect(mockCloseSync).toHaveBeenCalledTimes(1);
+
+    // A cached half-migrated handle would hide the failure from every
+    // caller after the first, and would never retry.
+    pragmaReturns(FRESH_COLUMNS, FRESH_FOLDER_COLUMNS);
+    expect(() => getDatabase()).not.toThrow();
+    expect(mockOpenDatabaseSync).toHaveBeenCalledTimes(2);
   });
 
   it('does not flatten again once the marker row is present', () => {

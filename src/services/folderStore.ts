@@ -29,7 +29,9 @@ function rowToFolder(row: FolderRow): Folder {
   };
 }
 
-const FOLDER_COLUMNS = 'id, name, createdAt, pinOrder, lastOpenedAt';
+const FOLDER_COLUMNS = ['id', 'name', 'createdAt', 'pinOrder', 'lastOpenedAt'];
+const FOLDER_COLUMN_LIST = FOLDER_COLUMNS.join(', ');
+const FOLDER_PLACEHOLDERS = FOLDER_COLUMNS.map(() => '?').join(', ');
 
 /**
  * Reads every folder in display order: the pinned block first by `pinOrder`,
@@ -40,17 +42,22 @@ const FOLDER_COLUMNS = 'id, name, createdAt, pinOrder, lastOpenedAt';
  * its NULL handling explicit rather than relying on that: unpinned folders
  * (`pinOrder IS NULL`) sort after pinned ones, and never-opened folders
  * (`lastOpenedAt IS NULL`) sort after opened ones.
+ *
+ * The name tiebreak is `COLLATE NOCASE` for the same kind of reason. The
+ * default collation for a text column is byte order, which puts every
+ * capital letter before every lowercase one — so `Zebra` would sort before
+ * `anthem` here and after it on web, where the comparison is locale-aware.
  */
 export function loadFolders(): Folder[] {
   const db = getDatabase();
   const rows = db.getAllSync<FolderRow>(
-    `SELECT ${FOLDER_COLUMNS} FROM folders
+    `SELECT ${FOLDER_COLUMN_LIST} FROM folders
      ORDER BY
        CASE WHEN pinOrder IS NULL THEN 1 ELSE 0 END ASC,
        pinOrder ASC,
        CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END ASC,
        lastOpenedAt DESC,
-       name ASC`,
+       name COLLATE NOCASE ASC`,
   );
   return rows.map(rowToFolder);
 }
@@ -58,7 +65,7 @@ export function loadFolders(): Folder[] {
 export function getFolder(id: string): Folder | null {
   const db = getDatabase();
   const row = db.getFirstSync<FolderRow>(
-    `SELECT ${FOLDER_COLUMNS} FROM folders WHERE id = ?`,
+    `SELECT ${FOLDER_COLUMN_LIST} FROM folders WHERE id = ?`,
     id,
   );
   return row ? rowToFolder(row) : null;
@@ -73,7 +80,7 @@ export function getFolder(id: string): Folder | null {
 export function insertFolder(folder: Folder): void {
   const db = getDatabase();
   db.runSync(
-    `INSERT INTO folders (${FOLDER_COLUMNS}) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO folders (${FOLDER_COLUMN_LIST}) VALUES (${FOLDER_PLACEHOLDERS})`,
     folder.id,
     folder.name,
     folder.createdAt,

@@ -2,10 +2,19 @@ import * as SQLite from 'expo-sqlite';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
+/**
+ * Opens the database, creating and migrating the schema on first use.
+ *
+ * The handle is cached only once that schema work has finished. Caching it
+ * first would mean a failed migration was raised to one caller and hidden
+ * from every caller after it, each handed a database whose columns were
+ * never added and which would never try again.
+ */
 export function getDatabase(): SQLite.SQLiteDatabase {
   if (!db) {
-    db = SQLite.openDatabaseSync('refrain.db');
-    db.execSync(`
+    const opened = SQLite.openDatabaseSync('refrain.db');
+    try {
+      opened.execSync(`
       CREATE TABLE IF NOT EXISTS tracks (
         id TEXT PRIMARY KEY NOT NULL,
         filename TEXT NOT NULL,
@@ -51,8 +60,13 @@ export function getDatabase(): SQLite.SQLiteDatabase {
       CREATE INDEX IF NOT EXISTS idx_folders_parentId
         ON folders (parentId);
     `);
-    migrateTracksSchema(db);
-    migrateFoldersSchema(db);
+      migrateTracksSchema(opened);
+      migrateFoldersSchema(opened);
+    } catch (error) {
+      opened.closeSync();
+      throw error;
+    }
+    db = opened;
   }
   return db;
 }
@@ -139,6 +153,10 @@ const FLATTEN_MIGRATION_KEY = 'migration.foldersFlattened';
  *    folders, `Gigs` and `March`. Nothing is merged, renamed or deleted, and
  *    no track changes folder.
  *
+ * The flatten is not wrapped in a transaction and does not need to be: both
+ * statements are idempotent, so an interruption before the marker row is
+ * written costs nothing more than running them again on the next open.
+ *
  * `parentId` and `sortOrder` stay as columns even though nothing reads them
  * any more. Dropping a column in SQLite means rebuilding the table, and
  * leaving them keeps a freshly created database and an upgraded one
@@ -172,6 +190,14 @@ function migrateFoldersSchema(database: SQLite.SQLiteDatabase): void {
   if (columns.some((column) => column.name === 'parentId')) {
     database.execSync('UPDATE folders SET parentId = NULL;');
   }
+  // Give folders that predate this column an open time, so the upgrade
+  // does not drop every folder a person already had into the
+  // never-opened tail. `insertFolder` stamps new folders the same way,
+  // and the web upgrade does exactly this — without it the same library
+  // would read back in two different orders on the two platforms.
+  database.execSync(
+    'UPDATE folders SET lastOpenedAt = createdAt WHERE lastOpenedAt IS NULL;',
+  );
   database.runSync(
     'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
     FLATTEN_MIGRATION_KEY,

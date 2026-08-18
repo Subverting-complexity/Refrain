@@ -59,6 +59,15 @@ async function migrateFromJson(): Promise<void> {
   }
 }
 
+/**
+ * The columns every read names explicitly. `SELECT *` would also return
+ * the retired `sortOrder` column, which still exists in the table, and the
+ * spread in `rowToTrack` would then put a field on the returned track that
+ * the `Track` type no longer has.
+ */
+const TRACK_COLUMNS =
+  'id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, isFavorite, lastPlayedAt';
+
 interface TrackRow {
   id: string;
   filename: string;
@@ -100,17 +109,19 @@ export async function loadTracks(
   const db = getDatabase();
   const rows =
     options.scope === 'all'
-      ? db.getAllSync<TrackRow>('SELECT * FROM tracks ORDER BY importedAt DESC')
+      ? db.getAllSync<TrackRow>(
+          `SELECT ${TRACK_COLUMNS} FROM tracks ORDER BY importedAt DESC`,
+        )
       : options.scope === 'favorites'
         ? db.getAllSync<TrackRow>(
-            'SELECT * FROM tracks WHERE isFavorite = 1 ORDER BY importedAt DESC',
+            `SELECT ${TRACK_COLUMNS} FROM tracks WHERE isFavorite = 1 ORDER BY importedAt DESC`,
           )
         : options.scope === 'unfiled'
           ? db.getAllSync<TrackRow>(
-              'SELECT * FROM tracks WHERE folderId IS NULL ORDER BY importedAt DESC',
+              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId IS NULL ORDER BY importedAt DESC`,
             )
           : db.getAllSync<TrackRow>(
-              'SELECT * FROM tracks WHERE folderId = ? ORDER BY importedAt DESC',
+              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId = ? ORDER BY importedAt DESC`,
               options.folderId,
             );
   return rows.map(rowToTrack);
@@ -127,7 +138,7 @@ export async function getTrack(id: string): Promise<Track | null> {
   await migrateFromJson();
   const db = getDatabase();
   const row = db.getFirstSync<TrackRow>(
-    'SELECT id, filename, uri, format, durationMs, durationEstimated, fileSizeBytes, importedAt, folderId, isFavorite, lastPlayedAt FROM tracks WHERE id = ?',
+    `SELECT ${TRACK_COLUMNS} FROM tracks WHERE id = ?`,
     id,
   );
   return row ? rowToTrack(row) : null;
