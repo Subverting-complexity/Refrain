@@ -18,13 +18,17 @@
  *   - `track_markers`   — active A/B markers per track (keyPath `trackId`).
  *   - `marker_profiles` — named A/B segment profiles (keyPath `id`, with a
  *                         non-unique `trackId` index for per-track lookup).
+ *   - `folders`         — one record per folder (keyPath `id`). Single level:
+ *                         folders do not contain other folders.
  */
 
 const DB_NAME = 'refrain-meta';
 // v2 adds the `track_markers` store; v3 adds `marker_profiles`; v4 adds
-// `folders`. The upgrade handler creates stores conditionally, so bumping the
+// `folders`; v5 flattens folder nesting and adds the favourite, play-time,
+// pin and open-time fields. The upgrade handler creates stores conditionally
+// and migrates records in the version-change transaction, so bumping the
 // version leaves existing data intact.
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const TRACKS_STORE = 'tracks';
 const SETTINGS_STORE = 'settings';
 const MARKERS_STORE = 'track_markers';
@@ -46,15 +50,16 @@ export interface StoredTrack {
   fileSizeBytes: number;
   importedAt: number;
   folderId: string | null;
-  sortOrder: number;
+  isFavorite: boolean;
+  lastPlayedAt: number | null;
 }
 
 export interface StoredFolder {
   id: string;
   name: string;
-  parentId: string | null;
   createdAt: number;
-  sortOrder: number;
+  pinOrder: number | null;
+  lastOpenedAt: number | null;
 }
 
 export interface StoredSetting {
@@ -81,6 +86,61 @@ export interface StoredProfile {
   createdAt: number;
 }
 
+/**
+ * Brings v4 records up to the v5 shape, inside the version-change
+ * transaction so the database is never readable in a half-migrated state.
+ *
+ * Tracks gain `isFavorite` and `lastPlayedAt` and lose the now-unused
+ * `sortOrder`. Folders are flattened — every folder becomes top level,
+ * keeping its own name, so `Gigs > March` turns into two independent
+ * folders — and gain `pinOrder` and `lastOpenedAt`. A folder that has never
+ * been opened is stamped with its creation time so it sorts sensibly rather
+ * than falling to the never-opened tail on first read.
+ *
+ * The `parentId` index goes with nesting. Unlike the native side, where
+ * dropping a column would mean rebuilding the table, removing an IndexedDB
+ * index is cheap, and the flatten makes it useless anyway.
+ */
+function migrateToV5(upgrade: IDBTransaction): void {
+  const tracks = upgrade.objectStore(TRACKS_STORE);
+  const trackCursor = tracks.openCursor();
+  trackCursor.onsuccess = () => {
+    const cursor = trackCursor.result;
+    if (!cursor) return;
+    const row = cursor.value as StoredTrack & { sortOrder?: number };
+    delete row.sortOrder;
+    cursor.update({
+      ...row,
+      folderId: row.folderId ?? null,
+      isFavorite: row.isFavorite ?? false,
+      lastPlayedAt: row.lastPlayedAt ?? null,
+    });
+    cursor.continue();
+  };
+
+  const folders = upgrade.objectStore(FOLDERS_STORE);
+  if (folders.indexNames.contains('parentId')) {
+    folders.deleteIndex('parentId');
+  }
+  const folderCursor = folders.openCursor();
+  folderCursor.onsuccess = () => {
+    const cursor = folderCursor.result;
+    if (!cursor) return;
+    const row = cursor.value as StoredFolder & {
+      parentId?: string | null;
+      sortOrder?: number;
+    };
+    delete row.parentId;
+    delete row.sortOrder;
+    cursor.update({
+      ...row,
+      pinOrder: row.pinOrder ?? null,
+      lastOpenedAt: row.lastOpenedAt ?? row.createdAt ?? null,
+    });
+    cursor.continue();
+  };
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDb(): Promise<IDBDatabase> {
@@ -88,8 +148,10 @@ function openDb(): Promise<IDBDatabase> {
 
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const upgrade = request.transaction;
+      const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
       if (!db.objectStoreNames.contains(TRACKS_STORE)) {
         db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
       }
@@ -108,10 +170,10 @@ function openDb(): Promise<IDBDatabase> {
         });
       }
       if (!db.objectStoreNames.contains(FOLDERS_STORE)) {
-        const folders = db.createObjectStore(FOLDERS_STORE, {
-          keyPath: 'id',
-        });
-        folders.createIndex('parentId', 'parentId', { unique: false });
+        db.createObjectStore(FOLDERS_STORE, { keyPath: 'id' });
+      }
+      if (oldVersion > 0 && oldVersion < 5 && upgrade) {
+        migrateToV5(upgrade);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -270,14 +332,6 @@ export function deleteStoredProfilesByTrack(trackId: string): Promise<void> {
 export function getAllStoredFolders(): Promise<StoredFolder[]> {
   return runTransaction<StoredFolder[]>(FOLDERS_STORE, 'readonly', (store) =>
     store.getAll(),
-  );
-}
-
-export function getStoredFoldersByParent(
-  parentId: string | null,
-): Promise<StoredFolder[]> {
-  return runTransaction<StoredFolder[]>(FOLDERS_STORE, 'readonly', (store) =>
-    store.index('parentId').getAll(parentId),
   );
 }
 

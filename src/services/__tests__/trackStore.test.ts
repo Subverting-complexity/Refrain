@@ -66,15 +66,25 @@ const sampleTrack: Track = {
   fileSizeBytes: 1_000_000,
   importedAt: 1700000000000,
   folderId: null,
-  sortOrder: 0,
+  isFavorite: false,
+  lastPlayedAt: null,
 };
 
+/**
+ * Opening the database runs both schema migrations, which read the table
+ * columns and check whether the one-off folder flatten has already run.
+ * Answering both here keeps that machinery out of the way: no ALTER is
+ * issued and the flatten is treated as done, so a test only sees the
+ * statements it is actually about. Tests that care override these.
+ */
 beforeEach(() => {
   jest.clearAllMocks();
   mockJsonExists = false;
   mockFileExists = {};
   mockDirEntries = [];
   mockDirExists = true;
+  mockGetAllSync.mockReturnValue([]);
+  mockGetFirstSync.mockReturnValue({ value: '1' });
 });
 
 describe('migration from JSON', () => {
@@ -102,6 +112,7 @@ describe('migration from JSON', () => {
       sampleTrack.importedAt,
       null,
       0,
+      null,
     );
     expect(mockDelete).toHaveBeenCalled();
   });
@@ -259,6 +270,7 @@ describe('insertTrack', () => {
       sampleTrack.importedAt,
       null,
       0,
+      null,
     );
   });
 });
@@ -388,7 +400,10 @@ describe('deleteTrack', () => {
   it('looks up the uri before deleting the row', () => {
     jest.resetModules();
     const callOrder: string[] = [];
-    mockGetFirstSync.mockImplementation(() => {
+    mockGetFirstSync.mockImplementation((sql: string) => {
+      // The folder migration reads the settings table on open; only the
+      // track's own uri lookup belongs in the recorded order.
+      if (sql.includes('settings')) return { value: '1' };
       callOrder.push('lookup');
       return { uri: 'tracks/track-1.mp3' };
     });
@@ -476,5 +491,154 @@ describe('cleanupOrphanFiles', () => {
 
     expect(cleanupOrphanFiles()).toBe(0);
     expect(mockDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('loadTracks scopes', () => {
+  it('reads every track by default, newest import first', async () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([]);
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks();
+
+    expect(mockGetAllSync).toHaveBeenCalledWith(
+      'SELECT * FROM tracks ORDER BY importedAt DESC',
+    );
+  });
+
+  it('reads only starred tracks in the favourites scope', async () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([]);
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks({ scope: 'favorites' });
+
+    expect(mockGetAllSync).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE isFavorite = 1'),
+    );
+  });
+
+  it('reads tracks in no folder in the unfiled scope', async () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([]);
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks({ scope: 'unfiled' });
+
+    expect(mockGetAllSync).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE folderId IS NULL'),
+    );
+  });
+
+  it('reads one folder in the folder scope', async () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([]);
+
+    const { loadTracks } = require('../trackStore');
+    await loadTracks({ scope: 'folder', folderId: 'folder-1' });
+
+    expect(mockGetAllSync).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE folderId = ?'),
+      'folder-1',
+    );
+  });
+
+  it('maps the favourite and play-time columns onto the track', async () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([
+      {
+        ...sampleTrack,
+        uri: 'tracks/track-1.mp3',
+        durationEstimated: 1,
+        isFavorite: 1,
+        lastPlayedAt: 1_700_000_500_000,
+      },
+    ]);
+
+    const { loadTracks } = require('../trackStore');
+    const tracks = await loadTracks();
+
+    expect(tracks[0].isFavorite).toBe(true);
+    expect(tracks[0].lastPlayedAt).toBe(1_700_000_500_000);
+  });
+});
+
+describe('setTrackFavorite', () => {
+  it('stars a track', () => {
+    jest.resetModules();
+
+    const { setTrackFavorite } = require('../trackStore');
+    setTrackFavorite('track-1', true);
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      'UPDATE tracks SET isFavorite = ? WHERE id = ?',
+      1,
+      'track-1',
+    );
+  });
+
+  it('unstars a track', () => {
+    jest.resetModules();
+
+    const { setTrackFavorite } = require('../trackStore');
+    setTrackFavorite('track-1', false);
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      'UPDATE tracks SET isFavorite = ? WHERE id = ?',
+      0,
+      'track-1',
+    );
+  });
+});
+
+describe('markTrackPlayed', () => {
+  it('records the timestamp the caller supplies', () => {
+    jest.resetModules();
+
+    const { markTrackPlayed } = require('../trackStore');
+    markTrackPlayed('track-1', 1_700_000_900_000);
+
+    expect(mockRunSync).toHaveBeenCalledWith(
+      'UPDATE tracks SET lastPlayedAt = ? WHERE id = ?',
+      1_700_000_900_000,
+      'track-1',
+    );
+  });
+});
+
+describe('getTrackCountsByFolder', () => {
+  it('counts per folder alongside all, favourites and unfiled', () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([
+      { folderId: null, cnt: 2 },
+      { folderId: 'folder-1', cnt: 3 },
+      { folderId: 'folder-2', cnt: 1 },
+    ]);
+    mockGetFirstSync.mockReturnValue({ cnt: 4 });
+
+    const { getTrackCountsByFolder } = require('../trackStore');
+
+    expect(getTrackCountsByFolder()).toEqual({
+      byFolder: { 'folder-1': 3, 'folder-2': 1 },
+      all: 6,
+      favorites: 4,
+      unfiled: 2,
+    });
+  });
+
+  it('reports zeroes for an empty library', () => {
+    jest.resetModules();
+    mockGetAllSync.mockReturnValue([]);
+    mockGetFirstSync.mockReturnValue(undefined);
+
+    const { getTrackCountsByFolder } = require('../trackStore');
+
+    expect(getTrackCountsByFolder()).toEqual({
+      byFolder: {},
+      all: 0,
+      favorites: 0,
+      unfiled: 0,
+    });
   });
 });

@@ -18,8 +18,11 @@ jest.mock('@/src/services/trackStore', () => ({
   deleteTrack: jest.fn(),
   renameTrack: jest.fn(),
   moveTrackToFolder: jest.fn(),
-  updateTrackSortOrder: jest.fn(),
-  getTrackCountsByFolder: jest.fn().mockReturnValue({}),
+  setTrackFavorite: jest.fn(),
+  markTrackPlayed: jest.fn(),
+  getTrackCountsByFolder: jest
+    .fn()
+    .mockReturnValue({ byFolder: {}, all: 0, favorites: 0, unfiled: 0 }),
 }));
 
 jest.mock('@/src/services/folderStore', () => ({
@@ -27,6 +30,9 @@ jest.mock('@/src/services/folderStore', () => ({
   insertFolder: jest.fn(),
   deleteFolder: jest.fn(),
   renameFolder: jest.fn(),
+  markFolderOpened: jest.fn(),
+  setFolderPinned: jest.fn(),
+  reorderPinnedFolders: jest.fn(),
 }));
 
 jest.mock('@/src/services/settingsStore', () => ({
@@ -182,7 +188,8 @@ const sampleTrack: Track = {
   fileSizeBytes: 2048,
   importedAt: 0,
   folderId: null,
-  sortOrder: 0,
+  isFavorite: false,
+  lastPlayedAt: null,
 };
 
 async function renderScreen(): Promise<ReactTestRenderer> {

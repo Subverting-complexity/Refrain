@@ -74,7 +74,8 @@ const baseTrack: Track = {
   fileSizeBytes: 1_000_000,
   importedAt: 1700000000000,
   folderId: null,
-  sortOrder: 0,
+  isFavorite: false,
+  lastPlayedAt: null,
 };
 
 // Accessibility label the component generates for baseTrack (formatDuration(42_000) = "0:42")

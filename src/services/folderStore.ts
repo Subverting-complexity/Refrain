@@ -1,25 +1,56 @@
 import { Folder } from '../types';
 import { getDatabase } from './database';
 
+/**
+ * Folder metadata store, single level.
+ *
+ * Folders no longer nest, so there is no parent to pass in and no tree to
+ * walk. What replaces nesting is a two-part ordering: a pinned block the
+ * reader arranges by hand, then everything else in most-recently-opened
+ * order. The `parentId` and `sortOrder` columns still exist in the table but
+ * nothing here reads or writes them (see `migrateFoldersSchema`).
+ */
+
 interface FolderRow {
   id: string;
   name: string;
-  parentId: string | null;
   createdAt: number;
-  sortOrder: number;
+  pinOrder: number | null;
+  lastOpenedAt: number | null;
 }
 
 function rowToFolder(row: FolderRow): Folder {
-  return { ...row };
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt,
+    pinOrder: row.pinOrder ?? null,
+    lastOpenedAt: row.lastOpenedAt ?? null,
+  };
 }
 
-export function loadFolders(parentId: string | null): Folder[] {
+const FOLDER_COLUMNS = 'id, name, createdAt, pinOrder, lastOpenedAt';
+
+/**
+ * Reads every folder in display order: the pinned block first by `pinOrder`,
+ * then unpinned folders by most recently opened, with folders that have never
+ * been opened last and alphabetical among themselves.
+ *
+ * SQLite sorts NULL before everything else by default, so each clause makes
+ * its NULL handling explicit rather than relying on that: unpinned folders
+ * (`pinOrder IS NULL`) sort after pinned ones, and never-opened folders
+ * (`lastOpenedAt IS NULL`) sort after opened ones.
+ */
+export function loadFolders(): Folder[] {
   const db = getDatabase();
   const rows = db.getAllSync<FolderRow>(
-    parentId === null
-      ? 'SELECT * FROM folders WHERE parentId IS NULL ORDER BY sortOrder ASC, name ASC'
-      : 'SELECT * FROM folders WHERE parentId = ? ORDER BY sortOrder ASC, name ASC',
-    ...(parentId === null ? [] : [parentId]),
+    `SELECT ${FOLDER_COLUMNS} FROM folders
+     ORDER BY
+       CASE WHEN pinOrder IS NULL THEN 1 ELSE 0 END ASC,
+       pinOrder ASC,
+       CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END ASC,
+       lastOpenedAt DESC,
+       name ASC`,
   );
   return rows.map(rowToFolder);
 }
@@ -27,21 +58,27 @@ export function loadFolders(parentId: string | null): Folder[] {
 export function getFolder(id: string): Folder | null {
   const db = getDatabase();
   const row = db.getFirstSync<FolderRow>(
-    'SELECT * FROM folders WHERE id = ?',
+    `SELECT ${FOLDER_COLUMNS} FROM folders WHERE id = ?`,
     id,
   );
   return row ? rowToFolder(row) : null;
 }
 
+/**
+ * Creates a folder. When the caller leaves `lastOpenedAt` null it is stamped
+ * from `createdAt`, so a folder made just now sorts to the top of the
+ * unpinned block instead of falling to the never-opened tail. Deriving it
+ * from the folder's own creation time keeps the store free of a clock read.
+ */
 export function insertFolder(folder: Folder): void {
   const db = getDatabase();
   db.runSync(
-    'INSERT INTO folders (id, name, parentId, createdAt, sortOrder) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO folders (${FOLDER_COLUMNS}) VALUES (?, ?, ?, ?, ?)`,
     folder.id,
     folder.name,
-    folder.parentId,
     folder.createdAt,
-    folder.sortOrder,
+    folder.pinOrder,
+    folder.lastOpenedAt ?? folder.createdAt,
   );
 }
 
@@ -50,22 +87,51 @@ export function renameFolder(id: string, name: string): void {
   db.runSync('UPDATE folders SET name = ? WHERE id = ?', name, id);
 }
 
+/**
+ * Deletes a folder and moves its tracks to Unfiled.
+ *
+ * With nesting gone there is no parent to hand the tracks back to, so they
+ * become unfiled (`folderId = NULL`). The audio files on disk are never
+ * touched: deleting a folder loses the grouping, never the recordings.
+ */
 export function deleteFolder(id: string): void {
   const db = getDatabase();
-  db.runSync(
-    'UPDATE tracks SET folderId = (SELECT parentId FROM folders WHERE id = ?) WHERE folderId = ?',
-    id,
-    id,
-  );
-  db.runSync(
-    'UPDATE folders SET parentId = (SELECT parentId FROM folders WHERE id = ?) WHERE parentId = ?',
-    id,
-    id,
-  );
+  db.runSync('UPDATE tracks SET folderId = NULL WHERE folderId = ?', id);
   db.runSync('DELETE FROM folders WHERE id = ?', id);
 }
 
-export function updateFolderSortOrder(id: string, sortOrder: number): void {
+/**
+ * Pins a folder at `pinOrder`, or unpins it when `pinOrder` is null. The
+ * value is the folder's position inside the pinned block; callers that are
+ * rearranging several folders at once should use `reorderPinnedFolders`.
+ */
+export function setFolderPinned(id: string, pinOrder: number | null): void {
   const db = getDatabase();
-  db.runSync('UPDATE folders SET sortOrder = ? WHERE id = ?', sortOrder, id);
+  db.runSync('UPDATE folders SET pinOrder = ? WHERE id = ?', pinOrder, id);
+}
+
+/**
+ * Rewrites the whole pinned block in one pass: each id in `orderedIds` gets
+ * its index as its `pinOrder`, and every folder not listed is unpinned. A
+ * single statement per folder inside one transaction, so a half-applied
+ * reorder cannot survive a failure partway through.
+ */
+export function reorderPinnedFolders(orderedIds: string[]): void {
+  const db = getDatabase();
+  db.withTransactionSync(() => {
+    db.runSync('UPDATE folders SET pinOrder = NULL WHERE pinOrder IS NOT NULL');
+    orderedIds.forEach((id, index) => {
+      db.runSync('UPDATE folders SET pinOrder = ? WHERE id = ?', index, id);
+    });
+  });
+}
+
+/**
+ * Records that a folder was opened at `at` (epoch milliseconds), which is
+ * what orders the unpinned block. As with `markTrackPlayed`, the timestamp
+ * comes from the caller so the write stays deterministic.
+ */
+export function markFolderOpened(id: string, at: number): void {
+  const db = getDatabase();
+  db.runSync('UPDATE folders SET lastOpenedAt = ? WHERE id = ?', at, id);
 }

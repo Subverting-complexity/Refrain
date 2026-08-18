@@ -57,11 +57,7 @@ function ActionRow({
 
 export interface TrackActionsSheetProps {
   track: Track;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
   onRename: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onMoveToFolder: () => void;
   onDelete: () => void;
   onDismiss: () => void;
@@ -69,11 +65,7 @@ export interface TrackActionsSheetProps {
 
 export function TrackActionsSheet({
   track,
-  canMoveUp,
-  canMoveDown,
   onRename,
-  onMoveUp,
-  onMoveDown,
   onMoveToFolder,
   onDelete,
   onDismiss,
@@ -89,24 +81,6 @@ export function TrackActionsSheet({
           onDismiss();
           onRename();
         }}
-      />
-      <ActionRow
-        icon="arrow-up"
-        label="Move up"
-        onPress={() => {
-          onDismiss();
-          onMoveUp();
-        }}
-        disabled={!canMoveUp}
-      />
-      <ActionRow
-        icon="arrow-down"
-        label="Move down"
-        onPress={() => {
-          onDismiss();
-          onMoveDown();
-        }}
-        disabled={!canMoveDown}
       />
       <ActionRow
         icon="folder-outline"

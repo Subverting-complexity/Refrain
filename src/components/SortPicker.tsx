@@ -17,11 +17,9 @@ const SORT_LABELS: Record<SortOption, string> = {
   'duration-desc': 'Longest first',
   'size-asc': 'Smallest first',
   'size-desc': 'Largest first',
-  manual: 'Manual order',
 };
 
 const SORT_OPTIONS: SortOption[] = [
-  'manual',
   'name-asc',
   'name-desc',
   'date-desc',
