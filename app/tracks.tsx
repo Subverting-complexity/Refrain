@@ -367,6 +367,13 @@ export default function TracksScreen() {
               ? // Restoring: only if the row is not already back. A reload
                 // that landed mid-write may have re-added it, and appending
                 // blind would put two rows with the same key in the list.
+                //
+                // This is the one path that re-inserts the captured track
+                // rather than patching a live one, because there is no live
+                // one left to patch. A rename landing in the same window
+                // would be reverted on screen until the next read; narrow
+                // enough to accept, and the alternative is leaving the row
+                // out of a view it belongs in.
                 prev.some((t) => t.id === track.id)
                 ? prev
                 : [...prev, { ...track, isFavorite }]

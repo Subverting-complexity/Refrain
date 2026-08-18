@@ -632,6 +632,68 @@ describe('library root folder management', () => {
   });
 });
 
+describe('library root new folder placement', () => {
+  // #240: a new folder belongs at the top of the unpinned block. Appending
+  // would drop it below every existing folder and then jump it upward on the
+  // next reload, which is the behaviour the requirement exists to prevent.
+  it('inserts a new folder above the unpinned folders and below the pinned', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('p', 'Pinned', 0),
+      folder('u', 'Unpinned'),
+    ]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Create folder' })
+        .props.onPress();
+    });
+    await act(async () => {
+      await renderer.root
+        .findAllByProps({ testID: 'create-folder-dialog' })
+        .filter((node) => typeof node.type !== 'string')[0]
+        .props.onSave('Fresh');
+    });
+
+    expect(entryNames(renderer)).toEqual([
+      'All tracks',
+      'Favourites',
+      'Pinned',
+      'Fresh',
+      'Unpinned',
+    ]);
+    act(() => renderer.unmount());
+  });
+
+  it('stamps the new folder the way the store will store it', async () => {
+    // Non-empty, so the screen shows the library rather than the empty state
+    // (which has no Create folder button).
+    mockCounts.mockReturnValue(counts({ all: 1, unfiled: 1 }));
+    mockLoadFolders.mockResolvedValue([]);
+
+    const renderer = await renderScreen();
+    await act(async () => {
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Create folder' })
+        .props.onPress();
+    });
+    await act(async () => {
+      await renderer.root
+        .findAllByProps({ testID: 'create-folder-dialog' })
+        .filter((node) => typeof node.type !== 'string')[0]
+        .props.onSave('Fresh');
+    });
+
+    // insertFolder defaults lastOpenedAt to createdAt. Holding null locally
+    // would claim a value the database does not have and sort the folder to
+    // the never-opened tail.
+    const written = mockInsertFolder.mock.calls[0][0];
+    expect(written.lastOpenedAt).toBe(written.createdAt);
+    act(() => renderer.unmount());
+  });
+});
+
 describe('library root folder pinning', () => {
   // Every pin, unpin and move goes through reorderPinnedFolders, which
   // rewrites the whole block in one pass. Per-row writes could leave two
@@ -745,6 +807,25 @@ describe('library root folder pinning', () => {
       'x',
     ]);
     expect(toastLabels(renderer).join(' ')).toContain('9 folders pinned');
+    act(() => renderer.unmount());
+  });
+
+  it('says nothing reassuring when the pin lands but the read back fails', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([folder('c', 'Gamma')]);
+
+    const renderer = await renderScreen();
+    const sheet = openSheet(renderer, 'Gamma');
+    mockLoadFolders.mockRejectedValueOnce(new Error('db read failed'));
+    await act(async () => {
+      await sheet.props.onTogglePin();
+    });
+
+    // "Folder pinned" on top of "Failed to load library" would contradict
+    // itself. The write did land, so neither is a lie — but only one of them
+    // tells the reader something they can act on.
+    expect(toastLabels(renderer)).toContain('Failed to load library');
+    expect(toastLabels(renderer)).not.toContain('Folder pinned');
     act(() => renderer.unmount());
   });
 

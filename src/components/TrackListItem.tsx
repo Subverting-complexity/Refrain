@@ -16,7 +16,11 @@ interface TrackListItemProps {
   track: Track;
   onPress?: (track: Track) => void;
   onDelete?: (id: string) => void;
-  /** Toggle the track's starred state. Wired to the left swipe. */
+  /**
+   * Toggle the track's starred state. Drawn in the left-hand reveal, which
+   * the reader uncovers by dragging the row to the *right* — see the
+   * direction note on `buildHint` below before changing either.
+   */
   onToggleFavorite?: (track: Track) => void;
   onLongPress?: (track: Track) => void;
   style?: ViewStyle;
