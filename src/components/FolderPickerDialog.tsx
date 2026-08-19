@@ -12,13 +12,24 @@ export interface FolderPickerDialogProps {
   folders: Folder[];
   currentFolderId: string | null;
   onSelect: (folderId: string | null) => void;
+  /**
+   * Starts a new folder to file the track into. Without it a reader who has
+   * no folders yet reaches a picker offering only the root they are already
+   * in — the one place the answer to "put this somewhere" cannot be no.
+   */
+  onCreateFolder?: () => void;
   onCancel: () => void;
 }
 
+/**
+ * Chooses where a track is filed: the library root, an existing folder, or a
+ * folder made on the spot.
+ */
 export function FolderPickerDialog({
   folders,
   currentFolderId,
   onSelect,
+  onCreateFolder,
   onCancel,
 }: FolderPickerDialogProps) {
   const { theme } = useTheme();
@@ -114,6 +125,35 @@ export function FolderPickerDialog({
           </View>
         </AccessiblePressable>
       ))}
+
+      {onCreateFolder ? (
+        <AccessiblePressable
+          accessibilityRole="button"
+          accessibilityLabel="New folder"
+          onPress={onCreateFolder}
+          style={[
+            styles.option,
+            {
+              backgroundColor: theme.colors.background,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <View style={styles.optionContent}>
+            <Ionicons
+              name="add"
+              size={18}
+              color={theme.colors.accent}
+              style={styles.optionIcon}
+            />
+            <Text
+              style={[theme.typography.body, { color: theme.colors.accent }]}
+            >
+              New folder…
+            </Text>
+          </View>
+        </AccessiblePressable>
+      ) : null}
 
       <DialogButton label="Cancel" variant="default" onPress={onCancel} />
     </CenteredDialog>

@@ -10,6 +10,7 @@ import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
+import { RowActionsButton } from './RowActionsButton';
 import { Track } from '../types';
 
 interface TrackListItemProps {
@@ -22,7 +23,11 @@ interface TrackListItemProps {
    * direction note on `buildHint` below before changing either.
    */
   onToggleFavorite?: (track: Track) => void;
-  onLongPress?: (track: Track) => void;
+  /**
+   * Opens the track action sheet, from the actions button or a long press.
+   * Without it a long press falls back to the delete confirmation.
+   */
+  onOpenActions?: (track: Track) => void;
   style?: ViewStyle;
 }
 
@@ -47,7 +52,7 @@ export function TrackListItem({
   onPress,
   onDelete,
   onToggleFavorite,
-  onLongPress,
+  onOpenActions,
   style,
 }: TrackListItemProps) {
   const { theme } = useTheme();
@@ -70,9 +75,9 @@ export function TrackListItem({
     onDelete?.(track.id);
   }
 
-  function handleLongPress() {
-    if (onLongPress) {
-      onLongPress(track);
+  function handleOpenActions() {
+    if (onOpenActions) {
+      onOpenActions(track);
       return;
     }
     if (!onDelete) return;
@@ -103,7 +108,7 @@ export function TrackListItem({
       );
     }
     if (onDelete) parts.push('swipe left to delete');
-    if (onLongPress) parts.push('long press for more');
+    if (onOpenActions) parts.push('long press for more');
     else if (onDelete) parts.push('long press to delete');
     if (!parts.length) return undefined;
     const hint = parts.join(', ');
@@ -175,60 +180,72 @@ export function TrackListItem({
         leftThreshold={40}
         rightThreshold={40}
       >
-        <AccessiblePressable
-          accessibilityRole="button"
-          accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}${track.isFavorite ? ', favourite' : ''}`}
-          accessibilityHint={buildHint()}
-          onLongPress={handleLongPress}
-          onPress={() => onPress?.(track)}
+        <View
           style={[
-            styles.container,
+            styles.row,
             {
               backgroundColor: theme.colors.surface,
               borderColor: theme.colors.border,
             },
           ]}
         >
-          <View
-            style={[
-              styles.iconContainer,
-              { backgroundColor: theme.colors.background },
-            ]}
+          <AccessiblePressable
+            accessibilityRole="button"
+            accessibilityLabel={`${track.filename}, ${track.durationEstimated ? '~' : ''}${formatDuration(track.durationMs)}, ${track.format.toUpperCase()}${track.isFavorite ? ', favourite' : ''}`}
+            accessibilityHint={buildHint()}
+            onLongPress={handleOpenActions}
+            onPress={() => onPress?.(track)}
+            style={styles.main}
           >
-            <Ionicons
-              name="musical-note"
-              size={20}
-              color={theme.colors.accent}
-            />
-          </View>
-          <View style={styles.info}>
-            <Text
-              style={[theme.typography.body, styles.filename]}
-              numberOfLines={1}
-              ellipsizeMode="middle"
+            <View
+              style={[
+                styles.iconContainer,
+                { backgroundColor: theme.colors.background },
+              ]}
             >
-              {track.filename}
-            </Text>
-            <Text style={theme.typography.caption}>
-              {track.durationEstimated ? '~' : ''}
-              {formatDuration(track.durationMs)} · {track.format.toUpperCase()}{' '}
-              · {formatFileSize(track.fileSizeBytes)}
-            </Text>
-          </View>
-          {/* Starred state is visible without swiping, so the list answers
+              <Ionicons
+                name="musical-note"
+                size={20}
+                color={theme.colors.accent}
+              />
+            </View>
+            <View style={styles.info}>
+              <Text
+                style={[theme.typography.body, styles.filename]}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
+                {track.filename}
+              </Text>
+              <Text style={theme.typography.caption}>
+                {track.durationEstimated ? '~' : ''}
+                {formatDuration(track.durationMs)} ·{' '}
+                {track.format.toUpperCase()} ·{' '}
+                {formatFileSize(track.fileSizeBytes)}
+              </Text>
+            </View>
+            {/* Starred state is visible without swiping, so the list answers
               "which of these are favourites" at a glance. Decorative: the
               row's own label already announces it. */}
-          {track.isFavorite ? (
-            <Ionicons
-              name="star"
-              size={16}
-              color={theme.colors.accent}
-              style={styles.star}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
+            {track.isFavorite ? (
+              <Ionicons
+                name="star"
+                size={16}
+                color={theme.colors.accent}
+                style={styles.star}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+            ) : null}
+          </AccessiblePressable>
+
+          {onOpenActions ? (
+            <RowActionsButton
+              rowName={track.filename}
+              onPress={() => onOpenActions(track)}
             />
           ) : null}
-        </AccessiblePressable>
+        </View>
       </ReanimatedSwipeable>
 
       {confirmingDelete ? (
@@ -256,13 +273,26 @@ export function TrackListItem({
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // The row's chrome sits here rather than on the pressable, because the
+  // actions button is a sibling of that pressable and both belong inside one
+  // border. Nesting it would put a click target inside a click target, which
+  // on web fires the row underneath as well as the menu.
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
     borderRadius: radii.sm,
     borderWidth: 1,
+    paddingRight: spacing.sm,
+  },
+  main: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing.lg,
+    // With the row's own right padding this totals the `lg` the row carried
+    // before the actions button existed.
+    paddingRight: spacing.sm,
+    paddingVertical: spacing.md,
   },
   iconContainer: {
     width: 40,

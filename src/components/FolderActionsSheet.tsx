@@ -17,8 +17,10 @@ export interface FolderActionsSheetProps {
 }
 
 /**
- * The folder long-press menu, mirroring {@link TrackActionsSheet} in shape
- * and gesture so both row types answer a long press the same way.
+ * The folder action menu, mirroring {@link TrackActionsSheet} in shape and
+ * in how it is reached, so both row types answer the same way. Rows open it
+ * from the actions button or a long press — the button is what makes these
+ * actions reachable with a mouse, where long press is undiscoverable.
  *
  * Move up and Move down are the *accessible* reordering path, not a fallback
  * for one: dragging is unusable with a screen reader, so reordering must

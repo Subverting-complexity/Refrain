@@ -113,7 +113,7 @@ jest.mock('@/src/components/FolderListItem', () => {
       onPress,
       onDelete,
       onRename,
-      onLongPress,
+      onOpenActions,
       pinned,
     }: {
       name: string;
@@ -123,7 +123,7 @@ jest.mock('@/src/components/FolderListItem', () => {
       onPress?: () => void;
       onDelete?: () => void;
       onRename?: () => void;
-      onLongPress?: () => void;
+      onOpenActions?: () => void;
       pinned?: boolean;
     }) =>
       ReactLocal.createElement(View, {
@@ -135,7 +135,7 @@ jest.mock('@/src/components/FolderListItem', () => {
         onPress,
         onDelete,
         onRename,
-        onLongPress,
+        onOpenActions,
         pinned: pinned ?? false,
       }),
   };
@@ -259,7 +259,7 @@ interface EntryProps {
   onPress?: () => void;
   onDelete?: () => void;
   onRename?: () => void;
-  onLongPress?: () => void;
+  onOpenActions?: () => void;
   pinned?: boolean;
 }
 
@@ -700,7 +700,7 @@ describe('library root folder pinning', () => {
   // folders claiming the same slot after a partial failure.
   function openSheet(renderer: ReactTestRenderer, name: string) {
     const entry = entries(renderer).find((e) => e.entryName === name)!;
-    act(() => entry.onLongPress?.());
+    act(() => entry.onOpenActions?.());
     return renderer.root
       .findAllByProps({ testID: 'folder-actions-sheet' })
       .filter((node) => typeof node.type !== 'string')[0];

@@ -14,12 +14,12 @@ export interface ActionRowProps {
 }
 
 /**
- * One row in a long-press action sheet.
+ * One row in an action sheet.
  *
  * Extracted so the track sheet and the folder sheet are the same control
- * rather than two that merely resemble each other — both row types are
- * reached by the same gesture, so a difference in how they respond to it
- * would read as one of them being broken.
+ * rather than two that merely resemble each other — both are reached the
+ * same way, so a difference in how they respond would read as one of them
+ * being broken.
  */
 export function ActionRow({
   icon,

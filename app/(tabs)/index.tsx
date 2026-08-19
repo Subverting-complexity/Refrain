@@ -403,7 +403,7 @@ export default function LibraryScreen() {
           onRename={() =>
             setRenamingFolder({ id: item.folder.id, name: item.folder.name })
           }
-          onLongPress={() => setActionsFolder(item.folder)}
+          onOpenActions={() => setActionsFolder(item.folder)}
           style={styles.listItem}
         />
       );
