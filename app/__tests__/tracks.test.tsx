@@ -200,10 +200,17 @@ jest.mock('@/src/components/CreateFolderDialog', () => {
   const ReactLocal = require('react');
   const { View } = require('react-native');
   return {
-    CreateFolderDialog: ({ onSave }: { onSave: (name: string) => void }) =>
+    CreateFolderDialog: ({
+      onSave,
+      onCancel,
+    }: {
+      onSave: (name: string) => void;
+      onCancel: () => void;
+    }) =>
       ReactLocal.createElement(View, {
         testID: 'create-folder-dialog',
         onSave,
+        onCancel,
       }),
   };
 });
@@ -783,6 +790,46 @@ describe('track view move between folders', () => {
           .findAllByProps({ testID: 'create-folder-dialog' })
           .filter((node) => typeof node.type !== 'string'),
       ).toHaveLength(1);
+      act(() => renderer.unmount());
+    });
+
+    // Backing out of the name is a change of mind about the new folder, not
+    // about filing the track — dropping the reader all the way out would
+    // make them reopen the row menu to pick an existing folder.
+    it('returns to the picker when the name is cancelled', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await act(async () => {
+        trackItems(renderer)[0].props.onOpenActions();
+      });
+      const sheet = renderer.root
+        .findAllByProps({ testID: 'track-actions-sheet' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        await sheet.props.onMoveToFolder();
+      });
+      await act(async () => {
+        renderer.root
+          .findAllByProps({ testID: 'folder-picker' })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onCreateFolder();
+      });
+      await act(async () => {
+        renderer.root
+          .findAllByProps({ testID: 'create-folder-dialog' })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onCancel();
+      });
+
+      expect(
+        renderer.root
+          .findAllByProps({ testID: 'folder-picker' })
+          .filter((node) => typeof node.type !== 'string'),
+      ).toHaveLength(1);
+      expect(
+        renderer.root.findAllByProps({ testID: 'create-folder-dialog' }),
+      ).toHaveLength(0);
       act(() => renderer.unmount());
     });
 

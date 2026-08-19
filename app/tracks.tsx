@@ -605,7 +605,13 @@ export default function TracksScreen() {
           onSave={(name) =>
             void handleCreateFolderForTrack(filingIntoNewFolder, name)
           }
-          onCancel={() => setFilingIntoNewFolder(null)}
+          // Backing out of naming a folder returns to the picker rather
+          // than abandoning the move: the reader asked to file this track,
+          // and only changed their mind about making a new folder for it.
+          onCancel={() => {
+            setMovingTrack(filingIntoNewFolder);
+            setFilingIntoNewFolder(null);
+          }}
         />
       ) : null}
 
