@@ -13,7 +13,8 @@ export interface TrackActionsSheetProps {
 }
 
 /**
- * The track long-press menu.
+ * The track action menu, opened from the row's actions button or a long
+ * press.
  *
  * Move up and Move down are deliberately absent: manual track order is gone,
  * because a hand-sorted list stops being maintainable long before a library

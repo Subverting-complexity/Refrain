@@ -209,6 +209,51 @@ describe('TrackListItem', () => {
     });
   });
 
+  // Long press and swipe are touch idioms a mouse cannot discover, so on web
+  // "Move to folder…" — the only way to file a track — had no way in at all.
+  describe('the actions button', () => {
+    it('opens the same sheet a long press does', () => {
+      const onOpenActions = jest.fn();
+      const tree = renderItem(baseTrack, { onOpenActions });
+
+      const button = tree.root.findByProps({
+        accessibilityLabel: 'More actions for song.mp3',
+      });
+      act(() => {
+        button.props.onPress();
+      });
+
+      expect(onOpenActions).toHaveBeenCalledWith(baseTrack);
+    });
+
+    // The button is a sibling of the row's pressable rather than a child of
+    // it, because on web a click inside a pressable bubbles out to it: a
+    // nested button would start playing the track as well as open the menu.
+    it('sits outside the row pressable, not inside it', () => {
+      const tree = renderItem(baseTrack, { onOpenActions: jest.fn() });
+
+      const pressable = tree.root.findByProps({
+        accessibilityLabel: ESTIMATED_LABEL,
+      });
+
+      expect(
+        pressable.findAllByProps({
+          accessibilityLabel: 'More actions for song.mp3',
+        }),
+      ).toHaveLength(0);
+    });
+
+    it('is absent when no action sheet is wired up', () => {
+      const tree = renderItem(baseTrack, { onDelete: jest.fn() });
+
+      expect(
+        tree.root.findAllByProps({
+          accessibilityLabel: 'More actions for song.mp3',
+        }),
+      ).toHaveLength(0);
+    });
+  });
+
   describe('swipe-to-delete action', () => {
     it('renders a swipe delete button when onDelete is provided', () => {
       const onDelete = jest.fn();
@@ -375,7 +420,7 @@ describe('TrackListItem', () => {
           onPress: jest.fn(),
           onToggleFavorite: jest.fn(),
           onDelete: jest.fn(),
-          onLongPress: jest.fn(),
+          onOpenActions: jest.fn(),
         }),
       ).toBe(
         'Tap to play, swipe right to favourite, swipe left to delete, long press for more',

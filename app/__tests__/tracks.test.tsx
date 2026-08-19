@@ -4,7 +4,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import TracksScreen from '../tracks';
 import { pickAndImportFile } from '@/src/services/fileImport';
-import { markFolderOpened } from '@/src/services/folderStore';
+import { insertFolder, markFolderOpened } from '@/src/services/folderStore';
 import {
   deleteTrack,
   insertTrack,
@@ -28,6 +28,7 @@ jest.mock('@/src/services/trackStore', () => ({
 jest.mock('@/src/services/folderStore', () => ({
   loadFolders: jest.fn().mockResolvedValue([]),
   markFolderOpened: jest.fn(),
+  insertFolder: jest.fn(),
 }));
 
 jest.mock('@/src/services/settingsStore', () => ({
@@ -96,20 +97,20 @@ jest.mock('@/src/components/TrackListItem', () => {
       onPress,
       onToggleFavorite,
       onDelete,
-      onLongPress,
+      onOpenActions,
     }: {
       track: { id: string };
       onPress: (track: unknown) => void;
       onToggleFavorite: (track: unknown) => void;
       onDelete: (id: string) => void;
-      onLongPress: (track: unknown) => void;
+      onOpenActions: (track: unknown) => void;
     }) =>
       ReactLocal.createElement(View, {
         testID: 'track-item',
         onPress: () => onPress(track),
         onDelete: () => onDelete(track.id),
         onToggleFavorite: () => onToggleFavorite(track),
-        onLongPress: () => onLongPress(track),
+        onOpenActions: () => onOpenActions(track),
       }),
   };
 });
@@ -182,9 +183,35 @@ jest.mock('@/src/components/FolderPickerDialog', () => {
   return {
     FolderPickerDialog: ({
       onSelect,
+      onCreateFolder,
     }: {
       onSelect: (folderId: string | null) => void;
-    }) => ReactLocal.createElement(View, { testID: 'folder-picker', onSelect }),
+      onCreateFolder?: () => void;
+    }) =>
+      ReactLocal.createElement(View, {
+        testID: 'folder-picker',
+        onSelect,
+        onCreateFolder,
+      }),
+  };
+});
+
+jest.mock('@/src/components/CreateFolderDialog', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  return {
+    CreateFolderDialog: ({
+      onSave,
+      onCancel,
+    }: {
+      onSave: (name: string) => void;
+      onCancel: () => void;
+    }) =>
+      ReactLocal.createElement(View, {
+        testID: 'create-folder-dialog',
+        onSave,
+        onCancel,
+      }),
   };
 });
 
@@ -194,6 +221,9 @@ const mockDeleteTrack = deleteTrack as jest.MockedFunction<typeof deleteTrack>;
 const mockRenameTrack = renameTrack as jest.MockedFunction<typeof renameTrack>;
 const mockMoveTrack = moveTrackToFolder as jest.MockedFunction<
   typeof moveTrackToFolder
+>;
+const mockInsertFolder = insertFolder as jest.MockedFunction<
+  typeof insertFolder
 >;
 const mockSetTrackFavorite = setTrackFavorite as jest.MockedFunction<
   typeof setTrackFavorite
@@ -257,7 +287,7 @@ async function renameViaSheet(
   filename: string,
 ): Promise<void> {
   await act(async () => {
-    trackItems(renderer)[0].props.onLongPress();
+    trackItems(renderer)[0].props.onOpenActions();
   });
   await act(async () => {
     sheet(renderer).props.onRename();
@@ -523,7 +553,7 @@ describe('track view track actions', () => {
 
     const renderer = await renderScreen();
     await act(async () => {
-      trackItems(renderer)[0].props.onLongPress();
+      trackItems(renderer)[0].props.onOpenActions();
     });
     await act(async () => {
       await sheet(renderer).props.onToggleFavorite();
@@ -670,7 +700,7 @@ describe('track view move between folders', () => {
     target: string | null,
   ): Promise<void> {
     await act(async () => {
-      trackItems(renderer)[0].props.onLongPress();
+      trackItems(renderer)[0].props.onOpenActions();
     });
     const sheet = renderer.root
       .findAllByProps({ testID: 'track-actions-sheet' })
@@ -685,6 +715,136 @@ describe('track view move between folders', () => {
       await picker.props.onSelect(target);
     });
   }
+
+  // A reader with no folders yet reached a picker offering only the root
+  // they were already in. Filing a track had to start on another screen.
+  describe('filing into a folder that does not exist yet', () => {
+    async function createFolderWhileMoving(
+      renderer: ReactTestRenderer,
+      name: string,
+    ): Promise<void> {
+      await act(async () => {
+        trackItems(renderer)[0].props.onOpenActions();
+      });
+      const sheet = renderer.root
+        .findAllByProps({ testID: 'track-actions-sheet' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        await sheet.props.onMoveToFolder();
+      });
+      const picker = renderer.root
+        .findAllByProps({ testID: 'folder-picker' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        picker.props.onCreateFolder();
+      });
+      const dialog = renderer.root
+        .findAllByProps({ testID: 'create-folder-dialog' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        await dialog.props.onSave(name);
+      });
+    }
+
+    it('creates the folder and files the track into it', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await createFolderWhileMoving(renderer, 'Warmups');
+
+      expect(mockInsertFolder).toHaveBeenCalledTimes(1);
+      const created = mockInsertFolder.mock.calls[0][0];
+      expect(created.name).toBe('Warmups');
+      expect(mockMoveTrack).toHaveBeenCalledWith('track-1', created.id);
+      expect(toastLabels(renderer)).toContain('Track moved');
+      act(() => renderer.unmount());
+    });
+
+    // The picker closes when the name dialog opens, so the reader is never
+    // typing into a field stacked on top of the list it came from.
+    it('closes the picker while the name is being typed', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await act(async () => {
+        trackItems(renderer)[0].props.onOpenActions();
+      });
+      const sheet = renderer.root
+        .findAllByProps({ testID: 'track-actions-sheet' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        await sheet.props.onMoveToFolder();
+      });
+      const picker = renderer.root
+        .findAllByProps({ testID: 'folder-picker' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        picker.props.onCreateFolder();
+      });
+
+      expect(
+        renderer.root.findAllByProps({ testID: 'folder-picker' }),
+      ).toHaveLength(0);
+      expect(
+        renderer.root
+          .findAllByProps({ testID: 'create-folder-dialog' })
+          .filter((node) => typeof node.type !== 'string'),
+      ).toHaveLength(1);
+      act(() => renderer.unmount());
+    });
+
+    // Backing out of the name is a change of mind about the new folder, not
+    // about filing the track — dropping the reader all the way out would
+    // make them reopen the row menu to pick an existing folder.
+    it('returns to the picker when the name is cancelled', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await act(async () => {
+        trackItems(renderer)[0].props.onOpenActions();
+      });
+      const sheet = renderer.root
+        .findAllByProps({ testID: 'track-actions-sheet' })
+        .filter((node) => typeof node.type !== 'string')[0];
+      await act(async () => {
+        await sheet.props.onMoveToFolder();
+      });
+      await act(async () => {
+        renderer.root
+          .findAllByProps({ testID: 'folder-picker' })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onCreateFolder();
+      });
+      await act(async () => {
+        renderer.root
+          .findAllByProps({ testID: 'create-folder-dialog' })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onCancel();
+      });
+
+      expect(
+        renderer.root
+          .findAllByProps({ testID: 'folder-picker' })
+          .filter((node) => typeof node.type !== 'string'),
+      ).toHaveLength(1);
+      expect(
+        renderer.root.findAllByProps({ testID: 'create-folder-dialog' }),
+      ).toHaveLength(0);
+      act(() => renderer.unmount());
+    });
+
+    it('reports a failed create and leaves the track where it was', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+      mockInsertFolder.mockRejectedValueOnce(new Error('disk full'));
+
+      const renderer = await renderScreen();
+      await createFolderWhileMoving(renderer, 'Warmups');
+
+      expect(mockMoveTrack).not.toHaveBeenCalled();
+      expect(toastLabels(renderer)).toContain('Failed to create folder');
+      act(() => renderer.unmount());
+    });
+  });
 
   it('takes a moved track out of the folder it left', async () => {
     mockParams = { scope: 'folder', folderId: 'f-1', name: 'Scales' };

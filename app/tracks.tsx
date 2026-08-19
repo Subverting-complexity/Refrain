@@ -15,6 +15,7 @@ import {
 } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
 import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { SearchBar } from '@/src/components/SearchBar';
@@ -27,7 +28,11 @@ import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
 import { useTrackImport } from '@/src/hooks/useTrackImport';
-import { loadFolders, markFolderOpened } from '@/src/services/folderStore';
+import {
+  insertFolder,
+  loadFolders,
+  markFolderOpened,
+} from '@/src/services/folderStore';
 import { getSetting, setSetting } from '@/src/services/settingsStore';
 import {
   deleteTrack,
@@ -44,6 +49,7 @@ import {
   sortTracks,
   unplayedBoundary,
 } from '@/src/utils/librarySort';
+import { generateId } from '@/src/utils/generateId';
 
 /**
  * Tracks belonging to one library entry, and only tracks — a folder row can
@@ -126,6 +132,12 @@ export default function TracksScreen() {
   const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
   const [movingTrack, setMovingTrack] = useState<Track | null>(null);
+  // The track waiting on a folder that does not exist yet. Held separately
+  // from `movingTrack` so the picker is closed while the name is typed
+  // rather than stacked underneath a second dialog.
+  const [filingIntoNewFolder, setFilingIntoNewFolder] = useState<Track | null>(
+    null,
+  );
   const [allFolders, setAllFolders] = useState<Folder[]>([]);
 
   // Same hazard as the library root: a read started before an edit holds a
@@ -321,6 +333,38 @@ export default function TracksScreen() {
     [showToast, invalidateLoads, scope, folderId],
   );
 
+  /**
+   * Makes a folder and files the track into it in one step.
+   *
+   * Creating the folder and moving the track are reported separately on
+   * purpose: if the move fails the folder still exists, and saying only
+   * "failed to move" would leave the reader hunting for a folder they were
+   * never told had been made.
+   */
+  const handleCreateFolderForTrack = useCallback(
+    async (track: Track, name: string) => {
+      let folder: Folder;
+      try {
+        const createdAt = Date.now();
+        folder = {
+          id: generateId(),
+          name,
+          createdAt,
+          pinOrder: null,
+          lastOpenedAt: createdAt,
+        };
+        await insertFolder(folder);
+      } catch {
+        showToast('Failed to create folder', 'error');
+        setFilingIntoNewFolder(null);
+        return;
+      }
+      setFilingIntoNewFolder(null);
+      await handleMoveTrack(track.id, folder.id);
+    },
+    [showToast, handleMoveTrack],
+  );
+
   const handleTrackPress = useCallback(
     (track: Track) => {
       router.push({
@@ -331,7 +375,7 @@ export default function TracksScreen() {
     [router],
   );
 
-  const handleTrackLongPress = useCallback((track: Track) => {
+  const handleOpenTrackActions = useCallback((track: Track) => {
     setActionsTrack(track);
   }, []);
 
@@ -451,7 +495,7 @@ export default function TracksScreen() {
           onPress={handleTrackPress}
           onDelete={(id) => void handleDelete(id)}
           onToggleFavorite={(track) => void handleToggleFavorite(track)}
-          onLongPress={handleTrackLongPress}
+          onOpenActions={handleOpenTrackActions}
           style={styles.listItem}
         />
       </>
@@ -460,7 +504,7 @@ export default function TracksScreen() {
       handleTrackPress,
       handleDelete,
       handleToggleFavorite,
-      handleTrackLongPress,
+      handleOpenTrackActions,
       unplayedAt,
       theme,
     ],
@@ -548,7 +592,26 @@ export default function TracksScreen() {
           folders={allFolders}
           currentFolderId={movingTrack.folderId}
           onSelect={(fid) => void handleMoveTrack(movingTrack.id, fid)}
+          onCreateFolder={() => {
+            setFilingIntoNewFolder(movingTrack);
+            setMovingTrack(null);
+          }}
           onCancel={() => setMovingTrack(null)}
+        />
+      ) : null}
+
+      {filingIntoNewFolder ? (
+        <CreateFolderDialog
+          onSave={(name) =>
+            void handleCreateFolderForTrack(filingIntoNewFolder, name)
+          }
+          // Backing out of naming a folder returns to the picker rather
+          // than abandoning the move: the reader asked to file this track,
+          // and only changed their mind about making a new folder for it.
+          onCancel={() => {
+            setMovingTrack(filingIntoNewFolder);
+            setFilingIntoNewFolder(null);
+          }}
         />
       ) : null}
 

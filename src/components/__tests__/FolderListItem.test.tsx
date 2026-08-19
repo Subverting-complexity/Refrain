@@ -183,7 +183,7 @@ describe('FolderListItem as a folder', () => {
         name="Scales"
         trackCount={2}
         onPress={jest.fn()}
-        onLongPress={onLongPress}
+        onOpenActions={onLongPress}
       />,
     );
 
@@ -265,6 +265,62 @@ describe('FolderListItem as a built-in entry', () => {
     expect(iconNames(renderer)).toContain('star');
     expect(iconNames(renderer)).not.toContain('folder');
     act(() => renderer.unmount());
+  });
+
+  // Long press and swipe are touch idioms a mouse cannot discover, so on web
+  // every one of these actions was unreachable without a visible control.
+  describe('the actions button', () => {
+    it('opens the same sheet a long press does', () => {
+      const onOpenActions = jest.fn();
+      const renderer = render(
+        <FolderListItem
+          name="Scales"
+          trackCount={2}
+          onPress={jest.fn()}
+          onOpenActions={onOpenActions}
+        />,
+      );
+
+      const button = renderer.root.findByProps({
+        accessibilityLabel: 'More actions for Scales',
+      });
+      act(() => button.props.onPress());
+
+      expect(onOpenActions).toHaveBeenCalledTimes(1);
+      act(() => renderer.unmount());
+    });
+
+    // The whole reason the button is a sibling of the row's pressable rather
+    // than a child of it: on web a click inside a pressable bubbles out to
+    // it, so a nested button would open the folder as well as the menu.
+    it('sits outside the row pressable, not inside it', () => {
+      const renderer = render(
+        <FolderListItem
+          name="Scales"
+          trackCount={2}
+          onPress={jest.fn()}
+          onOpenActions={jest.fn()}
+        />,
+      );
+
+      const row = renderer.root.findByProps({
+        accessibilityLabel: 'Scales folder, 2 tracks',
+      });
+
+      expect(
+        row.findAllByProps({
+          accessibilityLabel: 'More actions for Scales',
+        }),
+      ).toHaveLength(0);
+      act(() => renderer.unmount());
+    });
+
+    it('is absent on a row with no actions behind it', () => {
+      const renderer = render(<FolderListItem name="Scales" trackCount={2} />);
+
+      expect(labels(renderer)).not.toContain('More actions for Scales');
+      act(() => renderer.unmount());
+    });
   });
 
   // A saved query has nothing to rename or delete, so the swipe actions must

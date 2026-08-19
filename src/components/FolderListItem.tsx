@@ -7,12 +7,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+import { RowActionsButton } from './RowActionsButton';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 /**
  * A row on the library root. Two kinds of row share it: a real folder, which
- * can be renamed and deleted by swiping, and a built-in entry (All tracks,
+ * can be renamed, pinned and deleted, and a built-in entry (All tracks,
  * Favourites, Unfiled), which is a saved query rather than a record and so
  * offers no actions at all.
  *
@@ -38,10 +39,10 @@ export interface FolderListItemProps {
   onDelete?: () => void;
   onRename?: () => void;
   /**
-   * Opens the folder action sheet. Built-in rows do not pass it, which is
-   * what keeps them free of a long-press menu.
+   * Opens the folder action sheet, from the actions button or a long press.
+   * Built-in rows do not pass it, which is what keeps them free of a menu.
    */
-  onLongPress?: () => void;
+  onOpenActions?: () => void;
   /** Shows the pin marker. Pinned rows sit above the MRU-ordered ones. */
   pinned?: boolean;
   style?: ViewStyle;
@@ -55,7 +56,7 @@ export function FolderListItem({
   onPress,
   onDelete,
   onRename,
-  onLongPress,
+  onOpenActions,
   pinned = false,
   style,
 }: FolderListItemProps) {
@@ -125,35 +126,35 @@ export function FolderListItem({
     .join(', ');
   const hint =
     kind === 'folder'
-      ? onLongPress
+      ? onOpenActions
         ? 'Tap to open folder, long press for more'
         : 'Tap to open folder'
       : 'Tap to view these tracks';
 
   return (
-    <>
-      <ReanimatedSwipeable
-        ref={swipeableRef}
-        renderRightActions={
-          onDelete || onRename ? renderRightActions : undefined
-        }
-        containerStyle={style}
-        friction={2}
-        rightThreshold={40}
+    <ReanimatedSwipeable
+      ref={swipeableRef}
+      renderRightActions={onDelete || onRename ? renderRightActions : undefined}
+      containerStyle={style}
+      friction={2}
+      rightThreshold={40}
+    >
+      <View
+        style={[
+          styles.row,
+          {
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+          },
+        ]}
       >
         <AccessiblePressable
           accessibilityRole="button"
           accessibilityLabel={label}
           accessibilityHint={hint}
           onPress={() => onPress?.()}
-          onLongPress={onLongPress}
-          style={[
-            styles.container,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.border,
-            },
-          ]}
+          onLongPress={onOpenActions}
+          style={styles.main}
         >
           <View
             style={[
@@ -193,19 +194,35 @@ export function FolderListItem({
             color={theme.colors.textSecondary}
           />
         </AccessiblePressable>
-      </ReanimatedSwipeable>
-    </>
+
+        {onOpenActions ? (
+          <RowActionsButton rowName={name} onPress={onOpenActions} />
+        ) : null}
+      </View>
+    </ReanimatedSwipeable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // The row's chrome moved out here from the pressable when the actions
+  // button arrived: the button is a sibling of the pressable, and both have
+  // to sit inside one border rather than the button hanging off the edge.
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
     borderRadius: radii.sm,
     borderWidth: 1,
+    paddingRight: spacing.sm,
+  },
+  main: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing.lg,
+    // With the row's own right padding this totals the `lg` the row carried
+    // before the actions button existed, so a built-in row is unchanged.
+    paddingRight: spacing.sm,
+    paddingVertical: spacing.md,
   },
   iconContainer: {
     width: 40,
