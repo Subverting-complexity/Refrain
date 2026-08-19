@@ -101,6 +101,47 @@ jest.mock('@/src/components/ImportButton', () => {
   };
 });
 
+jest.mock('@/src/components/DraggablePinnedFolderList', () => {
+  const ReactLocal = require('react');
+  const { View } = require('react-native');
+  const { FolderListItem } = require('@/src/components/FolderListItem');
+  return {
+    DraggablePinnedFolderList: ({
+      folders,
+      trackCounts,
+      onOpenFolder,
+      onOpenActions,
+      onDeleteFolder,
+      onRenameFolder,
+      onReorder,
+    }: {
+      folders: Array<{ id: string; name: string }>;
+      trackCounts: Record<string, number>;
+      onOpenFolder: (folder: any) => void;
+      onOpenActions: (folder: any) => void;
+      onDeleteFolder: (folder: any) => void;
+      onRenameFolder: (folder: any) => void;
+      onReorder: (orderedIds: string[]) => void;
+    }) =>
+      ReactLocal.createElement(
+        View,
+        { testID: 'draggable-pinned-folder-list', onReorder },
+        folders.map((f) =>
+          ReactLocal.createElement(FolderListItem, {
+            key: f.id,
+            name: f.name,
+            trackCount: trackCounts[f.id] ?? 0,
+            pinned: true,
+            onPress: () => onOpenFolder(f),
+            onOpenActions: () => onOpenActions(f),
+            onDelete: () => onDeleteFolder(f),
+            onRename: () => onRenameFolder(f),
+          }),
+        ),
+      ),
+  };
+});
+
 jest.mock('@/src/components/FolderListItem', () => {
   const ReactLocal = require('react');
   const { View } = require('react-native');
@@ -843,6 +884,27 @@ describe('library root folder pinning', () => {
     });
 
     expect(toastLabels(renderer)).toContain('Failed to pin folder');
+    act(() => renderer.unmount());
+  });
+
+  it('persists a new order when DraggablePinnedFolderList drops a reordered sequence', async () => {
+    mockCounts.mockReturnValue(counts({ all: 0 }));
+    mockLoadFolders.mockResolvedValue([
+      folder('a', 'Alpha', 0),
+      folder('b', 'Beta', 1),
+      folder('c', 'Gamma', 2),
+    ]);
+
+    const renderer = await renderScreen();
+    const draggable = renderer.root
+      .findAllByProps({ testID: 'draggable-pinned-folder-list' })
+      .filter((node) => typeof node.type !== 'string')[0];
+
+    await act(async () => {
+      await draggable.props.onReorder(['c', 'a', 'b']);
+    });
+
+    expect(mockReorderPinned).toHaveBeenCalledWith(['c', 'a', 'b']);
     act(() => renderer.unmount());
   });
 });

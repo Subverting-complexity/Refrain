@@ -15,6 +15,7 @@ import { AccessiblePressable } from '@/src/components/AccessiblePressable';
 import { CenteredDialog } from '@/src/components/CenteredDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
 import { DialogButton } from '@/src/components/DialogButton';
+import { DraggablePinnedFolderList } from '@/src/components/DraggablePinnedFolderList';
 import { FolderActionsSheet } from '@/src/components/FolderActionsSheet';
 import { FolderListItem } from '@/src/components/FolderListItem';
 import { ImportButton } from '@/src/components/ImportButton';
@@ -62,6 +63,7 @@ const BUILTIN_ENTRIES: readonly BuiltinEntry[] = [
 
 type RootEntry =
   | { type: 'builtin'; entry: BuiltinEntry; count: number }
+  | { type: 'pinned-block'; folders: Folder[] }
   | { type: 'folder'; folder: Folder; trackCount: number };
 
 const EMPTY_COUNTS: TrackCounts = {
@@ -184,6 +186,8 @@ export default function LibraryScreen() {
     void importFile();
   }, [importFile]);
 
+  const searching = searchQuery.trim().length > 0;
+
   // Search covers the reader's own folders. The three built-in entries are
   // fixed furniture rather than search results, so they stay put whatever is
   // typed — otherwise a query with no folder matches would leave the reader
@@ -193,6 +197,16 @@ export default function LibraryScreen() {
     if (!q) return folders;
     return folders.filter((f) => f.name.toLowerCase().includes(q));
   }, [folders, searchQuery]);
+
+  const pinnedFolders = useMemo(
+    () => (searching ? [] : folders.filter((f) => f.pinOrder !== null)),
+    [folders, searching],
+  );
+
+  const unpinnedMatchingFolders = useMemo(() => {
+    if (searching) return matchingFolders;
+    return folders.filter((f) => f.pinOrder === null);
+  }, [folders, matchingFolders, searching]);
 
   const entries = useMemo((): RootEntry[] => {
     const items: RootEntry[] = [];
@@ -207,7 +221,10 @@ export default function LibraryScreen() {
       if (entry.key === 'unfiled' && count === 0) continue;
       items.push({ type: 'builtin', entry, count });
     }
-    for (const folder of matchingFolders) {
+    if (pinnedFolders.length > 0) {
+      items.push({ type: 'pinned-block', folders: pinnedFolders });
+    }
+    for (const folder of unpinnedMatchingFolders) {
       items.push({
         type: 'folder',
         folder,
@@ -215,7 +232,7 @@ export default function LibraryScreen() {
       });
     }
     return items;
-  }, [matchingFolders, counts]);
+  }, [pinnedFolders, unpinnedMatchingFolders, counts]);
 
   const openBuiltin = useCallback(
     (entry: BuiltinEntry) => {
@@ -393,6 +410,23 @@ export default function LibraryScreen() {
           />
         );
       }
+      if (item.type === 'pinned-block') {
+        return (
+          <DraggablePinnedFolderList
+            folders={item.folders}
+            trackCounts={counts.byFolder}
+            onOpenFolder={openFolder}
+            onOpenActions={(folder) => setActionsFolder(folder)}
+            onDeleteFolder={(folder) => setDeletingFolder(folder)}
+            onRenameFolder={(folder) =>
+              setRenamingFolder({ id: folder.id, name: folder.name })
+            }
+            onReorder={(orderedIds) => {
+              void writePinnedOrder(orderedIds, 'Failed to reorder folders');
+            }}
+          />
+        );
+      }
       return (
         <FolderListItem
           name={item.folder.name}
@@ -408,17 +442,16 @@ export default function LibraryScreen() {
         />
       );
     },
-    [openBuiltin, openFolder],
+    [openBuiltin, openFolder, counts.byFolder, writePinnedOrder],
   );
 
-  const keyExtractor = useCallback(
-    (item: RootEntry) =>
-      item.type === 'builtin' ? `b-${item.entry.key}` : `f-${item.folder.id}`,
-    [],
-  );
+  const keyExtractor = useCallback((item: RootEntry) => {
+    if (item.type === 'builtin') return `b-${item.entry.key}`;
+    if (item.type === 'pinned-block') return 'pinned-block';
+    return `f-${item.folder.id}`;
+  }, []);
 
   const libraryIsEmpty = counts.all === 0 && folders.length === 0;
-  const searching = searchQuery.trim().length > 0;
 
   if (libraryIsEmpty) {
     return (
