@@ -3,7 +3,6 @@ import { useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   ActivityIndicator,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -14,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
+import { PlayerErrorBanner } from '@/src/components/PlayerErrorBanner';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
@@ -372,57 +372,18 @@ export default function PlayerScreen() {
         </View>
 
         {isTrackMissing && (
-          <View style={styles.errorBanner}>
-            <View style={styles.errorHeadline}>
-              <Ionicons
-                name="alert-circle"
-                size={20}
-                color={theme.colors.error}
-              />
-              <Text
-                style={[theme.typography.body, { color: theme.colors.error }]}
-              >
-                This track is no longer in your library
-              </Text>
-            </View>
-            <Text
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.textSecondary },
-              ]}
-            >
-              Go back and import it again to keep playing.
-            </Text>
-          </View>
+          <PlayerErrorBanner
+            message="This track is no longer in your library"
+            detail="Go back and import it again to keep playing."
+          />
         )}
 
         {!isTrackMissing && status === 'error' && (
-          <View style={styles.errorBanner}>
-            <View style={styles.errorHeadline}>
-              <Ionicons
-                name="alert-circle"
-                size={20}
-                color={theme.colors.error}
-              />
-              <Text
-                style={[theme.typography.body, { color: theme.colors.error }]}
-              >
-                Unable to load this track
-              </Text>
-            </View>
-            {lastError ? (
-              <Text
-                style={[
-                  theme.typography.caption,
-                  { color: theme.colors.textSecondary },
-                ]}
-                numberOfLines={2}
-                ellipsizeMode="tail"
-              >
-                {lastError}
-              </Text>
-            ) : null}
-          </View>
+          <PlayerErrorBanner
+            message="Unable to load this track"
+            detail={lastError}
+            detailNumberOfLines={2}
+          />
         )}
 
         <View style={styles.controls}>
@@ -552,18 +513,6 @@ const styles = StyleSheet.create({
   },
   markers: {
     marginBottom: spacing.lg,
-  },
-  errorBanner: {
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.md,
-  },
-  errorHeadline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
   },
   seekBar: {
     marginBottom: spacing.lg,
