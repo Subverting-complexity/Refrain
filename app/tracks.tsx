@@ -1,18 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {
-  Stack,
-  useFocusEffect,
-  useLocalSearchParams,
-  useRouter,
-} from 'expo-router';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CenteredDialog } from '@/src/components/CenteredDialog';
@@ -29,6 +17,7 @@ import { TrackSortBar } from '@/src/components/TrackSortBar';
 import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
+import { useTokenedReload } from '@/src/hooks/useTokenedReload';
 import { useTrackImport } from '@/src/hooks/useTrackImport';
 import {
   insertFolder,
@@ -122,7 +111,6 @@ export default function TracksScreen() {
   const title = firstParam(params.name) ?? 'All tracks';
 
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>(readSortSetting);
   // Deliberately not persisted, and reset on entering any folder below. A
@@ -147,14 +135,6 @@ export default function TracksScreen() {
   );
   const [allFolders, setAllFolders] = useState<Folder[]>([]);
 
-  // Same hazard as the library root: a read started before an edit holds a
-  // snapshot that predates it, so it must not be allowed to land afterwards.
-  const loadToken = useRef(0);
-  const invalidateLoads = useCallback(() => {
-    loadToken.current += 1;
-    return loadToken.current;
-  }, []);
-
   const loadOptions = useMemo((): LoadTracksOptions => {
     if (scope === 'folder' && folderId !== null) {
       return { scope: 'folder', folderId };
@@ -162,38 +142,23 @@ export default function TracksScreen() {
     return { scope: scope === 'folder' ? 'all' : scope };
   }, [scope, folderId]);
 
-  /**
-   * Reads this entry's tracks and reports either outcome. The token guards
-   * the failure path as well as the successful one: a read that fails after
-   * the reader has left must not raise an error into whatever screen they
-   * moved on to.
-   */
-  const reloadData = useCallback(
-    async (announceSuccess: boolean, failureMessage: string) => {
-      const token = invalidateLoads();
-      try {
-        const loaded = await loadTracks(loadOptions);
-        if (loadToken.current !== token) return;
-        setTracks(loaded);
-        if (announceSuccess) {
-          AccessibilityInfo.announceForAccessibility('Tracks refreshed');
-        }
-      } catch {
-        if (loadToken.current !== token) return;
-        showToast(failureMessage, 'error');
-      }
-    },
-    [invalidateLoads, loadOptions, showToast],
+  const loadTracksForEntry = useCallback(
+    () => loadTracks(loadOptions),
+    [loadOptions],
+  );
+  const reportLoadError = useCallback(
+    (message: string) => showToast(message, 'error'),
+    [showToast],
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      void reloadData(false, 'Failed to load tracks');
-      return () => {
-        loadToken.current += 1;
-      };
-    }, [reloadData]),
-  );
+  const { refreshing, handleRefresh, invalidateLoads } = useTokenedReload({
+    load: loadTracksForEntry,
+    onLoaded: setTracks,
+    onError: reportLoadError,
+    announcement: 'Tracks refreshed',
+    loadFailureMessage: 'Failed to load tracks',
+    refreshFailureMessage: 'Failed to refresh tracks',
+  });
 
   // Opening a real folder is what orders the unpinned block on the root, so
   // stamp it once per visit. A folder that opens but is not stamped is still
@@ -211,15 +176,6 @@ export default function TracksScreen() {
       }
     })();
   }, [scope, folderId]);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await reloadData(true, 'Failed to refresh tracks');
-    } finally {
-      setRefreshing(false);
-    }
-  }, [reloadData]);
 
   // Import lands in the folder being viewed, and nowhere else — the built-in
   // entries are queries, not places, so an import made from one goes to

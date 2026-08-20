@@ -1,13 +1,6 @@
-import { ComponentProps, useCallback, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { ComponentProps, useCallback, useMemo, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -25,6 +18,7 @@ import { ToastHost } from '@/src/components/ToastHost';
 import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
+import { useTokenedReload } from '@/src/hooks/useTokenedReload';
 import { useTrackImport } from '@/src/hooks/useTrackImport';
 import {
   deleteFolder,
@@ -87,7 +81,6 @@ export default function LibraryScreen() {
   const focused = useIsScreenFocused();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [counts, setCounts] = useState<TrackCounts>(EMPTY_COUNTS);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { toast, showToast, hideToast } = useToast();
 
@@ -99,68 +92,34 @@ export default function LibraryScreen() {
   const [actionsFolder, setActionsFolder] = useState<Folder | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<Folder | null>(null);
 
-  // Retires reads that are still in flight. A load started before an edit
-  // holds a snapshot that predates it, so letting it land would silently
-  // undo the edit the reader just made.
-  const loadToken = useRef(0);
-  const invalidateLoads = useCallback(() => {
-    loadToken.current += 1;
-    return loadToken.current;
-  }, []);
-
-  /**
-   * Reads the folder list and the tallies together, and reports either
-   * outcome. The token guards both paths, not just the successful one: a read
-   * that fails after the reader has moved on must no more raise an error into
-   * whatever screen they are now looking at than a slow successful one may
-   * overwrite it.
-   */
-  const reloadData = useCallback(
-    async (
-      announceSuccess: boolean,
-      failureMessage: string,
-    ): Promise<boolean> => {
-      const token = invalidateLoads();
-      try {
-        const [loadedFolders, loadedCounts] = await Promise.all([
-          loadFolders(),
-          getTrackCountsByFolder(),
-        ]);
-        // A read the reader has moved on from reported nothing either way,
-        // so it is not a failure a caller should speak about.
-        if (loadToken.current !== token) return true;
-        setFolders(loadedFolders);
-        setCounts(loadedCounts);
-        if (announceSuccess) {
-          AccessibilityInfo.announceForAccessibility('Library refreshed');
-        }
-        return true;
-      } catch {
-        if (loadToken.current !== token) return true;
-        showToast(failureMessage, 'error');
-        return false;
-      }
+  // The folder list and the tallies are read together: a folder row shows
+  // its own count, so a list without counts is not a renderable state.
+  const loadLibrary = useCallback(
+    () => Promise.all([loadFolders(), getTrackCountsByFolder()]),
+    [],
+  );
+  const applyLibrary = useCallback(
+    ([loadedFolders, loadedCounts]: [Folder[], TrackCounts]) => {
+      setFolders(loadedFolders);
+      setCounts(loadedCounts);
     },
-    [invalidateLoads, showToast],
+    [],
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      void reloadData(false, 'Failed to load library');
-      return () => {
-        loadToken.current += 1;
-      };
-    }, [reloadData]),
+  const reportLoadError = useCallback(
+    (message: string) => showToast(message, 'error'),
+    [showToast],
   );
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await reloadData(true, 'Failed to refresh library');
-    } finally {
-      setRefreshing(false);
-    }
-  }, [reloadData]);
+  const { refreshing, handleRefresh, reload, invalidateLoads } =
+    useTokenedReload({
+      load: loadLibrary,
+      onLoaded: applyLibrary,
+      onError: reportLoadError,
+      announcement: 'Library refreshed',
+      loadFailureMessage: 'Failed to load library',
+      refreshFailureMessage: 'Failed to refresh library',
+    });
 
   // A fresh import lands in Unfiled, which is not a row the root is showing,
   // so nothing on screen would move without nudging the tallies. The reload
@@ -317,9 +276,9 @@ export default function LibraryScreen() {
       // The write landed, but the read back may not have. `reloadData`
       // reports its own failure, so say nothing further — a success toast on
       // top of "Failed to load library" would contradict it.
-      return reloadData(false, 'Failed to load library');
+      return reload();
     },
-    [showToast, reloadData],
+    [showToast, reload],
   );
 
   const handleTogglePin = useCallback(
@@ -374,9 +333,9 @@ export default function LibraryScreen() {
       }
       // Deleting a folder unfiles its tracks, so the tallies move too — read
       // them back rather than guessing.
-      await reloadData(false, 'Failed to load library');
+      await reload();
     },
-    [showToast, reloadData],
+    [showToast, reload],
   );
 
   const handleRenameFolder = useCallback(
