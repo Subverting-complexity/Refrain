@@ -57,3 +57,6 @@ graphify-out/cache/ast/
 
 expo-env.d.ts
 # @end expo-cli
+# github-workflow plugin per-session scratch (preflight marker, config projection)
+.claude/preflight-passed.txt
+.claude/projected-config.md
