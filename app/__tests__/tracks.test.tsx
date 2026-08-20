@@ -149,16 +149,19 @@ jest.mock('@/src/components/TrackActionsSheet', () => {
       onMoveToFolder,
       onRename,
       onToggleFavorite,
+      onDelete,
     }: {
       onMoveToFolder: () => void;
       onRename: () => void;
       onToggleFavorite: () => void;
+      onDelete: () => void;
     }) =>
       ReactLocal.createElement(View, {
         testID: 'track-actions-sheet',
         onMoveToFolder,
         onRename,
         onToggleFavorite,
+        onDelete,
       }),
   };
 });
@@ -639,6 +642,69 @@ describe('track view track actions', () => {
     expect(trackIds(renderer)).toEqual([]);
     expect(toastLabels(renderer)).toContain('Track deleted');
     act(() => renderer.unmount());
+  });
+
+  // Deleting an audio file is unrecoverable, so every route to it has to
+  // ask first. The swipe path is confirmed inside TrackListItem; the actions
+  // sheet reaches the screen's handler directly, so the screen confirms.
+  describe('deleting from the actions sheet', () => {
+    async function chooseDeleteInSheet(renderer: ReactTestRenderer) {
+      await act(async () => {
+        trackItems(renderer)[0].props.onOpenActions();
+      });
+      await act(async () => {
+        sheet(renderer).props.onDelete();
+      });
+    }
+
+    it('asks for confirmation instead of deleting straight away', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await chooseDeleteInSheet(renderer);
+
+      expect(mockDeleteTrack).not.toHaveBeenCalled();
+      expect(trackIds(renderer)).toEqual(['track-1']);
+      expect(textNodeExists(renderer, 'Delete track?')).toBe(true);
+      act(() => renderer.unmount());
+    });
+
+    it('deletes once the confirmation is accepted', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await chooseDeleteInSheet(renderer);
+      await act(async () => {
+        renderer.root
+          .findAllByProps({
+            accessibilityLabel: 'Confirm delete song.mp3',
+          })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onPress();
+      });
+
+      expect(mockDeleteTrack).toHaveBeenCalledWith('track-1');
+      expect(trackIds(renderer)).toEqual([]);
+      act(() => renderer.unmount());
+    });
+
+    it('keeps the track when the confirmation is cancelled', async () => {
+      mockLoadTracks.mockResolvedValue([sampleTrack]);
+
+      const renderer = await renderScreen();
+      await chooseDeleteInSheet(renderer);
+      await act(async () => {
+        renderer.root
+          .findAllByProps({ accessibilityLabel: 'Cancel delete' })
+          .filter((node) => typeof node.type !== 'string')[0]
+          .props.onPress();
+      });
+
+      expect(mockDeleteTrack).not.toHaveBeenCalled();
+      expect(trackIds(renderer)).toEqual(['track-1']);
+      expect(textNodeExists(renderer, 'Delete track?')).toBe(false);
+      act(() => renderer.unmount());
+    });
   });
 
   it('reports a failed delete and keeps the track listed', async () => {

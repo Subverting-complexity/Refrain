@@ -15,7 +15,9 @@ import {
 } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CenteredDialog } from '@/src/components/CenteredDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
+import { DialogButton } from '@/src/components/DialogButton';
 import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { SearchBar } from '@/src/components/SearchBar';
@@ -131,6 +133,11 @@ export default function TracksScreen() {
 
   const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
+  // Deleting from the actions sheet needs its own confirmation. The swipe
+  // path gets one from TrackListItem, but the sheet reaches `handleDelete`
+  // directly, so without this a single tap would destroy the audio file
+  // with nothing to undo it.
+  const [deletingTrack, setDeletingTrack] = useState<Track | null>(null);
   const [movingTrack, setMovingTrack] = useState<Track | null>(null);
   // The track waiting on a folder that does not exist yet. Held separately
   // from `movingTrack` so the picker is closed while the name is typed
@@ -582,7 +589,7 @@ export default function TracksScreen() {
           onRename={() => setRenamingTrack(actionsTrack)}
           onToggleFavorite={() => void handleToggleFavorite(actionsTrack)}
           onMoveToFolder={() => void openMoveToFolder(actionsTrack)}
-          onDelete={() => void handleDelete(actionsTrack.id)}
+          onDelete={() => setDeletingTrack(actionsTrack)}
           onDismiss={() => setActionsTrack(null)}
         />
       ) : null}
@@ -613,6 +620,31 @@ export default function TracksScreen() {
             setFilingIntoNewFolder(null);
           }}
         />
+      ) : null}
+
+      {deletingTrack ? (
+        <CenteredDialog
+          title="Delete track?"
+          message={`Remove “${deletingTrack.filename}” from your library?`}
+          onDismiss={() => setDeletingTrack(null)}
+        >
+          <DialogButton
+            label="Delete"
+            accessibilityLabel={`Confirm delete ${deletingTrack.filename}`}
+            variant="danger"
+            onPress={() => {
+              const target = deletingTrack;
+              setDeletingTrack(null);
+              void handleDelete(target.id);
+            }}
+          />
+          <DialogButton
+            label="Cancel"
+            accessibilityLabel="Cancel delete"
+            variant="default"
+            onPress={() => setDeletingTrack(null)}
+          />
+        </CenteredDialog>
       ) : null}
 
       <ToastHost toast={toast} onDismiss={hideToast} />
