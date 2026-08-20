@@ -11,7 +11,9 @@ import { deleteMarkers, deleteProfilesForTrack } from './markerStore.web';
 import {
   deleteBlob,
   getObjectUrl,
+  isAwaitingMetadata,
   listBlobIds,
+  releaseImportedBlobs,
   revokeObjectUrl,
 } from './webBlobStore.web';
 
@@ -181,10 +183,15 @@ export async function deleteTrack(id: string): Promise<void> {
   await deleteStoredTrack(id);
   await deleteMarkers(id);
   await deleteProfilesForTrack(id);
-  // Revoke the cached object URL and drop the blob. Fire-and-forget: a
-  // failed blob delete must not interrupt removal from the library.
   revokeObjectUrl(id);
-  void deleteBlob(id).catch(() => undefined);
+  // Await the blob removal so the promise means what the native store's does:
+  // the storage is actually back. Detached, it could still be uncommitted
+  // when the next import runs — so a delete made to free space would not have
+  // freed it yet — and navigating away straight after confirming abandoned it
+  // altogether, stranding the bytes until some later sweep. A failure is
+  // still swallowed: the track is out of the library either way, and the
+  // orphan sweep reclaims the blob on the next load.
+  await deleteBlob(id).catch(() => undefined);
 }
 
 /**
@@ -195,10 +202,17 @@ export async function deleteTrack(id: string): Promise<void> {
 export async function cleanupOrphanFiles(): Promise<number> {
   try {
     const knownIds = new Set(await getStoredTrackIds());
+    // An id that now has a metadata record no longer needs protecting.
+    releaseImportedBlobs(knownIds);
     const storedIds = await listBlobIds();
     let removed = 0;
     for (const id of storedIds) {
-      if (!knownIds.has(id)) {
+      // A blob written by an import whose track record has not landed yet is
+      // indistinguishable from an orphan. Skip it: the sweep runs on every
+      // library load, so it routinely overlaps an import in flight, and
+      // deleting here would silently strip the audio from the track the
+      // reader just added.
+      if (!knownIds.has(id) && !isAwaitingMetadata(id)) {
         await deleteBlob(id);
         removed += 1;
       }

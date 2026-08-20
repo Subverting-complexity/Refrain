@@ -54,6 +54,25 @@ describe('hydrateSettings', () => {
     expect(settings.getNumber('volume', 0.8)).toBe(0.8);
   });
 
+  // A failed attempt must not be cached. The read can fail for passing
+  // reasons — storage pressure, another tab blocking an upgrade — and caching
+  // it would mean every persisted preference silently reverted to its default
+  // for the rest of the page session, with changes appearing to work and
+  // reverting again on reload. Native re-reads storage on every call and so
+  // recovers on the next one; web has to clear the attempt to match.
+  it('retries after a failed hydration instead of serving defaults forever', async () => {
+    mockGetAllStoredSettings.mockRejectedValueOnce(new Error('db unavailable'));
+    const settings = await loadModule();
+    expect(settings.getNumber('volume', 0.8)).toBe(0.8);
+
+    mockGetAllStoredSettings.mockResolvedValue([
+      { key: 'volume', value: '0.3' },
+    ]);
+    await settings.hydrateSettings();
+
+    expect(settings.getNumber('volume', 0.8)).toBe(0.3);
+  });
+
   // Regression for #163: a read that lands before hydration resolves must not
   // permanently lose the persisted value — awaiting hydration recovers it.
   it('returns the persisted value once hydration is awaited, not the early-read default', async () => {

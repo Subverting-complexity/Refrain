@@ -43,12 +43,17 @@ const mockGetObjectUrl = jest.fn<Promise<string | null>, [string]>();
 const mockRevokeObjectUrl = jest.fn();
 const mockDeleteBlob = jest.fn<Promise<void>, [string]>();
 const mockListBlobIds = jest.fn<Promise<string[]>, []>();
+const mockIsAwaitingMetadata = jest.fn<boolean, [string]>();
+const mockReleaseImportedBlobs = jest.fn();
 
 jest.mock('../webBlobStore.web', () => ({
   getObjectUrl: (id: string) => mockGetObjectUrl(id),
   revokeObjectUrl: (id: string) => mockRevokeObjectUrl(id),
   deleteBlob: (id: string) => mockDeleteBlob(id),
   listBlobIds: () => mockListBlobIds(),
+  isAwaitingMetadata: (id: string) => mockIsAwaitingMetadata(id),
+  releaseImportedBlobs: (ids: Iterable<string>) =>
+    mockReleaseImportedBlobs(ids),
 }));
 
 const sampleTrack: Track = {
@@ -93,6 +98,9 @@ beforeEach(() => {
   mockListBlobIds.mockResolvedValue([]);
   mockDeleteMarkers.mockResolvedValue(undefined);
   mockDeleteProfilesForTrack.mockResolvedValue(undefined);
+  // Default: no import in flight, so the sweep treats every unmatched blob
+  // as a genuine orphan.
+  mockIsAwaitingMetadata.mockReturnValue(false);
 });
 
 describe('loadTracks', () => {
@@ -273,6 +281,34 @@ describe('cleanupOrphanFiles', () => {
     mockListBlobIds.mockResolvedValue(['track-1']);
     expect(await cleanupOrphanFiles()).toBe(0);
     expect(mockDeleteBlob).not.toHaveBeenCalled();
+  });
+
+  // An import writes the blob before the track record, so mid-import the
+  // blob looks exactly like an orphan. The sweep runs on every library load
+  // — including one triggered while the import is still in flight — and
+  // deleting here would strip the audio from the track just added.
+  it('spares a blob whose import has not written its record yet', async () => {
+    mockGetStoredTrackIds.mockResolvedValue([]);
+    mockListBlobIds.mockResolvedValue(['importing']);
+    mockIsAwaitingMetadata.mockImplementation((id) => id === 'importing');
+
+    const removed = await cleanupOrphanFiles();
+
+    expect(removed).toBe(0);
+    expect(mockDeleteBlob).not.toHaveBeenCalled();
+  });
+
+  it('stops sparing a blob once its record exists', async () => {
+    mockGetStoredTrackIds.mockResolvedValue(['imported']);
+    mockListBlobIds.mockResolvedValue(['imported']);
+
+    await cleanupOrphanFiles();
+
+    expect(mockReleaseImportedBlobs).toHaveBeenCalledWith(
+      expect.objectContaining({ has: expect.any(Function) }),
+    );
+    const released = mockReleaseImportedBlobs.mock.calls[0][0] as Set<string>;
+    expect(released.has('imported')).toBe(true);
   });
 
   it('returns 0 and swallows errors when listing fails', async () => {

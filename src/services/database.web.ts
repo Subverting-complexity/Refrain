@@ -215,6 +215,23 @@ export function putStoredTrack(track: StoredTrack): Promise<void> {
   ).then(() => undefined);
 }
 
+/**
+ * Writes several track records in one transaction, so a batch re-home lands
+ * whole or not at all. Deleting a folder unfiles every track inside it;
+ * writing them one at a time leaves some unfiled and the rest still pointing
+ * at a folder that is about to disappear — and such a track appears in no
+ * view at all, being neither unfiled nor inside an openable folder. The
+ * native store does the same work in a single UPDATE.
+ */
+export function putStoredTracks(tracks: StoredTrack[]): Promise<void> {
+  if (tracks.length === 0) return Promise.resolve();
+  return connection.runBatchTransaction(TRACKS_STORE, 'readwrite', (store) => {
+    for (const track of tracks) {
+      store.put(track);
+    }
+  });
+}
+
 export function deleteStoredTrack(id: string): Promise<void> {
   return runTransaction(TRACKS_STORE, 'readwrite', (store) =>
     store.delete(id),

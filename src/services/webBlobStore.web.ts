@@ -40,10 +40,39 @@ function runTransaction<T>(
   return connection.runTransaction(STORE, mode, run);
 }
 
+/**
+ * Blob ids written during this page session whose metadata record may not
+ * exist yet.
+ *
+ * An import writes the blob first and the track record second, so between the
+ * two the blob looks exactly like an orphan: present in this store, absent
+ * from the metadata store. The orphan sweep runs on every library load, which
+ * happens on focus — routinely while an import is still in flight — so
+ * without this it would delete the audio of the track the reader just added,
+ * leaving a row that plays nothing.
+ *
+ * Entries clear themselves: the sweep drops an id as soon as it observes a
+ * metadata record for it, which is exactly when the id stops needing
+ * protection. An import that dies between the two writes leaves its id
+ * protected for the rest of the page session; the next load sweeps it.
+ */
+const awaitingMetadata = new Set<string>();
+
+/** Stop protecting ids that now have a metadata record. */
+export function releaseImportedBlobs(knownIds: Iterable<string>): void {
+  for (const id of knownIds) awaitingMetadata.delete(id);
+}
+
+/** Whether a blob id is still waiting for its metadata record to be written. */
+export function isAwaitingMetadata(id: string): boolean {
+  return awaitingMetadata.has(id);
+}
+
 /** Persist (or overwrite) the audio blob for a track id. */
 export function putBlob(id: string, blob: Blob): Promise<void> {
   return runTransaction('readwrite', (store) => store.put(blob, id)).then(
     () => {
+      awaitingMetadata.add(id);
       revokeObjectUrl(id);
     },
   );
@@ -58,6 +87,7 @@ export function getBlob(id: string): Promise<Blob | null> {
 
 /** Remove the audio blob for a track id. No-op if absent. */
 export function deleteBlob(id: string): Promise<void> {
+  awaitingMetadata.delete(id);
   return runTransaction('readwrite', (store) => store.delete(id)).then(
     () => undefined,
   );
