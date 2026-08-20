@@ -12,15 +12,22 @@ class FakeMedia {
 let media: FakeMedia | null;
 
 const mockPlay = jest.fn();
+const mockPause = jest.fn();
 const mockSeekTo = jest.fn().mockResolvedValue(undefined);
 const mockRemove = jest.fn();
 const mockVolumeSet = jest.fn<void, [number]>();
-const mockAddListener = jest.fn(() => ({ remove: jest.fn() }));
+let statusCallback: ((status: unknown) => void) | null = null;
+const mockAddListener = jest.fn(
+  (_event: string, cb: (status: unknown) => void) => {
+    statusCallback = cb;
+    return { remove: jest.fn() };
+  },
+);
 
 const mockCreateAudioPlayer = jest.fn().mockImplementation(() => {
   const player: Record<string, unknown> = {
     play: mockPlay,
-    pause: jest.fn(),
+    pause: mockPause,
     seekTo: mockSeekTo,
     remove: mockRemove,
     addListener: mockAddListener,
@@ -223,6 +230,45 @@ describe('web media session wiring', () => {
     await play();
     expect(session.playbackState).toBe('playing');
     await pause();
+    expect(session.playbackState).toBe('paused');
+  });
+
+  // The overlay's state on web is a value the app publishes, not something
+  // the browser derives. When the engine paused itself — stopping at marker B
+  // with the loop disarmed — the overlay went on claiming 'playing', so a
+  // hardware play key dispatched `pause` on an already-paused track and
+  // appeared dead.
+  it('reports paused to the OS overlay when the loop stops at marker B', async () => {
+    const session = installSession();
+    const {
+      loadTrack,
+      play,
+      setMarkerA,
+      setMarkerB,
+      setLoopEnabled,
+    } = require('../audioEngine');
+
+    await loadTrack('blob:track', undefined, 'My Song');
+    await play();
+    expect(session.playbackState).toBe('playing');
+
+    setMarkerA(1_000);
+    setMarkerB(5_000);
+    setLoopEnabled(false);
+    mockPause.mockClear();
+
+    // Playing, and the playhead has reached marker B.
+    statusCallback?.({
+      isLoaded: true,
+      playing: true,
+      isBuffering: false,
+      currentTime: 5,
+      duration: 60,
+      didJustFinish: false,
+      error: null,
+    });
+
+    expect(mockPause).toHaveBeenCalled();
     expect(session.playbackState).toBe('paused');
   });
 

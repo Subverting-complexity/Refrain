@@ -144,6 +144,29 @@ async function seekInternal(targetMs: number): Promise<void> {
 }
 
 /**
+ * Start or stop playback and keep the OS media overlay in step.
+ *
+ * On web the overlay's state is a value we publish, not something the browser
+ * derives, so every transport change has to go through here. The exported
+ * play/pause mirrored it, but the engine's own changes — stopping at marker B
+ * with the loop disarmed, pausing at A to hand off to a count-in, resuming
+ * after the track ran out, restoring the transport after a marker drag — did
+ * not. The overlay then claimed the opposite of what was happening, and a
+ * hardware media key sent the action for that wrong state: pressing play on a
+ * paused track dispatched `pause`, so the key appeared dead. Native derives
+ * the state from the player itself and needs none of this.
+ */
+function startPlayback(target: AudioPlayer): void {
+  target.play();
+  if (Platform.OS === 'web') webMediaSession.setPlaybackState('playing');
+}
+
+function stopPlayback(target: AudioPlayer): void {
+  target.pause();
+  if (Platform.OS === 'web') webMediaSession.setPlaybackState('paused');
+}
+
+/**
  * Publish a failed background seek as an error — but only while the player it
  * was issued against is still the live one.
  *
@@ -362,7 +385,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     if (!monitor && !loopEnabled) {
       // Loop disarmed: play the A..B region once, then stop at B. The next
       // play() restarts from A (see play()).
-      player.pause();
+      stopPlayback(player);
       currentState = { ...newState, positionMs: region.b, status: 'paused' };
       notify(currentState);
       return;
@@ -378,7 +401,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     if (!monitor && onLoopRestart) {
       // A per-loop count-in is registered: pause at A and hand off so the
       // caller can run the lead-in before resuming.
-      player.pause();
+      stopPlayback(player);
       currentState = { ...newState, positionMs: region.a, status: 'paused' };
       notify(currentState);
       onLoopRestart();
@@ -388,7 +411,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     // When the track reached its natural end, the player auto-pauses.
     // Restart it so the loop continues seamlessly.
     if (status.didJustFinish) {
-      player.play();
+      startPlayback(player);
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
@@ -644,14 +667,12 @@ export async function play(): Promise<void> {
     await seekInternal(markerA ?? 0);
   }
   if (player !== target) return;
-  target.play();
-  if (Platform.OS === 'web') webMediaSession.setPlaybackState('playing');
+  startPlayback(target);
 }
 
 export async function pause(): Promise<void> {
   if (!player) return;
-  player.pause();
-  if (Platform.OS === 'web') webMediaSession.setPlaybackState('paused');
+  stopPlayback(player);
 }
 
 export async function stop(): Promise<void> {
@@ -858,7 +879,7 @@ export async function startMonitor(centerMs: number): Promise<void> {
     throw err;
   }
   if (player !== target) return;
-  target.play();
+  startPlayback(target);
 }
 
 /**
@@ -917,9 +938,9 @@ export async function stopMonitor(): Promise<void> {
     await seekInternal(saved ? saved.positionMs : 0);
     if (player !== target) return;
     if (saved?.isPlaying) {
-      target.play();
+      startPlayback(target);
     } else {
-      target.pause();
+      stopPlayback(target);
     }
   } finally {
     restoringTransport = false;
