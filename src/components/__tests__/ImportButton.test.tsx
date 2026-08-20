@@ -11,17 +11,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-      },
-      typography: { body: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function renderButton(
   props: Partial<React.ComponentProps<typeof ImportButton>> = {},

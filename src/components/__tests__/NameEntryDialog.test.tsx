@@ -2,22 +2,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { NameEntryDialog, NameEntryDialogProps } from '../NameEntryDialog';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        surface: '#111',
-        textPrimary: '#fff',
-        textSecondary: '#aaa',
-        accent: '#0f0',
-        accentText: '#000',
-        error: '#f00',
-        border: '#333',
-      },
-      typography: { heading: {}, body: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function render(overrides: Partial<NameEntryDialogProps> = {}) {
   let tree!: ReactTestRenderer;

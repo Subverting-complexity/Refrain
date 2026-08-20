@@ -4,25 +4,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { ColorMode } from '../../theme';
 import { AppearanceSettings } from '../AppearanceSettings';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#111d1f',
-        surface: '#1a2e28',
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        textPrimary: '#e8f5f0',
-        textSecondary: '#8fa89e',
-        border: '#2d4a40',
-      },
-      typography: {
-        body: { fontSize: 16, color: '#e8f5f0' },
-        bodySmall: { fontSize: 14, color: '#e8f5f0' },
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function render(value: ColorMode, onChange: jest.Mock): ReactTestRenderer {
   let tree!: ReactTestRenderer;

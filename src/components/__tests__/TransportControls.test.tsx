@@ -3,22 +3,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { TransportControls } from '../TransportControls';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#111d1f',
-        border: '#2a4a4e',
-        surface: '#1a2e30',
-        textPrimary: '#e0f0eb',
-        textSecondary: '#8ba89e',
-      },
-      spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
-      typography: {},
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

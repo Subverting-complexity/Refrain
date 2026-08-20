@@ -3,25 +3,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { MarkerTimeSheet } from '../MarkerTimeSheet';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        surface: '#1a2e30',
-        textPrimary: '#e0f0eb',
-        textSecondary: '#8ba89e',
-        border: '#2a4a4e',
-        error: '#ff5d77',
-        overlay: 'rgba(0, 0, 0, 0.5)',
-      },
-      typography: {
-        heading: { fontSize: 18, fontWeight: '600' },
-        body: { fontSize: 15 },
-        caption: { fontSize: 12 },
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

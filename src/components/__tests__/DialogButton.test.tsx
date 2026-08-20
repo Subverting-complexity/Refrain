@@ -3,21 +3,9 @@ import { StyleSheet, Text } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { DialogButton } from '../DialogButton';
+import { darkTheme } from '../../theme';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        error: '#f87171',
-        textPrimary: '#e8f5f0',
-        border: '#2d4a40',
-      },
-      typography: { body: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function renderButton(
   props: Partial<React.ComponentProps<typeof DialogButton>> = {},
@@ -70,14 +58,16 @@ describe('DialogButton', () => {
     const flat = StyleSheet.flatten(
       findHost(tree).props.style({ pressed: false }),
     );
-    expect(flat.backgroundColor).toBe('#7edbb8');
+    expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
     expect(flat.borderWidth).toBeUndefined();
   });
 
   it('renders the primary label in accentText color', () => {
     const tree = renderButton({ variant: 'primary' });
     const text = tree.root.findAllByType(Text)[0];
-    expect(StyleSheet.flatten(text.props.style).color).toBe('#0a1612');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(
+      darkTheme.colors.accentText,
+    );
   });
 
   it('outlines the default variant with the border color', () => {
@@ -87,19 +77,23 @@ describe('DialogButton', () => {
     );
     expect(flat.backgroundColor).toBeUndefined();
     expect(flat.borderWidth).toBe(1);
-    expect(flat.borderColor).toBe('#2d4a40');
+    expect(flat.borderColor).toBe(darkTheme.colors.border);
   });
 
   it('renders the default label in textPrimary color', () => {
     const tree = renderButton();
     const text = tree.root.findAllByType(Text)[0];
-    expect(StyleSheet.flatten(text.props.style).color).toBe('#e8f5f0');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(
+      darkTheme.colors.textPrimary,
+    );
   });
 
   it('renders the danger label in the error color on an outlined button', () => {
     const tree = renderButton({ variant: 'danger' });
     const text = tree.root.findAllByType(Text)[0];
-    expect(StyleSheet.flatten(text.props.style).color).toBe('#f87171');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(
+      darkTheme.colors.error,
+    );
     const flat = StyleSheet.flatten(
       findHost(tree).props.style({ pressed: false }),
     );

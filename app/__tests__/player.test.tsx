@@ -110,27 +110,7 @@ jest.mock('@/src/hooks/useCountdown', () => ({
   }),
 }));
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#000',
-        surface: '#111',
-        accent: '#0f0',
-        accentText: '#000',
-        textPrimary: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        error: '#f00',
-        markerA: '#ffb02e',
-        markerAText: '#3a2600',
-        markerB: '#ff5d77',
-        markerBText: '#fff',
-      },
-      typography: { heading: {}, body: {}, bodySmall: {}, caption: {} },
-    },
-  }),
-}));
+jest.mock('@/src/hooks/useTheme');
 
 // Capture the navigation beforeRemove listener so a test can fire the
 // leave-the-player guard, and the dispatch the resolved guard re-issues.

@@ -3,20 +3,9 @@ import { StyleSheet } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { ChipGroup, ChipOption } from '../ChipGroup';
+import { darkTheme } from '../../theme';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      dark: true,
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        textPrimary: '#e8f5f0',
-        border: '#2d4a40',
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 const OPTIONS: ChipOption<number>[] = [
   { label: '1s', value: 1 },
@@ -78,8 +67,8 @@ describe('ChipGroup', () => {
     const tree = renderGroup({ value: 5 });
     const selected = findChip(tree, 'Length 5s');
     const flat = StyleSheet.flatten(selected.props.style({ pressed: false }));
-    expect(flat.backgroundColor).toBe('#7edbb8');
-    expect(flat.borderColor).toBe('#7edbb8');
+    expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
+    expect(flat.borderColor).toBe(darkTheme.colors.accent);
   });
 
   it('outlines unselected chips with the border color', () => {
@@ -87,7 +76,7 @@ describe('ChipGroup', () => {
     const unselected = findChip(tree, 'Length 1s');
     const flat = StyleSheet.flatten(unselected.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe('transparent');
-    expect(flat.borderColor).toBe('#2d4a40');
+    expect(flat.borderColor).toBe(darkTheme.colors.border);
   });
 
   it('calls onChange with the pressed option value', () => {

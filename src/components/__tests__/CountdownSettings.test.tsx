@@ -11,28 +11,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#111d1f',
-        surface: '#1a2e28',
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        textPrimary: '#e8f5f0',
-        textSecondary: '#8fa89e',
-        border: '#2d4a40',
-        error: '#f87171',
-        errorText: '#1a1a1a',
-      },
-      typography: {
-        body: { fontSize: 16, color: '#e8f5f0' },
-        bodySmall: { fontSize: 14, color: '#e8f5f0' },
-        caption: { fontSize: 12, color: '#8fa89e' },
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function defaultConfig(
   overrides: Partial<CountdownConfig> = {},

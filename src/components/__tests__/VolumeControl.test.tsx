@@ -3,20 +3,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { VolumeControl } from '../VolumeControl';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        border: '#2a4a4e',
-        surface: '#1a2e30',
-        textSecondary: '#8ba89e',
-      },
-      spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
-      typography: { caption: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 const mockIsIOSWeb = jest.fn<boolean, []>();
 jest.mock('../../utils/platform', () => ({

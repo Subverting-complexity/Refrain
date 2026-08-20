@@ -7,23 +7,7 @@ import {
   SegmentProfileSheetProps,
 } from '../SegmentProfileSheet';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        surface: '#111',
-        textPrimary: '#fff',
-        textSecondary: '#aaa',
-        accent: '#0f0',
-        accentText: '#000',
-        border: '#333',
-        error: '#f00',
-        overlay: 'rgba(0, 0, 0, 0.5)',
-      },
-      typography: { heading: {}, body: {}, caption: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

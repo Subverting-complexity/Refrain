@@ -18,6 +18,8 @@ module.exports = {
     'app/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
     '!src/types/**',
+    // Manual Jest mocks are test fixtures, not product code.
+    '!src/**/__mocks__/**',
   ],
   coverageThreshold: {
     // Project-wide regression floor. Set just below the current measured

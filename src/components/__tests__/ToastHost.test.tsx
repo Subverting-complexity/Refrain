@@ -4,19 +4,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { ToastHost } from '../ToastHost';
 import { ToastState } from '../../hooks/useToast';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        surface: '#1a2e30',
-        textPrimary: '#e8f5f0',
-        accent: '#7edbb8',
-        error: '#f87171',
-      },
-      typography: { bodySmall: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function render(node: React.ReactElement): ReactTestRenderer {
   let tree!: ReactTestRenderer;

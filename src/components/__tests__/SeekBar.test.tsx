@@ -3,20 +3,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { SeekBar } from '../SeekBar';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        border: '#2a4a4e',
-        surface: '#1a2e30',
-        textSecondary: '#8ba89e',
-      },
-      spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
-      typography: {},
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 // Stub gesture-handler: GestureDetector renders its child and Gesture.Pan()
 // records its callbacks so the test can drive begin/update/finalize with

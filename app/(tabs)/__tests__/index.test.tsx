@@ -52,21 +52,7 @@ jest.mock('@/src/hooks/useShareIntent', () => ({
   useShareIntent: jest.fn(),
 }));
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#000',
-        surface: '#111',
-        accent: '#0f0',
-        accentText: '#000',
-        textPrimary: '#fff',
-        error: '#f00',
-      },
-      typography: { heading: {}, body: {}, bodySmall: {}, caption: {} },
-    },
-  }),
-}));
+jest.mock('@/src/hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

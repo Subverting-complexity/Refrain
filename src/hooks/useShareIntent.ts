@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useShareIntent as useExpoShareIntent } from 'expo-share-intent';
@@ -40,6 +40,29 @@ export function useShareIntent({
   // so a given initial URL is imported at most once.
   const handledInitialUrlRef = useRef<string | null>(null);
 
+  // `importFromUri` resolves to an outcome for the failures it expects, but
+  // it can still throw outright — the native path constructs an
+  // expo-file-system `File` and reads `.exists` before its own try, so a
+  // malformed shared path or file/content URI escapes. Both flows below are
+  // fire-and-forget, so an escaping rejection would go unhandled instead of
+  // reaching the caller's onError. Catch here so every import failure is
+  // reported the same way, whichever door the file arrived through.
+  const importAndReport = useCallback(
+    async (uri: string, filename: string) => {
+      try {
+        const result = await importFromUri(uri, filename);
+        if (result.success) {
+          onTrackImportedRef.current(result.track);
+        } else {
+          onErrorRef.current?.(result.message);
+        }
+      } catch (error) {
+        onErrorRef.current?.(errorMessage(error));
+      }
+    },
+    [onTrackImportedRef, onErrorRef],
+  );
+
   // System share sheet (Android ACTION_SEND, iOS share-extension target).
   // Safe to call unconditionally on every platform: expo-share-intent loads
   // its native module optionally and defaults `disabled` to true on web, so
@@ -70,22 +93,9 @@ export function useShareIntent({
           continue;
         }
 
-        // `importFromUri` resolves to an outcome for the failures it expects,
-        // but it can still throw outright — the native path constructs an
-        // expo-file-system `File` and reads `.exists` before its own try, so a
-        // malformed shared path escapes. Catch per file so one bad share is
-        // reported through onError instead of becoming an unhandled rejection,
-        // and so it does not abort the files queued behind it.
-        try {
-          const result = await importFromUri(file.path, filename);
-          if (result.success) {
-            onTrackImportedRef.current(result.track);
-          } else {
-            onErrorRef.current?.(result.message);
-          }
-        } catch (error) {
-          onErrorRef.current?.(errorMessage(error));
-        }
+        // Caught per file (inside importAndReport) so one bad share does not
+        // abort the files queued behind it.
+        await importAndReport(file.path, filename);
       }
     })().catch(() => undefined);
     // The callback refs are stable, so this still re-runs only per share.
@@ -94,8 +104,8 @@ export function useShareIntent({
     hasShareIntent,
     shareIntent,
     resetShareIntent,
-    onTrackImportedRef,
     onErrorRef,
+    importAndReport,
   ]);
 
   useEffect(() => {
@@ -131,20 +141,7 @@ export function useShareIntent({
         return;
       }
 
-      // Same reasoning as the share-intent path above: importFromUri can throw
-      // on a malformed file/content URI, and both call sites below are
-      // fire-and-forget, so an escaping rejection would go unhandled instead of
-      // reaching the caller's onError.
-      try {
-        const result = await importFromUri(url, filename);
-        if (result.success) {
-          onTrackImportedRef.current(result.track);
-        } else {
-          onErrorRef.current?.(result.message);
-        }
-      } catch (error) {
-        onErrorRef.current?.(errorMessage(error));
-      }
+      await importAndReport(url, filename);
     }
 
     Linking.getInitialURL()
@@ -168,7 +165,7 @@ export function useShareIntent({
     });
 
     return () => subscription.remove();
-    // The callback refs are stable, so this re-subscribes only when the
-    // caller's enabled state flips.
-  }, [enabled, onTrackImportedRef, onErrorRef]);
+    // The callback refs (and the helper built on them) are stable, so this
+    // re-subscribes only when the caller's enabled state flips.
+  }, [enabled, onErrorRef, importAndReport]);
 }

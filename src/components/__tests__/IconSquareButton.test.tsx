@@ -3,6 +3,7 @@ import { StyleSheet } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { IconSquareButton } from '../IconSquareButton';
+import { darkTheme } from '../../theme';
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');
@@ -11,19 +12,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#0f0',
-        accentText: '#000',
-        surface: '#111',
-        border: '#333',
-        textSecondary: '#aaa',
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function renderButton(
   props: Partial<React.ComponentProps<typeof IconSquareButton>> = {},
@@ -72,16 +61,16 @@ describe('IconSquareButton', () => {
     const tree = renderButton({ active: true });
     const node = findHost(tree);
     const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
-    expect(flat.backgroundColor).toBe('#0f0');
-    expect(flat.borderColor).toBe('#0f0');
+    expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
+    expect(flat.borderColor).toBe(darkTheme.colors.accent);
   });
 
   it('uses surface colors when inactive', () => {
     const tree = renderButton({ active: false });
     const node = findHost(tree);
     const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
-    expect(flat.backgroundColor).toBe('#111');
-    expect(flat.borderColor).toBe('#333');
+    expect(flat.backgroundColor).toBe(darkTheme.colors.surface);
+    expect(flat.borderColor).toBe(darkTheme.colors.border);
   });
 
   it('sets opacity 0.4 when disabled', () => {
@@ -156,12 +145,12 @@ describe('IconSquareButton', () => {
   it('renders the icon with accentText color when active', () => {
     const tree = renderButton({ active: true });
     const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
-    expect(icon.props.color).toBe('#000');
+    expect(icon.props.color).toBe(darkTheme.colors.accentText);
   });
 
   it('renders the icon with textSecondary color when inactive', () => {
     const tree = renderButton({ active: false });
     const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
-    expect(icon.props.color).toBe('#aaa');
+    expect(icon.props.color).toBe(darkTheme.colors.textSecondary);
   });
 });
