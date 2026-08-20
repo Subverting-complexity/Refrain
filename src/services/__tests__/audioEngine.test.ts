@@ -234,6 +234,52 @@ describe('audioEngine', () => {
     });
   });
 
+  // Markers are restored without knowing the new track's length, so a track
+  // re-imported from a shorter file (or a corrected duration) can leave B
+  // past the end. The playhead could then never reach B: the loop never
+  // rewound, and play() started at the very end, which finished immediately
+  // — a Play button that did nothing, with nothing explaining why.
+  describe('a saved marker B past the end of the track', () => {
+    async function loadWithMarkersPastEnd() {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 5_000,
+        markerB: 90_000, // the track below is only 60s
+        loopEnabled: true,
+      });
+      const engine = require('../audioEngine');
+      await engine.loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      return engine;
+    }
+
+    it('rewinds at the end of the track rather than never looping', async () => {
+      const { subscribe } = await loadWithMarkersPastEnd();
+      const listener = jest.fn();
+      subscribe(listener);
+      mockSeekTo.mockClear();
+
+      // Playing, and the playhead has reached the end of the real audio.
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 60, playing: true }),
+      );
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+    });
+
+    it('restarts from marker A instead of stalling at the end', async () => {
+      const { play } = await loadWithMarkersPastEnd();
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 60, playing: false }),
+      );
+      mockSeekTo.mockClear();
+
+      await play();
+
+      expect(mockSeekTo).toHaveBeenCalledWith(5);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+  });
+
   describe('a load that fails partway', () => {
     // The player is created before the lock-screen registration; a throw in
     // between left it unreachable — `player` was never assigned, so unload

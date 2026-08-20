@@ -25,6 +25,19 @@ import {
  * the stored audio at load time so the player can play it.
  */
 
+/**
+ * Whether a stored row is starred.
+ *
+ * IndexedDB stores whatever it was handed, so a record could carry the
+ * native store's numeric 0/1 encoding rather than a boolean — from a restore
+ * path, or a hand-edited record. Reading it one way in the list and another
+ * in the tally made them disagree: the Favourites badge counted a row that
+ * opening Favourites did not show. One predicate, used everywhere.
+ */
+function isStarred(row: StoredTrack): boolean {
+  return Boolean(row.isFavorite);
+}
+
 async function rowToTrack(row: StoredTrack): Promise<Track> {
   const uri = (await getObjectUrl(row.id)) ?? `idb://${row.id}`;
   return {
@@ -37,7 +50,7 @@ async function rowToTrack(row: StoredTrack): Promise<Track> {
     fileSizeBytes: row.fileSizeBytes,
     importedAt: row.importedAt,
     folderId: row.folderId ?? null,
-    isFavorite: row.isFavorite ?? false,
+    isFavorite: isStarred(row),
     lastPlayedAt: row.lastPlayedAt ?? null,
   };
 }
@@ -72,7 +85,7 @@ export async function loadTracks(
   });
   let rows = await getAllStoredTracks();
   if (options.scope === 'favorites') {
-    rows = rows.filter((r) => r.isFavorite === true);
+    rows = rows.filter(isStarred);
   } else if (options.scope === 'unfiled') {
     rows = rows.filter((r) => (r.folderId ?? null) === null);
   } else if (options.scope === 'folder') {
@@ -169,7 +182,7 @@ export async function getTrackCountsByFolder(): Promise<TrackCounts> {
   let favorites = 0;
   let unfiled = 0;
   for (const row of rows) {
-    if (row.isFavorite) favorites += 1;
+    if (isStarred(row)) favorites += 1;
     if (row.folderId == null) {
       unfiled += 1;
     } else {

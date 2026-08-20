@@ -695,6 +695,18 @@ export async function stop(): Promise<void> {
 function regionBounds(): { a: number; b: number } | null {
   if (markerA == null || markerB == null) return null;
   if (markerA >= markerB) return null;
+  // Clamp B to the track. Saved markers are restored without knowing the new
+  // track's length — a track re-imported over the same id from a shorter
+  // file, or a duration corrected after the markers were saved, leaves B past
+  // the end. The playhead can then never reach B, so the loop never rewinds
+  // and `play()` finds the position neither before A nor at B and starts at
+  // the very end, which finishes immediately: the Play button looks dead with
+  // nothing explaining why. Clamping keeps the region reachable.
+  const duration = currentState.durationMs;
+  if (duration > 0 && markerB > duration) {
+    if (markerA >= duration) return null;
+    return { a: markerA, b: duration };
+  }
   return { a: markerA, b: markerB };
 }
 
