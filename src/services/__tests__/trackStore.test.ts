@@ -6,6 +6,9 @@ const mockGetAllSync = jest.fn();
 const mockGetFirstSync = jest.fn();
 const mockExecSync = jest.fn();
 const mockCloseSync = jest.fn();
+// Runs the body immediately, like the real synchronous transaction wrapper,
+// so statements issued inside it are still observable through mockRunSync.
+const mockWithTransactionSync = jest.fn((body: () => void) => body());
 
 jest.mock('expo-sqlite', () => ({
   openDatabaseSync: jest.fn(() => ({
@@ -14,6 +17,7 @@ jest.mock('expo-sqlite', () => ({
     getFirstSync: mockGetFirstSync,
     execSync: mockExecSync,
     closeSync: mockCloseSync,
+    withTransactionSync: mockWithTransactionSync,
   })),
 }));
 

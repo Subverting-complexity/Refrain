@@ -37,27 +37,7 @@ jest.mock('react-native-gesture-handler', () => {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const RNGH = require('react-native-gesture-handler');
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#111d1f',
-        border: '#2a4a4e',
-        surface: '#1a2e30',
-        background: '#0f1e20',
-        error: '#ff6b6b',
-        errorText: '#fff',
-        textPrimary: '#e0f0eb',
-        textSecondary: '#8ba89e',
-      },
-      typography: {
-        body: { color: '#e0f0eb' },
-        caption: { color: '#8ba89e' },
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('../FolderListItem', () => {
   const ReactLocal = require('react');

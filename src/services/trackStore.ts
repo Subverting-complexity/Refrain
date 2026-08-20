@@ -252,9 +252,17 @@ export function deleteTrack(id: string): void {
     'SELECT uri FROM tracks WHERE id = ?',
     id,
   );
-  db.runSync('DELETE FROM tracks WHERE id = ?', id);
-  deleteMarkers(id);
-  deleteProfilesForTrack(id);
+  // The row, its markers and its saved segments go together or not at all.
+  // Written as three statements, a failure partway left the track gone from
+  // the library with its markers and profiles still stored against an id
+  // nothing refers to any more (the same reasoning as `folderStore`'s
+  // reorder). The file removal stays outside: it cannot be rolled back, and
+  // it is safe to run only once the metadata is definitely gone.
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM tracks WHERE id = ?', id);
+    deleteMarkers(id);
+    deleteProfilesForTrack(id);
+  });
   if (row?.uri) {
     deleteFileIfExists(resolveUri(row.uri));
   }

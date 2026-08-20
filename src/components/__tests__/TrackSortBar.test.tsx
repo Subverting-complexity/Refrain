@@ -4,19 +4,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { TrackSortBar } from '../TrackSortBar';
 import { SortOption } from '../../types';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      dark: true,
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#111d1f',
-        border: '#2a4a4e',
-        textPrimary: '#e0f0eb',
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

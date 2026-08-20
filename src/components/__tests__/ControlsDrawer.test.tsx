@@ -11,22 +11,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#000',
-        surface: '#111',
-        accent: '#0f0',
-        accentText: '#000',
-        textPrimary: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-      },
-      typography: { body: {}, bodySmall: {}, caption: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 // Stub the panel bodies so a test can detect which one is mounted by label
 // without pulling in their full behavior.

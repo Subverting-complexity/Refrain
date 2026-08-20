@@ -12,7 +12,9 @@ import {
   deleteBlob,
   getObjectUrl,
   listBlobIds,
+  releaseImportedBlob,
   revokeObjectUrl,
+  spareAwaitingMetadata,
 } from './webBlobStore.web';
 
 /**
@@ -22,6 +24,22 @@ import {
  * playable `Track.uri` handed to the UI is a `blob:` object URL resolved from
  * the stored audio at load time so the player can play it.
  */
+
+/**
+ * Whether a stored row is starred.
+ *
+ * The stored type declares a boolean and the only writer normalises to one,
+ * so through the typed API this is just `row.isFavorite`. It exists because
+ * IndexedDB stores whatever it is handed: a record reaching the store by some
+ * other route — a future restore or sync path, or the native side's numeric
+ * 0/1 encoding — would not be typed on the way in. The list used to test it
+ * strictly and the tally loosely, so such a record would have been counted in
+ * the Favourites badge yet missing from the list that badge opens. One
+ * predicate means the two cannot disagree, whatever arrives.
+ */
+function isStarred(row: StoredTrack): boolean {
+  return Boolean(row.isFavorite);
+}
 
 async function rowToTrack(row: StoredTrack): Promise<Track> {
   const uri = (await getObjectUrl(row.id)) ?? `idb://${row.id}`;
@@ -35,7 +53,7 @@ async function rowToTrack(row: StoredTrack): Promise<Track> {
     fileSizeBytes: row.fileSizeBytes,
     importedAt: row.importedAt,
     folderId: row.folderId ?? null,
-    isFavorite: row.isFavorite ?? false,
+    isFavorite: isStarred(row),
     lastPlayedAt: row.lastPlayedAt ?? null,
   };
 }
@@ -70,7 +88,7 @@ export async function loadTracks(
   });
   let rows = await getAllStoredTracks();
   if (options.scope === 'favorites') {
-    rows = rows.filter((r) => r.isFavorite === true);
+    rows = rows.filter(isStarred);
   } else if (options.scope === 'unfiled') {
     rows = rows.filter((r) => (r.folderId ?? null) === null);
   } else if (options.scope === 'folder') {
@@ -93,6 +111,10 @@ export async function getTrack(id: string): Promise<Track | null> {
 
 export async function insertTrack(track: Track): Promise<void> {
   await putStoredTrack(toStored(track));
+  // The record exists now, so the blob written just before it no longer needs
+  // the orphan sweep's protection. Releasing here rather than waiting for a
+  // sweep to notice keeps the protection window as short as the import.
+  releaseImportedBlob(track.id);
 }
 
 /**
@@ -167,7 +189,7 @@ export async function getTrackCountsByFolder(): Promise<TrackCounts> {
   let favorites = 0;
   let unfiled = 0;
   for (const row of rows) {
-    if (row.isFavorite) favorites += 1;
+    if (isStarred(row)) favorites += 1;
     if (row.folderId == null) {
       unfiled += 1;
     } else {
@@ -181,10 +203,16 @@ export async function deleteTrack(id: string): Promise<void> {
   await deleteStoredTrack(id);
   await deleteMarkers(id);
   await deleteProfilesForTrack(id);
-  // Revoke the cached object URL and drop the blob. Fire-and-forget: a
-  // failed blob delete must not interrupt removal from the library.
   revokeObjectUrl(id);
-  void deleteBlob(id).catch(() => undefined);
+  // Await the blob removal so this promise resolving means the storage is
+  // actually back, matching what native guarantees by unlinking the file
+  // before `deleteTrack` returns. Detached, it could still be uncommitted
+  // when the next import runs — so a delete made to free space would not have
+  // freed it yet — and navigating away straight after confirming abandoned it
+  // altogether, stranding the bytes until some later sweep. A failure is
+  // still swallowed: the track is out of the library either way, and the
+  // orphan sweep reclaims the blob on the next load.
+  await deleteBlob(id).catch(() => undefined);
 }
 
 /**
@@ -192,16 +220,46 @@ export async function deleteTrack(id: string): Promise<void> {
  * the metadata store. Best-effort and asynchronous — never throws. Resolves
  * to the number of orphan blobs removed.
  */
-export async function cleanupOrphanFiles(): Promise<number> {
+export function cleanupOrphanFiles(): Promise<number> {
+  // One sweep at a time. `loadTracks` fires a sweep on every library load and
+  // never awaits it, so two can otherwise overlap — and because each holds its
+  // own snapshot of the known ids while the protection marks are shared, a
+  // newer sweep could clear the mark on a blob an older sweep was still
+  // holding a pre-import snapshot for, and the older one would then delete it.
+  // Serialising removes the interleave entirely.
+  if (!sweepInFlight) {
+    sweepInFlight = runOrphanSweep().finally(() => {
+      sweepInFlight = null;
+    });
+  }
+  return sweepInFlight;
+}
+
+let sweepInFlight: Promise<number> | null = null;
+
+async function runOrphanSweep(): Promise<number> {
   try {
-    const knownIds = new Set(await getStoredTrackIds());
     const storedIds = await listBlobIds();
+    if (storedIds.length === 0) return 0;
+    // Read the known ids *after* listing the blobs, so a record written while
+    // the listing was in flight is still seen. Reading first would leave a
+    // just-imported track looking recordless.
+    const knownIds = new Set(await getStoredTrackIds());
     let removed = 0;
     for (const id of storedIds) {
-      if (!knownIds.has(id)) {
-        await deleteBlob(id);
-        removed += 1;
+      if (knownIds.has(id)) {
+        // The record exists, so the blob is not an orphan and needs no
+        // further protection.
+        releaseImportedBlob(id);
+        continue;
       }
+      // A blob written by an import whose record has not landed yet is
+      // indistinguishable from an orphan. Spare it — the sweep runs on every
+      // library load, so it routinely overlaps an import in flight, and
+      // deleting here would strip the audio from the track just added.
+      if (spareAwaitingMetadata(id)) continue;
+      await deleteBlob(id);
+      removed += 1;
     }
     return removed;
   } catch {

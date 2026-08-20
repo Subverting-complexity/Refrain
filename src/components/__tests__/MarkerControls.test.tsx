@@ -4,26 +4,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { MarkerControls } from '../MarkerControls';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#111d1f',
-        border: '#2a4a4e',
-        surface: '#1a2e30',
-        textPrimary: '#e0f0eb',
-        textSecondary: '#8ba89e',
-        markerA: '#ffb02e',
-        markerAText: '#3a2600',
-        markerB: '#ff5d77',
-        markerBText: '#ffffff',
-      },
-      spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
-      typography: {},
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');

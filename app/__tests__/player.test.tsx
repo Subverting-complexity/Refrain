@@ -25,13 +25,18 @@ const mockAudioPlayerState = {
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
   clearMarkerB: jest.fn(),
-  commitMarkerPlacement: jest.fn(),
+  // Returns a promise, like the real one — callers attach a rejection
+  // handler to it, so a bare jest.fn() returning undefined would not stand in
+  // for it faithfully.
+  commitMarkerPlacement: jest.fn().mockResolvedValue(undefined),
   setLoopEnabled: jest.fn(),
   setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),
-  startMonitor: jest.fn(),
+  // Promise-returning, like the real engine functions — callers attach a
+  // rejection handler to them.
+  startMonitor: jest.fn().mockResolvedValue(undefined),
   updateMonitor: jest.fn(),
-  stopMonitor: jest.fn(),
+  stopMonitor: jest.fn().mockResolvedValue(undefined),
 };
 
 let mockSnippetPreviewEnabled = true;
@@ -110,27 +115,7 @@ jest.mock('@/src/hooks/useCountdown', () => ({
   }),
 }));
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#000',
-        surface: '#111',
-        accent: '#0f0',
-        accentText: '#000',
-        textPrimary: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        error: '#f00',
-        markerA: '#ffb02e',
-        markerAText: '#3a2600',
-        markerB: '#ff5d77',
-        markerBText: '#fff',
-      },
-      typography: { heading: {}, body: {}, bodySmall: {}, caption: {} },
-    },
-  }),
-}));
+jest.mock('@/src/hooks/useTheme');
 
 // Capture the navigation beforeRemove listener so a test can fire the
 // leave-the-player guard, and the dispatch the resolved guard re-issues.

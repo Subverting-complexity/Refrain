@@ -3,19 +3,14 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import SettingsScreen from '../settings';
 
-const mockSetColorMode = jest.fn();
+jest.mock('@/src/hooks/useTheme');
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#0a1612',
-      },
-    },
-    colorMode: 'system',
-    setColorMode: mockSetColorMode,
-  }),
-}));
+// The manual mock's setColorMode spy, taken from the module instance Jest
+// actually substitutes for the hook (a direct import of the __mocks__ file
+// would be a separate instance).
+const { mockSetColorMode } = jest.requireMock(
+  '@/src/hooks/useTheme',
+) as typeof import('@/src/hooks/__mocks__/useTheme');
 
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
@@ -68,7 +63,7 @@ describe('SettingsScreen', () => {
 
   it('passes the current color mode to AppearanceSettings', () => {
     const tree = renderScreen();
-    expect(findAppearance(tree).props.value).toBe('system');
+    expect(findAppearance(tree).props.value).toBe('dark');
   });
 
   it('forwards appearance changes to setColorMode', () => {

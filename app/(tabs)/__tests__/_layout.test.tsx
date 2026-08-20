@@ -29,13 +29,7 @@ jest.mock('expo-router', () => {
   return { Tabs, useRouter: () => ({ push: mockPush }) };
 });
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: { background: '#000', textPrimary: '#fff' },
-    },
-  }),
-}));
+jest.mock('@/src/hooks/useTheme');
 
 describe('TabLayout', () => {
   beforeEach(() => {

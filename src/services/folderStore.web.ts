@@ -6,7 +6,7 @@ import {
   getStoredFolder,
   putStoredFolder,
   putStoredFolders,
-  putStoredTrack,
+  putStoredTracks,
   StoredFolder,
 } from './database.web';
 
@@ -99,11 +99,13 @@ export async function deleteFolder(id: string): Promise<void> {
   // its folder id is not null so it is not unfiled, and there is no folder
   // left to open. The native implementation re-homes unconditionally too.
   const allTracks = await getAllStoredTracks();
-  for (const track of allTracks) {
-    if (track.folderId === id) {
-      await putStoredTrack({ ...track, folderId: null });
-    }
-  }
+  // One transaction for the whole re-home, so it cannot be observed or
+  // interrupted half-applied — the native store does it in a single UPDATE.
+  await putStoredTracks(
+    allTracks
+      .filter((track) => track.folderId === id)
+      .map((track) => ({ ...track, folderId: null })),
+  );
 
   await deleteStoredFolder(id);
 }

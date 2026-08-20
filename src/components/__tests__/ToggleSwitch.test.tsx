@@ -3,18 +3,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { ToggleSwitch } from '../ToggleSwitch';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        textSecondary: '#8fa89e',
-        border: '#2d4a40',
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 // ToggleSwitch starts a 160ms Animated.timing on mount. Fake timers keep its
 // frames off the real event loop, and the afterEach below unmounts and

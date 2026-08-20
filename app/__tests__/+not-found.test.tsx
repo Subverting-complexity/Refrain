@@ -19,17 +19,7 @@ jest.mock('expo-router', () => {
   };
 });
 
-jest.mock('@/src/hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#0a1612',
-        accent: '#7edbb8',
-      },
-      typography: { heading: {}, body: {} },
-    },
-  }),
-}));
+jest.mock('@/src/hooks/useTheme');
 
 function renderScreen(): ReactTestRenderer {
   let tree!: ReactTestRenderer;

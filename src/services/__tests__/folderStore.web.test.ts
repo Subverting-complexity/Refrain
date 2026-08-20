@@ -19,7 +19,7 @@ const mockPutStoredFolder = jest.fn<Promise<void>, unknown[]>();
 const mockPutStoredFolders = jest.fn<Promise<void>, [StoredFolder[]]>();
 const mockDeleteStoredFolder = jest.fn<Promise<void>, [string]>();
 const mockGetAllStoredTracks = jest.fn();
-const mockPutStoredTrack = jest.fn<Promise<void>, unknown[]>();
+const mockPutStoredTracks = jest.fn<Promise<void>, [unknown[]]>();
 
 jest.mock('../database.web', () => ({
   getAllStoredFolders: () => mockGetAllStoredFolders(),
@@ -28,7 +28,7 @@ jest.mock('../database.web', () => ({
   putStoredFolders: (folders: StoredFolder[]) => mockPutStoredFolders(folders),
   deleteStoredFolder: (id: string) => mockDeleteStoredFolder(id),
   getAllStoredTracks: () => mockGetAllStoredTracks(),
-  putStoredTrack: (track: unknown) => mockPutStoredTrack(track),
+  putStoredTracks: (tracks: unknown[]) => mockPutStoredTracks(tracks),
 }));
 
 function storedFolder(overrides: Record<string, unknown> = {}) {
@@ -50,7 +50,7 @@ beforeEach(() => {
   mockPutStoredFolders.mockResolvedValue(undefined);
   mockDeleteStoredFolder.mockResolvedValue(undefined);
   mockGetAllStoredTracks.mockResolvedValue([]);
-  mockPutStoredTrack.mockResolvedValue(undefined);
+  mockPutStoredTracks.mockResolvedValue(undefined);
 });
 
 describe('loadFolders', () => {
@@ -221,11 +221,12 @@ describe('deleteFolder', () => {
 
     await deleteFolder('folder-1');
 
-    expect(mockPutStoredTrack).toHaveBeenCalledTimes(1);
-    expect(mockPutStoredTrack).toHaveBeenCalledWith({
-      id: 'track-1',
-      folderId: null,
-    });
+    // One batched write, so the re-home cannot be interrupted half-applied:
+    // a track left pointing at a deleted folder appears in no view at all.
+    expect(mockPutStoredTracks).toHaveBeenCalledTimes(1);
+    expect(mockPutStoredTracks).toHaveBeenCalledWith([
+      { id: 'track-1', folderId: null },
+    ]);
     expect(mockDeleteStoredFolder).toHaveBeenCalledWith('folder-1');
   });
 
@@ -239,10 +240,9 @@ describe('deleteFolder', () => {
 
     // Without this the track shows up nowhere: its folder id is not null so
     // it is not unfiled, and there is no folder left to open.
-    expect(mockPutStoredTrack).toHaveBeenCalledWith({
-      id: 'track-1',
-      folderId: null,
-    });
+    expect(mockPutStoredTracks).toHaveBeenCalledWith([
+      { id: 'track-1', folderId: null },
+    ]);
     expect(mockDeleteStoredFolder).toHaveBeenCalledWith('folder-1');
   });
 
@@ -251,7 +251,7 @@ describe('deleteFolder', () => {
 
     await deleteFolder('missing');
 
-    expect(mockPutStoredTrack).not.toHaveBeenCalled();
+    expect(mockPutStoredTracks).toHaveBeenCalledWith([]);
   });
 });
 

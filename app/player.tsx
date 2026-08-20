@@ -3,7 +3,6 @@ import { useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   ActivityIndicator,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -14,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
+import { PlayerErrorBanner } from '@/src/components/PlayerErrorBanner';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
@@ -134,7 +134,10 @@ export default function PlayerScreen() {
   // never invoked and dragging behaves exactly as before.
   const handlePreviewStart = useCallback(
     (centerMs: number) => {
-      void startMonitor(centerMs);
+      // Rejects when the player is released mid-drag (navigating away). The
+      // preview is a courtesy; a failed one must not raise an unhandled
+      // rejection out of a gesture handler.
+      void startMonitor(centerMs).catch(() => undefined);
     },
     [startMonitor],
   );
@@ -145,7 +148,7 @@ export default function PlayerScreen() {
     [updateMonitor],
   );
   const handlePreviewEnd = useCallback(() => {
-    void stopMonitor();
+    void stopMonitor().catch(() => undefined);
   }, [stopMonitor]);
 
   // Tap-to-place arm state. Driven by the A/B buttons; the waveform reads it to
@@ -194,7 +197,10 @@ export default function PlayerScreen() {
   // so the region just defined is the one that plays next.
   const handleMarkerCommit = useCallback(
     (marker: 'A' | 'B') => {
-      void commitMarkerPlacement(marker);
+      // The commit ends in a seek, which rejects against a player released
+      // mid-gesture. The marker is placed either way; only the courtesy seek
+      // is lost, so swallow rather than leave the rejection unhandled.
+      void commitMarkerPlacement(marker).catch(() => undefined);
     },
     [commitMarkerPlacement],
   );
@@ -204,14 +210,16 @@ export default function PlayerScreen() {
   const handleEditA = useCallback(
     (positionMs: number) => {
       setMarkerA(positionMs);
-      void commitMarkerPlacement('A');
+      void commitMarkerPlacement('A').catch(() => undefined);
     },
     [setMarkerA, commitMarkerPlacement],
   );
 
   const handleEditB = useCallback(
     (positionMs: number) => {
-      if (applyMarkerB(positionMs)) void commitMarkerPlacement('B');
+      if (applyMarkerB(positionMs)) {
+        void commitMarkerPlacement('B').catch(() => undefined);
+      }
     },
     [applyMarkerB, commitMarkerPlacement],
   );
@@ -372,57 +380,18 @@ export default function PlayerScreen() {
         </View>
 
         {isTrackMissing && (
-          <View style={styles.errorBanner}>
-            <View style={styles.errorHeadline}>
-              <Ionicons
-                name="alert-circle"
-                size={20}
-                color={theme.colors.error}
-              />
-              <Text
-                style={[theme.typography.body, { color: theme.colors.error }]}
-              >
-                This track is no longer in your library
-              </Text>
-            </View>
-            <Text
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.textSecondary },
-              ]}
-            >
-              Go back and import it again to keep playing.
-            </Text>
-          </View>
+          <PlayerErrorBanner
+            message="This track is no longer in your library"
+            detail="Go back and import it again to keep playing."
+          />
         )}
 
         {!isTrackMissing && status === 'error' && (
-          <View style={styles.errorBanner}>
-            <View style={styles.errorHeadline}>
-              <Ionicons
-                name="alert-circle"
-                size={20}
-                color={theme.colors.error}
-              />
-              <Text
-                style={[theme.typography.body, { color: theme.colors.error }]}
-              >
-                Unable to load this track
-              </Text>
-            </View>
-            {lastError ? (
-              <Text
-                style={[
-                  theme.typography.caption,
-                  { color: theme.colors.textSecondary },
-                ]}
-                numberOfLines={2}
-                ellipsizeMode="tail"
-              >
-                {lastError}
-              </Text>
-            ) : null}
-          </View>
+          <PlayerErrorBanner
+            message="Unable to load this track"
+            detail={lastError}
+            detailNumberOfLines={2}
+          />
         )}
 
         <View style={styles.controls}>
@@ -552,18 +521,6 @@ const styles = StyleSheet.create({
   },
   markers: {
     marginBottom: spacing.lg,
-  },
-  errorBanner: {
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.md,
-  },
-  errorHeadline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
   },
   seekBar: {
     marginBottom: spacing.lg,

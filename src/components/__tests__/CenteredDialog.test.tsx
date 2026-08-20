@@ -10,19 +10,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { CenteredDialog } from '../CenteredDialog';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        overlay: 'rgba(0,0,0,0.5)',
-        surface: '#1a2e30',
-        textPrimary: '#e8f5f0',
-        textSecondary: '#8fa89e',
-      },
-      typography: { heading: {}, body: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function renderDialog(
   props: Partial<React.ComponentProps<typeof CenteredDialog>> = {},

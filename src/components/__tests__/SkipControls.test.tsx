@@ -11,20 +11,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      dark: true,
-      colors: {
-        accent: '#7edbb8',
-        accentText: '#0a1612',
-        textPrimary: '#e8f5f0',
-        border: '#2d4a40',
-      },
-      typography: { bodySmall: {} },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function renderControls(
   props: Partial<React.ComponentProps<typeof SkipControls>> = {},

@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {
-  Stack,
-  useFocusEffect,
-  useLocalSearchParams,
-  useRouter,
-} from 'expo-router';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CenteredDialog } from '@/src/components/CenteredDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
+import { DialogButton } from '@/src/components/DialogButton';
 import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { SearchBar } from '@/src/components/SearchBar';
@@ -27,6 +17,7 @@ import { TrackSortBar } from '@/src/components/TrackSortBar';
 import { useIsScreenFocused } from '@/src/hooks/useIsScreenFocused';
 import { useTheme } from '@/src/hooks/useTheme';
 import { useToast } from '@/src/hooks/useToast';
+import { useTokenedReload } from '@/src/hooks/useTokenedReload';
 import { useTrackImport } from '@/src/hooks/useTrackImport';
 import {
   insertFolder,
@@ -120,7 +111,6 @@ export default function TracksScreen() {
   const title = firstParam(params.name) ?? 'All tracks';
 
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>(readSortSetting);
   // Deliberately not persisted, and reset on entering any folder below. A
@@ -131,6 +121,11 @@ export default function TracksScreen() {
 
   const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
+  // Deleting from the actions sheet needs its own confirmation. The swipe
+  // path gets one from TrackListItem, but the sheet reaches `handleDelete`
+  // directly, so without this a single tap would destroy the audio file
+  // with nothing to undo it.
+  const [deletingTrack, setDeletingTrack] = useState<Track | null>(null);
   const [movingTrack, setMovingTrack] = useState<Track | null>(null);
   // The track waiting on a folder that does not exist yet. Held separately
   // from `movingTrack` so the picker is closed while the name is typed
@@ -140,14 +135,6 @@ export default function TracksScreen() {
   );
   const [allFolders, setAllFolders] = useState<Folder[]>([]);
 
-  // Same hazard as the library root: a read started before an edit holds a
-  // snapshot that predates it, so it must not be allowed to land afterwards.
-  const loadToken = useRef(0);
-  const invalidateLoads = useCallback(() => {
-    loadToken.current += 1;
-    return loadToken.current;
-  }, []);
-
   const loadOptions = useMemo((): LoadTracksOptions => {
     if (scope === 'folder' && folderId !== null) {
       return { scope: 'folder', folderId };
@@ -155,38 +142,23 @@ export default function TracksScreen() {
     return { scope: scope === 'folder' ? 'all' : scope };
   }, [scope, folderId]);
 
-  /**
-   * Reads this entry's tracks and reports either outcome. The token guards
-   * the failure path as well as the successful one: a read that fails after
-   * the reader has left must not raise an error into whatever screen they
-   * moved on to.
-   */
-  const reloadData = useCallback(
-    async (announceSuccess: boolean, failureMessage: string) => {
-      const token = invalidateLoads();
-      try {
-        const loaded = await loadTracks(loadOptions);
-        if (loadToken.current !== token) return;
-        setTracks(loaded);
-        if (announceSuccess) {
-          AccessibilityInfo.announceForAccessibility('Tracks refreshed');
-        }
-      } catch {
-        if (loadToken.current !== token) return;
-        showToast(failureMessage, 'error');
-      }
-    },
-    [invalidateLoads, loadOptions, showToast],
+  const loadTracksForEntry = useCallback(
+    () => loadTracks(loadOptions),
+    [loadOptions],
+  );
+  const reportLoadError = useCallback(
+    (message: string) => showToast(message, 'error'),
+    [showToast],
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      void reloadData(false, 'Failed to load tracks');
-      return () => {
-        loadToken.current += 1;
-      };
-    }, [reloadData]),
-  );
+  const { refreshing, handleRefresh, invalidateLoads } = useTokenedReload({
+    load: loadTracksForEntry,
+    onLoaded: setTracks,
+    onError: reportLoadError,
+    announcement: 'Tracks refreshed',
+    loadFailureMessage: 'Failed to load tracks',
+    refreshFailureMessage: 'Failed to refresh tracks',
+  });
 
   // Opening a real folder is what orders the unpinned block on the root, so
   // stamp it once per visit. A folder that opens but is not stamped is still
@@ -204,15 +176,6 @@ export default function TracksScreen() {
       }
     })();
   }, [scope, folderId]);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await reloadData(true, 'Failed to refresh tracks');
-    } finally {
-      setRefreshing(false);
-    }
-  }, [reloadData]);
 
   // Import lands in the folder being viewed, and nowhere else — the built-in
   // entries are queries, not places, so an import made from one goes to
@@ -582,7 +545,7 @@ export default function TracksScreen() {
           onRename={() => setRenamingTrack(actionsTrack)}
           onToggleFavorite={() => void handleToggleFavorite(actionsTrack)}
           onMoveToFolder={() => void openMoveToFolder(actionsTrack)}
-          onDelete={() => void handleDelete(actionsTrack.id)}
+          onDelete={() => setDeletingTrack(actionsTrack)}
           onDismiss={() => setActionsTrack(null)}
         />
       ) : null}
@@ -613,6 +576,31 @@ export default function TracksScreen() {
             setFilingIntoNewFolder(null);
           }}
         />
+      ) : null}
+
+      {deletingTrack ? (
+        <CenteredDialog
+          title="Delete track?"
+          message={`Remove “${deletingTrack.filename}” from your library?`}
+          onDismiss={() => setDeletingTrack(null)}
+        >
+          <DialogButton
+            label="Delete"
+            accessibilityLabel={`Confirm delete ${deletingTrack.filename}`}
+            variant="danger"
+            onPress={() => {
+              const target = deletingTrack;
+              setDeletingTrack(null);
+              void handleDelete(target.id);
+            }}
+          />
+          <DialogButton
+            label="Cancel"
+            accessibilityLabel="Cancel delete"
+            variant="default"
+            onPress={() => setDeletingTrack(null)}
+          />
+        </CenteredDialog>
       ) : null}
 
       <ToastHost toast={toast} onDismiss={hideToast} />

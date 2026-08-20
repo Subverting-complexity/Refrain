@@ -362,6 +362,99 @@ describe('markers store', () => {
   });
 });
 
+describe('putStoredTracks', () => {
+  const trackRow = (id: string, folderId: string | null) => ({
+    ...sampleTrack,
+    id,
+    folderId,
+  });
+
+  it('writes every track in the batch', async () => {
+    const db = load();
+    await db.putStoredTracks([
+      trackRow('track-1', null),
+      trackRow('track-2', null),
+    ]);
+    const stored = await db.getAllStoredTracks();
+    expect(stored.map((t) => t.id).sort()).toEqual(['track-1', 'track-2']);
+  });
+
+  it('resolves without touching the store for an empty batch', async () => {
+    const db = load();
+    await expect(db.putStoredTracks([])).resolves.toBeUndefined();
+    expect(await db.getAllStoredTracks()).toEqual([]);
+  });
+
+  // The point of the batch: a folder delete unfiles every track inside it, and
+  // a half-applied re-home leaves tracks in no view at all — neither unfiled
+  // nor inside a folder that still exists.
+  it('applies the whole re-home or none of it', async () => {
+    const db = load();
+    await db.putStoredTrack(trackRow('track-1', 'folder-1'));
+    await db.putStoredTrack(trackRow('track-2', 'folder-1'));
+
+    await db.putStoredTracks([
+      trackRow('track-1', null),
+      trackRow('track-2', null),
+    ]);
+
+    const stored = await db.getAllStoredTracks();
+    expect(stored.every((t) => t.folderId === null)).toBe(true);
+  });
+});
+
+describe('folders store (single-record accessors)', () => {
+  const sampleFolder = {
+    id: 'folder-1',
+    name: 'Gigs',
+    createdAt: 1_700_000_000_000,
+    pinOrder: null,
+    lastOpenedAt: null,
+  };
+
+  it('round-trips a folder record', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    expect(await db.getStoredFolder('folder-1')).toEqual(sampleFolder);
+  });
+
+  it('returns null for an absent folder record', async () => {
+    const db = load();
+    expect(await db.getStoredFolder('missing')).toBeNull();
+  });
+
+  it('overwrites an existing folder on put (same id)', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.putStoredFolder({ ...sampleFolder, name: 'Rehearsals' });
+    expect(await db.getStoredFolder('folder-1')).toEqual({
+      ...sampleFolder,
+      name: 'Rehearsals',
+    });
+  });
+
+  it('deletes a folder record', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.deleteStoredFolder('folder-1');
+    expect(await db.getStoredFolder('folder-1')).toBeNull();
+  });
+
+  it('leaves other folders untouched when one is deleted', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.putStoredFolder({ ...sampleFolder, id: 'folder-2', name: 'Set' });
+    await db.deleteStoredFolder('folder-1');
+    const remaining = await db.getAllStoredFolders();
+    expect(remaining.map((f) => f.id)).toEqual(['folder-2']);
+  });
+
+  it('deleting an absent folder resolves without error', async () => {
+    const db = load();
+    await expect(db.deleteStoredFolder('missing')).resolves.toBeUndefined();
+  });
+});
+
 describe('schema upgrade', () => {
   it('keeps tracks and settings stores alongside the new markers store', async () => {
     const db = load();

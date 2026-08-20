@@ -43,12 +43,16 @@ const mockGetObjectUrl = jest.fn<Promise<string | null>, [string]>();
 const mockRevokeObjectUrl = jest.fn();
 const mockDeleteBlob = jest.fn<Promise<void>, [string]>();
 const mockListBlobIds = jest.fn<Promise<string[]>, []>();
+const mockSpareAwaitingMetadata = jest.fn<boolean, [string]>();
+const mockReleaseImportedBlob = jest.fn();
 
 jest.mock('../webBlobStore.web', () => ({
   getObjectUrl: (id: string) => mockGetObjectUrl(id),
   revokeObjectUrl: (id: string) => mockRevokeObjectUrl(id),
   deleteBlob: (id: string) => mockDeleteBlob(id),
   listBlobIds: () => mockListBlobIds(),
+  spareAwaitingMetadata: (id: string) => mockSpareAwaitingMetadata(id),
+  releaseImportedBlob: (id: string) => mockReleaseImportedBlob(id),
 }));
 
 const sampleTrack: Track = {
@@ -93,6 +97,9 @@ beforeEach(() => {
   mockListBlobIds.mockResolvedValue([]);
   mockDeleteMarkers.mockResolvedValue(undefined);
   mockDeleteProfilesForTrack.mockResolvedValue(undefined);
+  // Default: no import in flight, so the sweep treats every unmatched blob
+  // as a genuine orphan.
+  mockSpareAwaitingMetadata.mockReturnValue(false);
 });
 
 describe('loadTracks', () => {
@@ -275,6 +282,68 @@ describe('cleanupOrphanFiles', () => {
     expect(mockDeleteBlob).not.toHaveBeenCalled();
   });
 
+  // An import writes the blob before the track record, so mid-import the
+  // blob looks exactly like an orphan. The sweep runs on every library load
+  // — including one triggered while the import is still in flight — and
+  // deleting here would strip the audio from the track just added.
+  it('spares a blob whose import has not written its record yet', async () => {
+    mockGetStoredTrackIds.mockResolvedValue([]);
+    mockListBlobIds.mockResolvedValue(['importing']);
+    mockSpareAwaitingMetadata.mockImplementation((id) => id === 'importing');
+
+    const removed = await cleanupOrphanFiles();
+
+    expect(removed).toBe(0);
+    expect(mockDeleteBlob).not.toHaveBeenCalled();
+  });
+
+  it('stops sparing a blob once its record exists', async () => {
+    mockGetStoredTrackIds.mockResolvedValue(['imported']);
+    mockListBlobIds.mockResolvedValue(['imported']);
+
+    await cleanupOrphanFiles();
+
+    expect(mockReleaseImportedBlob).toHaveBeenCalledWith('imported');
+    expect(mockDeleteBlob).not.toHaveBeenCalled();
+  });
+
+  // The known ids must be read after the blob listing, or a record written
+  // while the listing was in flight would be missed and its blob deleted.
+  it('reads the known ids after listing the blobs', async () => {
+    const order: string[] = [];
+    mockListBlobIds.mockImplementation(async () => {
+      order.push('list');
+      return ['track-1'];
+    });
+    mockGetStoredTrackIds.mockImplementation(async () => {
+      order.push('known');
+      return ['track-1'];
+    });
+
+    await cleanupOrphanFiles();
+
+    expect(order).toEqual(['list', 'known']);
+  });
+
+  // loadTracks fires a sweep on every library load and never awaits it, so two
+  // could otherwise overlap and race each other's protection marks.
+  it('runs one sweep at a time', async () => {
+    let releaseList: (ids: string[]) => void = () => undefined;
+    mockListBlobIds.mockImplementation(
+      () =>
+        new Promise<string[]>((resolve) => {
+          releaseList = resolve;
+        }),
+    );
+
+    const first = cleanupOrphanFiles();
+    const second = cleanupOrphanFiles();
+    releaseList([]);
+    await Promise.all([first, second]);
+
+    expect(mockListBlobIds).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 0 and swallows errors when listing fails', async () => {
     mockGetStoredTrackIds.mockResolvedValue([]);
     mockListBlobIds.mockRejectedValue(new Error('idb unavailable'));
@@ -398,6 +467,24 @@ describe('getTrackCountsByFolder', () => {
       favorites: 2,
       unfiled: 1,
     });
+  });
+
+  // IndexedDB stores whatever it is handed, so a record could arrive carrying
+  // the native side's numeric encoding. The tally and the list it opens have
+  // to agree about it, or the badge shows a count the list cannot show.
+  it('agrees with the favourites list about a numerically-flagged record', async () => {
+    const rows = [
+      storedRow({ id: 'a', folderId: null, isFavorite: 1 }),
+      storedRow({ id: 'b', folderId: null, isFavorite: 0 }),
+    ];
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+
+    const counts = await getTrackCountsByFolder();
+    mockGetAllStoredTracks.mockResolvedValue(rows);
+    const listed = await loadTracks({ scope: 'favorites' });
+
+    expect(counts.favorites).toBe(listed.length);
+    expect(listed.map((t) => t.id)).toEqual(['a']);
   });
 
   it('reports zeroes for an empty library', async () => {

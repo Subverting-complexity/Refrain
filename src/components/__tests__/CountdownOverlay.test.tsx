@@ -4,16 +4,7 @@ import { create, act, ReactTestRenderer } from 'react-test-renderer';
 import { CountdownState } from '../../types';
 import { CountdownOverlay } from '../CountdownOverlay';
 
-jest.mock('../../hooks/useTheme', () => ({
-  useTheme: () => ({
-    theme: {
-      colors: {
-        background: '#111d1f',
-        accent: '#7edbb8',
-      },
-    },
-  }),
-}));
+jest.mock('../../hooks/useTheme');
 
 function makeState(overrides: Partial<CountdownState> = {}): CountdownState {
   return {

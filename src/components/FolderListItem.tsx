@@ -5,8 +5,9 @@ import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSw
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
-import { radii, spacing } from '../theme';
+import { spacing } from '../theme';
 import { AccessiblePressable } from './AccessiblePressable';
+import { listRowStyles } from './listRowStyles';
 import { RowActionsButton } from './RowActionsButton';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
@@ -141,7 +142,7 @@ export function FolderListItem({
     >
       <View
         style={[
-          styles.row,
+          listRowStyles.row,
           {
             backgroundColor: theme.colors.surface,
             borderColor: theme.colors.border,
@@ -154,11 +155,11 @@ export function FolderListItem({
           accessibilityHint={hint}
           onPress={() => onPress?.()}
           onLongPress={onOpenActions}
-          style={styles.main}
+          style={listRowStyles.main}
         >
           <View
             style={[
-              styles.iconContainer,
+              listRowStyles.iconContainer,
               { backgroundColor: theme.colors.background },
             ]}
           >
@@ -168,7 +169,7 @@ export function FolderListItem({
               color={theme.colors.accent}
             />
           </View>
-          <View style={styles.info}>
+          <View style={listRowStyles.info}>
             <Text
               style={[theme.typography.body, styles.name]}
               numberOfLines={1}
@@ -203,38 +204,9 @@ export function FolderListItem({
   );
 }
 
+// Row chrome (border, main pressable, icon square, info column) is shared
+// with TrackListItem — see listRowStyles.
 const styles = StyleSheet.create({
-  // The row's chrome moved out here from the pressable when the actions
-  // button arrived: the button is a sibling of the pressable, and both have
-  // to sit inside one border rather than the button hanging off the edge.
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    paddingRight: spacing.sm,
-  },
-  main: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: spacing.lg,
-    // With the row's own right padding this totals the `lg` the row carried
-    // before the actions button existed, so a built-in row is unchanged.
-    paddingRight: spacing.sm,
-    paddingVertical: spacing.md,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-  },
-  info: {
-    flex: 1,
-  },
   name: {
     marginBottom: spacing.xs,
   },
