@@ -10,123 +10,34 @@
  * URLs on page unload.
  */
 
+import { createIdbConnection } from './idb.web';
+
 const DB_NAME = 'refrain-audio';
 const DB_VERSION = 1;
 const STORE = 'blobs';
 
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-/**
- * The same two lifecycle handlers `database.web` attaches, for the same
- * reasons: close on `versionchange` so this tab never blocks another tab's
- * upgrade, and drop the cache on `close` so a connection the browser
- * force-closes — storage cleared, or eviction under memory pressure — does
- * not leave every later blob read throwing `InvalidStateError` for the rest
- * of the page session. Each clears the cache only while it still refers to
- * this connection.
- */
-function attachLifecycleHandlers(
-  db: IDBDatabase,
-  box: { promise?: Promise<IDBDatabase> },
-): void {
-  const clearIfCurrent = () => {
-    if (dbPromise === box.promise) dbPromise = null;
-  };
-  db.onversionchange = () => {
-    db.close();
-    clearIfCurrent();
-  };
-  db.onclose = () => {
-    clearIfCurrent();
-  };
-}
-
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-
-  const box: { promise?: Promise<IDBDatabase> } = {};
-
-  box.promise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE);
-      }
-    };
-    // Rejecting on `blocked` does not cancel the open request: when the other
-    // tab eventually closes, the upgrade goes ahead and `onsuccess` fires
-    // against a promise that has already settled. Nothing would reference
-    // that connection and nothing would close it, so every retry would strand
-    // another one. Track whether the promise is spoken for, and close the
-    // late arrival. (Mirrors `database.web`.)
-    let settled = false;
-    request.onsuccess = () => {
-      if (settled) {
-        request.result.close();
-        return;
-      }
-      settled = true;
-      const opened = request.result;
-      attachLifecycleHandlers(opened, box);
-      resolve(opened);
-    };
-    request.onerror = () => {
-      settled = true;
-      reject(request.error);
-    };
-    // This store is still at version 1, so a blocked upgrade is latent rather
-    // than reachable today — it becomes real the first time its schema
-    // changes. Without the handler that first bump would leave callers
-    // waiting on a promise that never settles.
-    request.onblocked = () => {
-      settled = true;
-      reject(
-        new Error(
-          'Refrain is open in another tab using an older version of its audio store. Close the other tab and reload.',
-        ),
-      );
-    };
-  });
-  dbPromise = box.promise;
-
-  // A failed open must not be cached. This one is reachable today: in private
-  // browsing, or where storage permission is denied, caching the rejection
-  // would fail every audio load for the rest of the page session with no way
-  // to retry.
-  return dbPromise.catch((error: unknown) => {
-    if (dbPromise === box.promise) dbPromise = null;
-    throw error;
-  });
-}
+// Open/lifecycle/transaction plumbing is shared with `database.web` — the
+// guarantees (blocked-upgrade rejection, force-close recovery,
+// commit-anchored settling) are documented once in `idb.web`. This store is
+// still at version 1, so a blocked upgrade is latent rather than reachable
+// today — it becomes real the first time its schema changes.
+const connection = createIdbConnection({
+  name: DB_NAME,
+  version: DB_VERSION,
+  blockedMessage:
+    'Refrain is open in another tab using an older version of its audio store. Close the other tab and reload.',
+  upgrade: (db) => {
+    if (!db.objectStoreNames.contains(STORE)) {
+      db.createObjectStore(STORE);
+    }
+  },
+});
 
 function runTransaction<T>(
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const tx = db.transaction(STORE, mode);
-        const request = run(tx.objectStore(STORE));
-        // A request can report success before the transaction commits, so
-        // resolving on `request.onsuccess` would surface success even when the
-        // commit later fails — for the large audio blobs stored here, a
-        // quota-exceeded abort at commit time is the likeliest failure, and it
-        // would leave the track's metadata written but its audio missing.
-        // Capture the result on success, but only resolve once the transaction
-        // actually commits (mirrors database.web.ts).
-        let result: T;
-        request.onsuccess = () => {
-          result = request.result;
-        };
-        request.onerror = () => reject(request.error);
-        tx.oncomplete = () => resolve(result);
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () =>
-          reject(tx.error ?? new Error('IndexedDB transaction aborted'));
-      }),
-  );
+  return connection.runTransaction(STORE, mode, run);
 }
 
 /** Persist (or overwrite) the audio blob for a track id. */

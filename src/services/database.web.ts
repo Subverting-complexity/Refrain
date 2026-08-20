@@ -22,6 +22,8 @@
  *                         folders do not contain other folders.
  */
 
+import { createIdbConnection } from './idb.web';
+
 const DB_NAME = 'refrain-meta';
 // v2 adds the `track_markers` store; v3 adds `marker_profiles`; v4 adds
 // `folders`; v5 flattens folder nesting and adds the favourite, play-time,
@@ -141,162 +143,54 @@ function migrateToV5(upgrade: IDBTransaction): void {
   };
 }
 
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-/**
- * Gives a connection the two handlers it needs to survive the rest of the
- * page session honestly, before it is ever handed to a caller.
- *
- * `versionchange` fires when another tab opens this database at a higher
- * version. A tab that holds the old version open is exactly what makes the
- * other tab's upgrade block — the condition this module already refuses to
- * hang on. Without this handler the module inflicts on other tabs the fault
- * it defends itself from, so close here and let them proceed.
- *
- * `close` fires when the browser force-closes the connection out from under
- * us: storage cleared, or eviction under memory pressure. The cached promise
- * then holds a dead handle and every later transaction throws
- * `InvalidStateError` for the rest of the session. The open path already
- * refuses to cache a connection it could not make good; the same reasoning
- * applies after a successful open, so drop the cache and let the next call
- * reopen.
- *
- * Both clear the cache only when it still refers to this connection, so a
- * handler firing late can never discard a newer one.
- */
-function attachLifecycleHandlers(
-  db: IDBDatabase,
-  box: { promise?: Promise<IDBDatabase> },
-): void {
-  const clearIfCurrent = () => {
-    if (dbPromise === box.promise) dbPromise = null;
-  };
-  db.onversionchange = () => {
-    db.close();
-    clearIfCurrent();
-  };
-  db.onclose = () => {
-    clearIfCurrent();
-  };
-}
-
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-
-  // The promise is held in a box so the lifecycle handlers can compare the
-  // cache against their own connection without a self-referential `const`.
-  // They only ever run after this assignment completes.
-  const box: { promise?: Promise<IDBDatabase> } = {};
-
-  box.promise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = request.result;
-      const upgrade = request.transaction;
-      const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
-      if (!db.objectStoreNames.contains(TRACKS_STORE)) {
-        db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
+// Open/lifecycle/transaction plumbing is shared with `webBlobStore.web` —
+// the guarantees (blocked-upgrade rejection, force-close recovery,
+// commit-anchored settling) are documented once in `idb.web`.
+const connection = createIdbConnection({
+  name: DB_NAME,
+  version: DB_VERSION,
+  blockedMessage:
+    'Refrain is open in another tab using an older version of its database. Close the other tab and reload.',
+  upgrade: (db, upgrade, oldVersion) => {
+    if (!db.objectStoreNames.contains(TRACKS_STORE)) {
+      db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
+    }
+    if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+      db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
+    }
+    if (!db.objectStoreNames.contains(MARKERS_STORE)) {
+      db.createObjectStore(MARKERS_STORE, { keyPath: 'trackId' });
+    }
+    if (!db.objectStoreNames.contains(PROFILES_STORE)) {
+      const profiles = db.createObjectStore(PROFILES_STORE, {
+        keyPath: 'id',
+      });
+      profiles.createIndex(PROFILES_TRACK_INDEX, 'trackId', {
+        unique: false,
+      });
+    }
+    if (!db.objectStoreNames.contains(FOLDERS_STORE)) {
+      db.createObjectStore(FOLDERS_STORE, { keyPath: 'id' });
+    }
+    if (oldVersion > 0 && oldVersion < 5) {
+      if (!upgrade) {
+        // Cannot happen per the specification, but if it ever did the
+        // version would reach 5 with unmigrated records and the version
+        // itself is the guard, so the migration could never run again.
+        // Throwing aborts the upgrade and rolls the version back.
+        throw new Error('No version-change transaction to migrate in');
       }
-      if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
-        db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
-      }
-      if (!db.objectStoreNames.contains(MARKERS_STORE)) {
-        db.createObjectStore(MARKERS_STORE, { keyPath: 'trackId' });
-      }
-      if (!db.objectStoreNames.contains(PROFILES_STORE)) {
-        const profiles = db.createObjectStore(PROFILES_STORE, {
-          keyPath: 'id',
-        });
-        profiles.createIndex(PROFILES_TRACK_INDEX, 'trackId', {
-          unique: false,
-        });
-      }
-      if (!db.objectStoreNames.contains(FOLDERS_STORE)) {
-        db.createObjectStore(FOLDERS_STORE, { keyPath: 'id' });
-      }
-      if (oldVersion > 0 && oldVersion < 5) {
-        if (!upgrade) {
-          // Cannot happen per the specification, but if it ever did the
-          // version would reach 5 with unmigrated records and the version
-          // itself is the guard, so the migration could never run again.
-          // Throwing aborts the upgrade and rolls the version back.
-          throw new Error('No version-change transaction to migrate in');
-        }
-        migrateToV5(upgrade);
-      }
-    };
-    // Rejecting on `blocked` does not cancel the open request: when the
-    // other tab eventually closes, the upgrade goes ahead and `onsuccess`
-    // fires against a promise that has already settled. Nothing would ever
-    // reference that connection, and nothing would ever close it, so each
-    // retry would leave another one open for the rest of the page session.
-    // Track whether the promise is spoken for, and close the late arrival.
-    let settled = false;
-    request.onsuccess = () => {
-      if (settled) {
-        request.result.close();
-        return;
-      }
-      settled = true;
-      const opened = request.result;
-      attachLifecycleHandlers(opened, box);
-      resolve(opened);
-    };
-    request.onerror = () => {
-      settled = true;
-      reject(request.error);
-    };
-    // Without this, an upgrade held up by another tab still holding the
-    // old version fires neither handler, and the caller waits on a promise
-    // that never settles. This release bumps the version, so that path is
-    // newly reachable for anyone with the app open twice.
-    request.onblocked = () => {
-      settled = true;
-      reject(
-        new Error(
-          'Refrain is open in another tab using an older version of its database. Close the other tab and reload.',
-        ),
-      );
-    };
-  });
-  dbPromise = box.promise;
-
-  // A failed open must not be cached: private browsing, a denied storage
-  // permission, or a transient error would otherwise reject every later
-  // call for the rest of the page session with no way to try again.
-  return dbPromise.catch((error: unknown) => {
-    if (dbPromise === box.promise) dbPromise = null;
-    throw error;
-  });
-}
+      migrateToV5(upgrade);
+    }
+  },
+});
 
 function runTransaction<T>(
   store: string,
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const tx = db.transaction(store, mode);
-        const request = run(tx.objectStore(store));
-        // A request can report success before the transaction commits, so
-        // resolving on `request.onsuccess` would surface success even when
-        // the commit later fails (e.g. quota exceeded). Capture the result
-        // on success but only settle the promise on the transaction's own
-        // lifecycle events: resolve once the commit completes, reject on
-        // request error, transaction error, or abort. Matches the pattern
-        // in `deleteStoredProfilesByTrack`.
-        let result: T;
-        request.onsuccess = () => {
-          result = request.result;
-        };
-        request.onerror = () => reject(request.error);
-        tx.oncomplete = () => resolve(result);
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      }),
-  );
+  return connection.runTransaction(store, mode, run);
 }
 
 // --- Tracks ---------------------------------------------------------------
@@ -394,23 +288,17 @@ export function deleteStoredProfile(id: string): Promise<void> {
  * atomic.
  */
 export function deleteStoredProfilesByTrack(trackId: string): Promise<void> {
-  return openDb().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(PROFILES_STORE, 'readwrite');
-        const store = tx.objectStore(PROFILES_STORE);
-        const keysRequest = store
-          .index(PROFILES_TRACK_INDEX)
-          .getAllKeys(trackId);
-        keysRequest.onsuccess = () => {
-          for (const key of keysRequest.result) {
-            store.delete(key);
-          }
-        };
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      }),
+  return connection.runBatchTransaction(
+    PROFILES_STORE,
+    'readwrite',
+    (store) => {
+      const keysRequest = store.index(PROFILES_TRACK_INDEX).getAllKeys(trackId);
+      keysRequest.onsuccess = () => {
+        for (const key of keysRequest.result) {
+          store.delete(key);
+        }
+      };
+    },
   );
 }
 
@@ -445,19 +333,11 @@ export function putStoredFolder(folder: StoredFolder): Promise<void> {
  */
 export function putStoredFolders(folders: StoredFolder[]): Promise<void> {
   if (folders.length === 0) return Promise.resolve();
-  return openDb().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(FOLDERS_STORE, 'readwrite');
-        const store = tx.objectStore(FOLDERS_STORE);
-        for (const folder of folders) {
-          store.put(folder);
-        }
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      }),
-  );
+  return connection.runBatchTransaction(FOLDERS_STORE, 'readwrite', (store) => {
+    for (const folder of folders) {
+      store.put(folder);
+    }
+  });
 }
 
 export function deleteStoredFolder(id: string): Promise<void> {
