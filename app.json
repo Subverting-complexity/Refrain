@@ -11,6 +11,11 @@
     "ios": {
       "bundleIdentifier": "com.subvertingcomplexity.refrain",
       "supportsTablet": true,
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.subvertingcomplexity.refrain"
+        ]
+      },
       "infoPlist": {
         "UIBackgroundModes": ["audio"],
         "CFBundleDocumentTypes": [
