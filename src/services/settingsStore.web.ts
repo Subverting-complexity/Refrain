@@ -22,19 +22,29 @@ let hydrationPromise: Promise<void> | null = null;
 export function hydrateSettings(): Promise<void> {
   if (!hydrationPromise) {
     // Boxed so the catch can identify its own attempt without a
-    // self-referential const (the same shape `idb.web` uses).
+    // self-referential const.
     const box: { promise?: Promise<void> } = {};
-    box.promise = (async () => {
+    // Deferred to a microtask so the body cannot run before the assignment
+    // below. Inlining an async IIFE would look equivalent, but if the read
+    // ever threw synchronously its catch would run first, find the box not
+    // yet installed, and cache the failed attempt — the very thing this
+    // guards against.
+    box.promise = Promise.resolve().then(async () => {
       try {
         const rows = await getAllStoredSettings();
         for (const row of rows) {
-          cache.set(row.key, row.value);
+          // Never overwrite a value this session already set. A retry can land
+          // long after startup — every persisted-setting component hydrates on
+          // mount — and if the write that followed the reader's change also
+          // failed, the disk still holds the old value. Letting it win would
+          // flip their theme back under them.
+          if (!cache.has(row.key)) cache.set(row.key, row.value);
         }
       } catch {
         // Let the next call try again rather than serving defaults forever.
         if (hydrationPromise === box.promise) hydrationPromise = null;
       }
-    })();
+    });
     hydrationPromise = box.promise;
   }
   return hydrationPromise;

@@ -134,7 +134,10 @@ export default function PlayerScreen() {
   // never invoked and dragging behaves exactly as before.
   const handlePreviewStart = useCallback(
     (centerMs: number) => {
-      void startMonitor(centerMs);
+      // Rejects when the player is released mid-drag (navigating away). The
+      // preview is a courtesy; a failed one must not raise an unhandled
+      // rejection out of a gesture handler.
+      void startMonitor(centerMs).catch(() => undefined);
     },
     [startMonitor],
   );
@@ -145,7 +148,7 @@ export default function PlayerScreen() {
     [updateMonitor],
   );
   const handlePreviewEnd = useCallback(() => {
-    void stopMonitor();
+    void stopMonitor().catch(() => undefined);
   }, [stopMonitor]);
 
   // Tap-to-place arm state. Driven by the A/B buttons; the waveform reads it to
@@ -194,7 +197,10 @@ export default function PlayerScreen() {
   // so the region just defined is the one that plays next.
   const handleMarkerCommit = useCallback(
     (marker: 'A' | 'B') => {
-      void commitMarkerPlacement(marker);
+      // The commit ends in a seek, which rejects against a player released
+      // mid-gesture. The marker is placed either way; only the courtesy seek
+      // is lost, so swallow rather than leave the rejection unhandled.
+      void commitMarkerPlacement(marker).catch(() => undefined);
     },
     [commitMarkerPlacement],
   );
@@ -204,14 +210,16 @@ export default function PlayerScreen() {
   const handleEditA = useCallback(
     (positionMs: number) => {
       setMarkerA(positionMs);
-      void commitMarkerPlacement('A');
+      void commitMarkerPlacement('A').catch(() => undefined);
     },
     [setMarkerA, commitMarkerPlacement],
   );
 
   const handleEditB = useCallback(
     (positionMs: number) => {
-      if (applyMarkerB(positionMs)) void commitMarkerPlacement('B');
+      if (applyMarkerB(positionMs)) {
+        void commitMarkerPlacement('B').catch(() => undefined);
+      }
     },
     [applyMarkerB, commitMarkerPlacement],
   );

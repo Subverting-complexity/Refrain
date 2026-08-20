@@ -54,6 +54,24 @@ describe('hydrateSettings', () => {
     expect(settings.getNumber('volume', 0.8)).toBe(0.8);
   });
 
+  // A retry can land long after startup, because every persisted-setting
+  // component hydrates on mount. If the write that followed the reader's
+  // change also failed, the disk still holds the old value — letting it win
+  // would flip their setting back under them.
+  it('does not overwrite a value changed since the failed hydration', async () => {
+    mockGetAllStoredSettings.mockRejectedValueOnce(new Error('db unavailable'));
+    const settings = await loadModule();
+
+    settings.setSetting('volume', '0.9');
+
+    mockGetAllStoredSettings.mockResolvedValue([
+      { key: 'volume', value: '0.3' },
+    ]);
+    await settings.hydrateSettings();
+
+    expect(settings.getSetting('volume')).toBe('0.9');
+  });
+
   // A failed attempt must not be cached. The read can fail for passing
   // reasons — storage pressure, another tab blocking an upgrade — and caching
   // it would mean every persisted preference silently reverted to its default

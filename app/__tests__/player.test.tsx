@@ -32,9 +32,11 @@ const mockAudioPlayerState = {
   setLoopEnabled: jest.fn(),
   setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),
-  startMonitor: jest.fn(),
+  // Promise-returning, like the real engine functions — callers attach a
+  // rejection handler to them.
+  startMonitor: jest.fn().mockResolvedValue(undefined),
   updateMonitor: jest.fn(),
-  stopMonitor: jest.fn(),
+  stopMonitor: jest.fn().mockResolvedValue(undefined),
 };
 
 let mockSnippetPreviewEnabled = true;

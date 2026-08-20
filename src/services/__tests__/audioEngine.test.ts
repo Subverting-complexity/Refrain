@@ -266,6 +266,39 @@ describe('audioEngine', () => {
       expect(mockSeekTo).toHaveBeenCalledWith(5);
     });
 
+    // The harder case: A is past the end too, so there is no usable region at
+    // all. The whole-track loop must not be handed an inverted region
+    // ({ a: 100s, b: 60s }) — the playhead is always past `b`, so every status
+    // update would rewind to a point beyond the end, finish immediately and
+    // rewind again, spinning at the update rate while reporting a position
+    // past the end of the track.
+    it('falls back to the whole track when marker A is past the end too', async () => {
+      mockGetActiveMarkers.mockReturnValue({
+        markerA: 100_000,
+        markerB: 120_000,
+        loopEnabled: true,
+      });
+      const { loadTrack, subscribe } = require('../audioEngine');
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+
+      const listener = jest.fn();
+      subscribe(listener);
+      listener.mockClear();
+      mockSeekTo.mockClear();
+
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 60, playing: true }),
+      );
+
+      // Rewinds to the start of the track, not to an unreachable marker.
+      expect(mockSeekTo).toHaveBeenCalledWith(0);
+      // And never publishes a position beyond the track.
+      for (const [state] of listener.mock.calls) {
+        expect(state.positionMs).toBeLessThanOrEqual(60_000);
+      }
+    });
+
     it('restarts from marker A instead of stalling at the end', async () => {
       const { play } = await loadWithMarkersPastEnd();
       statusCallback?.(
@@ -277,6 +310,115 @@ describe('audioEngine', () => {
 
       expect(mockSeekTo).toHaveBeenCalledWith(5);
       expect(mockPlay).toHaveBeenCalled();
+    });
+  });
+
+  describe('the rolling monitor', () => {
+    async function loadPlaying() {
+      const engine = require('../audioEngine');
+      await engine.loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      return engine;
+    }
+
+    // The active flag is committed before the seek that can reject. Left set,
+    // the monitor window would outrank the A/B region for the rest of the
+    // track's life, silently replacing the reader's loop with a four-second
+    // window.
+    it('does not stay in preview mode when its seek fails', async () => {
+      const { startMonitor, setMarkerA, setMarkerB, stopMonitor } =
+        await loadPlaying();
+      setMarkerA(1_000);
+      setMarkerB(50_000);
+
+      mockSeekTo.mockRejectedValueOnce(new Error('seek failed'));
+      await expect(startMonitor(20_000)).rejects.toThrow('seek failed');
+
+      // Not monitoring: stopMonitor has nothing to restore, so it issues no
+      // seek of its own.
+      mockSeekTo.mockClear();
+      await stopMonitor();
+      expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    // Between clearing the monitor and the restore seek landing, the playhead
+    // is still inside the old preview window. If that window sat at or past
+    // marker B, the loop would fire its own rewind and steal the playhead the
+    // restore was putting back.
+    it('does not let the loop steal the playhead during the restore', async () => {
+      const { startMonitor, stopMonitor, setMarkerA, setMarkerB, seekTo } =
+        await loadPlaying();
+      setMarkerA(1_000);
+      setMarkerB(30_000);
+
+      // Park at 20s, playing, then preview around marker B.
+      await seekTo(20_000);
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 20, playing: true }),
+      );
+      await startMonitor(30_000);
+
+      // Hold the restore seek open, and let a status tick past B arrive while
+      // it is still in flight.
+      let releaseSeek: () => void = () => undefined;
+      mockSeekTo.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseSeek = resolve;
+          }),
+      );
+      const stopping = stopMonitor();
+      mockSeekTo.mockClear();
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 31, playing: true }),
+      );
+
+      // The loop must not have issued a rewind of its own.
+      expect(mockSeekTo).not.toHaveBeenCalled();
+      releaseSeek();
+      await stopping;
+    });
+  });
+
+  describe('a background seek that fails after teardown', () => {
+    // subscribe() replays currentState to every new subscriber, so an error
+    // stamped onto the idle state after unload would greet the next track.
+    it('does not report an error against a player that is gone', async () => {
+      const {
+        loadTrack,
+        unloadTrack,
+        subscribe,
+        setMarkerA,
+        setMarkerB,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3', 'track-1');
+      statusCallback?.(makeLoadedStatus({ duration: 60 }));
+      setMarkerA(1_000);
+      setMarkerB(30_000);
+
+      // The loop rewind's seek rejects, but only after the track is unloaded.
+      let rejectSeek: (err: Error) => void = () => undefined;
+      mockSeekTo.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSeek = reject;
+          }),
+      );
+      statusCallback?.(
+        makeLoadedStatus({ duration: 60, currentTime: 30, playing: true }),
+      );
+
+      await unloadTrack();
+      rejectSeek(new Error('player released'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const listener = jest.fn();
+      subscribe(listener);
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'idle' }),
+      );
     });
   });
 

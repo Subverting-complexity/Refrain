@@ -11,10 +11,10 @@ import { deleteMarkers, deleteProfilesForTrack } from './markerStore.web';
 import {
   deleteBlob,
   getObjectUrl,
-  isAwaitingMetadata,
   listBlobIds,
-  releaseImportedBlobs,
+  releaseImportedBlob,
   revokeObjectUrl,
+  spareAwaitingMetadata,
 } from './webBlobStore.web';
 
 /**
@@ -28,11 +28,14 @@ import {
 /**
  * Whether a stored row is starred.
  *
- * IndexedDB stores whatever it was handed, so a record could carry the
- * native store's numeric 0/1 encoding rather than a boolean — from a restore
- * path, or a hand-edited record. Reading it one way in the list and another
- * in the tally made them disagree: the Favourites badge counted a row that
- * opening Favourites did not show. One predicate, used everywhere.
+ * The stored type declares a boolean and the only writer normalises to one,
+ * so through the typed API this is just `row.isFavorite`. It exists because
+ * IndexedDB stores whatever it is handed: a record reaching the store by some
+ * other route — a future restore or sync path, or the native side's numeric
+ * 0/1 encoding — would not be typed on the way in. The list used to test it
+ * strictly and the tally loosely, so such a record would have been counted in
+ * the Favourites badge yet missing from the list that badge opens. One
+ * predicate means the two cannot disagree, whatever arrives.
  */
 function isStarred(row: StoredTrack): boolean {
   return Boolean(row.isFavorite);
@@ -108,6 +111,10 @@ export async function getTrack(id: string): Promise<Track | null> {
 
 export async function insertTrack(track: Track): Promise<void> {
   await putStoredTrack(toStored(track));
+  // The record exists now, so the blob written just before it no longer needs
+  // the orphan sweep's protection. Releasing here rather than waiting for a
+  // sweep to notice keeps the protection window as short as the import.
+  releaseImportedBlob(track.id);
 }
 
 /**
@@ -197,8 +204,9 @@ export async function deleteTrack(id: string): Promise<void> {
   await deleteMarkers(id);
   await deleteProfilesForTrack(id);
   revokeObjectUrl(id);
-  // Await the blob removal so the promise means what the native store's does:
-  // the storage is actually back. Detached, it could still be uncommitted
+  // Await the blob removal so this promise resolving means the storage is
+  // actually back, matching what native guarantees by unlinking the file
+  // before `deleteTrack` returns. Detached, it could still be uncommitted
   // when the next import runs — so a delete made to free space would not have
   // freed it yet — and navigating away straight after confirming abandoned it
   // altogether, stranding the bytes until some later sweep. A failure is
@@ -212,23 +220,46 @@ export async function deleteTrack(id: string): Promise<void> {
  * the metadata store. Best-effort and asynchronous — never throws. Resolves
  * to the number of orphan blobs removed.
  */
-export async function cleanupOrphanFiles(): Promise<number> {
+export function cleanupOrphanFiles(): Promise<number> {
+  // One sweep at a time. `loadTracks` fires a sweep on every library load and
+  // never awaits it, so two can otherwise overlap — and because each holds its
+  // own snapshot of the known ids while the protection marks are shared, a
+  // newer sweep could clear the mark on a blob an older sweep was still
+  // holding a pre-import snapshot for, and the older one would then delete it.
+  // Serialising removes the interleave entirely.
+  if (!sweepInFlight) {
+    sweepInFlight = runOrphanSweep().finally(() => {
+      sweepInFlight = null;
+    });
+  }
+  return sweepInFlight;
+}
+
+let sweepInFlight: Promise<number> | null = null;
+
+async function runOrphanSweep(): Promise<number> {
   try {
-    const knownIds = new Set(await getStoredTrackIds());
-    // An id that now has a metadata record no longer needs protecting.
-    releaseImportedBlobs(knownIds);
     const storedIds = await listBlobIds();
+    if (storedIds.length === 0) return 0;
+    // Read the known ids *after* listing the blobs, so a record written while
+    // the listing was in flight is still seen. Reading first would leave a
+    // just-imported track looking recordless.
+    const knownIds = new Set(await getStoredTrackIds());
     let removed = 0;
     for (const id of storedIds) {
-      // A blob written by an import whose track record has not landed yet is
-      // indistinguishable from an orphan. Skip it: the sweep runs on every
-      // library load, so it routinely overlaps an import in flight, and
-      // deleting here would silently strip the audio from the track the
-      // reader just added.
-      if (!knownIds.has(id) && !isAwaitingMetadata(id)) {
-        await deleteBlob(id);
-        removed += 1;
+      if (knownIds.has(id)) {
+        // The record exists, so the blob is not an orphan and needs no
+        // further protection.
+        releaseImportedBlob(id);
+        continue;
       }
+      // A blob written by an import whose record has not landed yet is
+      // indistinguishable from an orphan. Spare it — the sweep runs on every
+      // library load, so it routinely overlaps an import in flight, and
+      // deleting here would strip the audio from the track just added.
+      if (spareAwaitingMetadata(id)) continue;
+      await deleteBlob(id);
+      removed += 1;
     }
     return removed;
   } catch {

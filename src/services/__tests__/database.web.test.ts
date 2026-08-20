@@ -362,6 +362,47 @@ describe('markers store', () => {
   });
 });
 
+describe('putStoredTracks', () => {
+  const trackRow = (id: string, folderId: string | null) => ({
+    ...sampleTrack,
+    id,
+    folderId,
+  });
+
+  it('writes every track in the batch', async () => {
+    const db = load();
+    await db.putStoredTracks([
+      trackRow('track-1', null),
+      trackRow('track-2', null),
+    ]);
+    const stored = await db.getAllStoredTracks();
+    expect(stored.map((t) => t.id).sort()).toEqual(['track-1', 'track-2']);
+  });
+
+  it('resolves without touching the store for an empty batch', async () => {
+    const db = load();
+    await expect(db.putStoredTracks([])).resolves.toBeUndefined();
+    expect(await db.getAllStoredTracks()).toEqual([]);
+  });
+
+  // The point of the batch: a folder delete unfiles every track inside it, and
+  // a half-applied re-home leaves tracks in no view at all — neither unfiled
+  // nor inside a folder that still exists.
+  it('applies the whole re-home or none of it', async () => {
+    const db = load();
+    await db.putStoredTrack(trackRow('track-1', 'folder-1'));
+    await db.putStoredTrack(trackRow('track-2', 'folder-1'));
+
+    await db.putStoredTracks([
+      trackRow('track-1', null),
+      trackRow('track-2', null),
+    ]);
+
+    const stored = await db.getAllStoredTracks();
+    expect(stored.every((t) => t.folderId === null)).toBe(true);
+  });
+});
+
 describe('folders store (single-record accessors)', () => {
   const sampleFolder = {
     id: 'folder-1',

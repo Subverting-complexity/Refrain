@@ -365,6 +365,14 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     newState.positionMs = newState.durationMs;
   }
 
+  // The real duration arrives here, after the markers were restored against a
+  // length nobody knew yet. Reconcile them once it is known: a marker past the
+  // end is unreachable, and leaving it in place would show the reader a B flag
+  // beyond the end of their waveform and save that value straight back.
+  reconcileMarkersToDuration(newState.durationMs);
+  newState.markerA = markerA;
+  newState.markerB = markerB;
+
   // The monitor window, when active, overrides the A/B region: the preview
   // loops its own window and always rewinds (it ignores the loop toggle and
   // any per-loop count-in handler), so a marker drag previews cleanly without
@@ -664,7 +672,10 @@ export async function play(): Promise<void> {
     currentState.positionMs >= currentState.durationMs &&
     currentState.durationMs > 0
   ) {
-    await seekInternal(markerA ?? 0);
+    // Same reasoning as `trackLoopBounds`: a restored A past the end would
+    // seek to a point the player clamps back to the end, so Play would appear
+    // to do nothing.
+    await seekInternal(usableMarkerA(currentState.durationMs));
   }
   if (player !== target) return;
   startPlayback(target);
@@ -740,7 +751,54 @@ function regionBounds(): { a: number; b: number } | null {
  */
 function trackLoopBounds(durationMs: number): { a: number; b: number } | null {
   if (!loopEnabled || durationMs <= 0) return null;
-  return { a: markerA ?? 0, b: durationMs };
+  return { a: usableMarkerA(durationMs), b: durationMs };
+}
+
+/**
+ * Bring restored markers inside the track once its real length is known.
+ *
+ * Markers are restored during load, before any duration has been reported, so
+ * a track re-imported from a shorter file (or one whose estimated duration is
+ * later corrected downward) can carry markers past its end. Reconciling here —
+ * the moment the duration arrives — keeps three things honest at once: the
+ * loop bounds, what the waveform and time readouts show, and what the
+ * debounced save writes back. Doing it only in `regionBounds` fixed the
+ * looping while leaving the reader looking at a B flag beyond the end of their
+ * own waveform, and saved that value again.
+ *
+ * A B past the end is dropped rather than pinned to the end: a loop end the
+ * reader never chose is a worse guess than no loop end. An A past the end goes
+ * with it, since it can no longer start anything.
+ */
+function reconcileMarkersToDuration(durationMs: number): void {
+  if (durationMs <= 0) return;
+  let changed = false;
+  if (markerB != null && markerB > durationMs) {
+    markerB = null;
+    changed = true;
+  }
+  if (markerA != null && markerA >= durationMs) {
+    markerA = null;
+    changed = true;
+  }
+  if (changed) scheduleMarkerSave();
+}
+
+/**
+ * Marker A if it lands inside the track, else the start.
+ *
+ * Markers are restored without knowing the new track's length, so a track
+ * re-imported from a shorter file can leave A past the end. Used as a loop
+ * start it would give an inverted region — the playhead is always past `b`,
+ * so every status update would rewind to a point beyond the end, finish
+ * immediately, and rewind again, spinning at the update rate while reporting
+ * a position past the end of the track. A marker that cannot be reached is
+ * not a loop start; fall back to the beginning.
+ */
+function usableMarkerA(durationMs: number): number {
+  if (markerA == null) return 0;
+  if (durationMs > 0 && markerA >= durationMs) return 0;
+  return markerA;
 }
 
 /**
