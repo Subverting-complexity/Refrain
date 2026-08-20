@@ -362,6 +362,58 @@ describe('markers store', () => {
   });
 });
 
+describe('folders store (single-record accessors)', () => {
+  const sampleFolder = {
+    id: 'folder-1',
+    name: 'Gigs',
+    createdAt: 1_700_000_000_000,
+    pinOrder: null,
+    lastOpenedAt: null,
+  };
+
+  it('round-trips a folder record', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    expect(await db.getStoredFolder('folder-1')).toEqual(sampleFolder);
+  });
+
+  it('returns null for an absent folder record', async () => {
+    const db = load();
+    expect(await db.getStoredFolder('missing')).toBeNull();
+  });
+
+  it('overwrites an existing folder on put (same id)', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.putStoredFolder({ ...sampleFolder, name: 'Rehearsals' });
+    expect(await db.getStoredFolder('folder-1')).toEqual({
+      ...sampleFolder,
+      name: 'Rehearsals',
+    });
+  });
+
+  it('deletes a folder record', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.deleteStoredFolder('folder-1');
+    expect(await db.getStoredFolder('folder-1')).toBeNull();
+  });
+
+  it('leaves other folders untouched when one is deleted', async () => {
+    const db = load();
+    await db.putStoredFolder(sampleFolder);
+    await db.putStoredFolder({ ...sampleFolder, id: 'folder-2', name: 'Set' });
+    await db.deleteStoredFolder('folder-1');
+    const remaining = await db.getAllStoredFolders();
+    expect(remaining.map((f) => f.id)).toEqual(['folder-2']);
+  });
+
+  it('deleting an absent folder resolves without error', async () => {
+    const db = load();
+    await expect(db.deleteStoredFolder('missing')).resolves.toBeUndefined();
+  });
+});
+
 describe('schema upgrade', () => {
   it('keeps tracks and settings stores alongside the new markers store', async () => {
     const db = load();
