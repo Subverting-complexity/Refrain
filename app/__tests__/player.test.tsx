@@ -25,7 +25,10 @@ const mockAudioPlayerState = {
   setMarkerB: (ms: number) => mockSetMarkerB(ms),
   clearMarkers: jest.fn(),
   clearMarkerB: jest.fn(),
-  commitMarkerPlacement: jest.fn(),
+  // Returns a promise, like the real one — callers attach a rejection
+  // handler to it, so a bare jest.fn() returning undefined would not stand in
+  // for it faithfully.
+  commitMarkerPlacement: jest.fn().mockResolvedValue(undefined),
   setLoopEnabled: jest.fn(),
   setLoopRestartHandler: jest.fn(),
   setVolume: jest.fn(),

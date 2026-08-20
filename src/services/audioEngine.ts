@@ -85,6 +85,12 @@ let monitorActive = false;
 let monitorWindow: { start: number; end: number } | null = null;
 // Transport state captured at startMonitor, restored verbatim at stopMonitor.
 let savedTransport: { positionMs: number; isPlaying: boolean } | null = null;
+// True while stopMonitor's restore seek is in flight. The monitor window is
+// already cleared by then, so without this the status handler would fall
+// through to the A/B region and, if the preview sat at or past marker B,
+// issue its own rewind — racing the restore and stealing the playhead the
+// user had before the drag.
+let restoringTransport = false;
 
 // --- Lock-screen skip interception (native) ---------------------------------
 // expo-audio 56 wires the lock-screen seek buttons entirely in native code: iOS
@@ -135,6 +141,26 @@ async function seekInternal(targetMs: number): Promise<void> {
   if (!player) return;
   markInternalSeek(targetMs);
   await player.seekTo(msToSec(targetMs));
+}
+
+/**
+ * Publish a failed background seek as an error — but only while the player it
+ * was issued against is still the live one.
+ *
+ * Releasing a player rejects any seek already in flight, and teardown has by
+ * then reset `currentState` to idle. Reporting unconditionally would stamp an
+ * error over that idle state, and because `subscribe` replays `currentState`
+ * to every new subscriber, the *next* track would open showing the previous
+ * track's teardown error.
+ */
+function reportSeekFailure(target: AudioPlayer | null, err: unknown): void {
+  if (player !== target) return;
+  currentState = {
+    ...currentState,
+    status: 'error',
+    lastError: errorMessage(err),
+  };
+  notify(currentState);
 }
 
 /**
@@ -299,13 +325,9 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     // Nothing to correct when the native interval already lands where the
     // preference asks — a 10s setting inside an ample region.
     if (Math.abs(target - newState.positionMs) > 1) {
-      seekInternal(target).catch((err) => {
-        currentState = {
-          ...currentState,
-          status: 'error',
-          lastError: errorMessage(err),
-        };
-        notify(currentState);
+      const seeking = player;
+      seekInternal(target).catch((err: unknown) => {
+        reportSeekFailure(seeking, err);
       });
       // Publish the corrected position immediately so the UI never flashes the
       // native interval's landing spot on the way past.
@@ -334,7 +356,8 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     (status.playing || status.didJustFinish) &&
     region &&
     newState.positionMs >= region.b &&
-    player
+    player &&
+    !restoringTransport
   ) {
     if (!monitor && !loopEnabled) {
       // Loop disarmed: play the A..B region once, then stop at B. The next
@@ -347,13 +370,9 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
 
     // Loop armed (or monitor active): rewind to the start.
     markInternalSeek(region.a);
-    player.seekTo(msToSec(region.a)).catch((err) => {
-      currentState = {
-        ...currentState,
-        status: 'error',
-        lastError: errorMessage(err),
-      };
-      notify(currentState);
+    const rewinding = player;
+    rewinding.seekTo(msToSec(region.a)).catch((err: unknown) => {
+      reportSeekFailure(rewinding, err);
     });
 
     if (!monitor && onLoopRestart) {
@@ -430,6 +449,12 @@ async function loadTrackImpl(
   trackId?: string,
   trackName?: string,
 ): Promise<void> {
+  // Held outside the try so the catch can release a player that was created
+  // but never published to `player` — a throw between the two (on native,
+  // `setActiveForLockScreen` can fail on a permission or media-session
+  // problem) would otherwise strand a fully loaded native player that
+  // nothing can reach, and every retry would strand another.
+  let created: AudioPlayer | null = null;
   try {
     await unloadTrackImpl();
     // Associate this load with its track so marker changes persist and the
@@ -454,6 +479,7 @@ async function loadTrackImpl(
     });
 
     const newPlayer = createAudioPlayer({ uri }, { updateInterval: 100 });
+    created = newPlayer;
     // Seed the current volume so the very first frame plays at the persisted
     // level; setVolume() handles later live changes.
     newPlayer.volume = volume;
@@ -503,21 +529,26 @@ async function loadTrackImpl(
     // media-key support. Best-effort and self-guarded — a no-op off-web.
     if (Platform.OS === 'web') {
       webMediaSession.setMetadata({ title: trackName, artist: 'Refrain' });
+      // Each transport call can reject — they all reach `player.seekTo`, which
+      // rejects against a released player. `void` discards the value but
+      // attaches no rejection handler, so a media key pressed while the tab is
+      // being backgrounded would raise an unhandled rejection out of a no-op.
+      // A failed media-key press is not worth reporting; swallow it.
       webMediaSession.setHandlers({
         play: () => {
-          void play();
+          void play().catch(() => undefined);
         },
         pause: () => {
-          void pause();
+          void pause().catch(() => undefined);
         },
         stop: () => {
-          void stop();
+          void stop().catch(() => undefined);
         },
         seekBackward: () => {
-          void skipBack();
+          void skipBack().catch(() => undefined);
         },
         seekForward: () => {
-          void skipForward();
+          void skipForward().catch(() => undefined);
         },
       });
       webMediaSession.setPlaybackState('paused');
@@ -529,6 +560,24 @@ async function loadTrackImpl(
       await restoreActiveMarkers(currentTrackId);
     }
   } catch (err) {
+    // Release a player that never became the live one, and drop any listener
+    // that was attached to it, so a failed load leaves nothing behind.
+    if (created && player !== created) {
+      try {
+        statusSubscription?.remove();
+      } catch {
+        // Best-effort teardown: report the original failure, not this one.
+      }
+      statusSubscription = null;
+      try {
+        created.remove();
+      } catch {
+        // Same.
+      }
+    }
+    // The id was claimed before the load could fail. Leaving it set would let
+    // a later marker edit schedule a save against a track that never loaded.
+    currentTrackId = null;
     currentState = {
       status: 'error',
       positionMs: 0,
@@ -544,7 +593,15 @@ async function loadTrackImpl(
 }
 
 export async function play(): Promise<void> {
-  if (!player) return;
+  // Snapshot the player, as `stop` does. Everything below awaits, and a
+  // teardown or a load of a different track can land in the gap: `player`
+  // may be null by the time we get back (crash), or it may be a *different*
+  // track's player (which would start that track at this one's marker A).
+  // Comparing the snapshot against the live binding after each await is the
+  // only way to tell — TypeScript keeps the narrowing across `await` for a
+  // mutable module binding, so it cannot catch this.
+  const target = player;
+  if (!target) return;
   // Resume the audio graph on this user gesture so iOS's autoplay policy
   // can't leave the rerouted output silently suspended.
   if (webGainActive) webAudioGain.resume();
@@ -565,6 +622,8 @@ export async function play(): Promise<void> {
     }
   }
 
+  if (player !== target) return;
+
   const region = regionBounds();
   if (region) {
     // With an A/B region set, playback is confined to it: (re)start from A
@@ -584,7 +643,8 @@ export async function play(): Promise<void> {
   ) {
     await seekInternal(markerA ?? 0);
   }
-  player.play();
+  if (player !== target) return;
+  target.play();
   if (Platform.OS === 'web') webMediaSession.setPlaybackState('playing');
 }
 
@@ -755,7 +815,10 @@ export function skipForward(): Promise<void> {
  * it is safe to treat repeated starts as updates.
  */
 export async function startMonitor(centerMs: number): Promise<void> {
-  if (!player) return;
+  const target = player;
+  if (!target) return;
+  const wasActive = monitorActive;
+  const priorWindow = monitorWindow;
   if (!monitorActive) {
     // Capture the prior transport once, on entry, so a second startMonitor
     // (or any updateMonitor) can't overwrite the state we must restore.
@@ -769,8 +832,21 @@ export async function startMonitor(centerMs: number): Promise<void> {
   // Resume the web audio graph on this gesture so the preview isn't left
   // silently suspended by the autoplay policy (mirrors play()).
   if (webGainActive) webAudioGain.resume();
-  await seekInternal(monitorWindow.start);
-  player.play();
+  try {
+    await seekInternal(monitorWindow.start);
+  } catch (err) {
+    // The monitor flag is committed before the seek, so a rejection here
+    // would otherwise leave the engine monitoring forever: `monitorBounds`
+    // takes precedence over the A/B region, so the user's loop would be
+    // silently replaced by a 4-second window until the track was reloaded.
+    // Roll back to whatever was in force before this call.
+    monitorActive = wasActive;
+    monitorWindow = priorWindow;
+    if (!wasActive) savedTransport = null;
+    throw err;
+  }
+  if (player !== target) return;
+  target.play();
 }
 
 /**
@@ -819,14 +895,22 @@ export async function stopMonitor(): Promise<void> {
   monitorWindow = null;
   savedTransport = null;
 
-  if (!player) return;
+  const target = player;
+  if (!target) return;
 
-  // Restore the exact prior playhead, then the prior play/pause state.
-  await seekInternal(saved ? saved.positionMs : 0);
-  if (saved?.isPlaying) {
-    player.play();
-  } else {
-    player.pause();
+  // Restore the exact prior playhead, then the prior play/pause state. The
+  // guard keeps the status handler off the transport until both have landed.
+  restoringTransport = true;
+  try {
+    await seekInternal(saved ? saved.positionMs : 0);
+    if (player !== target) return;
+    if (saved?.isPlaying) {
+      target.play();
+    } else {
+      target.pause();
+    }
+  } finally {
+    restoringTransport = false;
   }
 }
 
@@ -933,13 +1017,16 @@ export function getVolume(): number {
  * native and desktop web. The value is always stored and reflected in the UI so
  * behaviour is consistent across platforms.
  */
-export function setVolume(value: number): void {
-  volume = clampVolume(value);
+/**
+ * Route the current `volume` to whatever is actually producing sound. Shared
+ * by `setVolume` and `loadPersistedVolume` so a level read from storage is
+ * applied, not merely reported — `resumeContext` is false for the latter,
+ * which does not run on a user gesture.
+ */
+function applyVolume(resumeContext: boolean): void {
   if (webGainActive) {
-    // Attenuate via the gain node. Resume on this user gesture so a drag can
-    // wake a context the autoplay policy left suspended.
     webAudioGain.setGain(volume);
-    webAudioGain.resume();
+    if (resumeContext) webAudioGain.resume();
   } else if (player) {
     // Setting volume can throw if the player was released mid-flight; swallow
     // so a volume tweak can never surface as a playback error.
@@ -949,6 +1036,13 @@ export function setVolume(value: number): void {
       // best-effort
     }
   }
+}
+
+export function setVolume(value: number): void {
+  volume = clampVolume(value);
+  // Resume on this user gesture so a drag can wake a context the autoplay
+  // policy left suspended.
+  applyVolume(true);
   try {
     settingsStore.setNumber(VOLUME_SETTING_KEY, volume);
   } catch {
@@ -978,6 +1072,12 @@ export async function loadPersistedVolume(): Promise<void> {
   } catch {
     volume = DEFAULT_VOLUME;
   }
+  // Apply it, don't just report it. This can resolve after the player was
+  // created — on a cold web load `hydrateSettings` is a real IndexedDB read,
+  // and `loadTrack` runs alongside it — in which case the player was seeded
+  // with the default and only this call corrects it. Without it the slider
+  // shows the saved level while the track plays at full volume.
+  applyVolume(false);
   currentState = { ...currentState, volume };
   notify(currentState);
 }

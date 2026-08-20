@@ -234,6 +234,58 @@ describe('audioEngine', () => {
     });
   });
 
+  describe('a load that fails partway', () => {
+    // The player is created before the lock-screen registration; a throw in
+    // between left it unreachable — `player` was never assigned, so unload
+    // could not release it and every retry stranded another native player.
+    it('releases a player created before the failure', async () => {
+      const { loadTrack } = require('../audioEngine');
+
+      mockSetActiveForLockScreen.mockImplementationOnce(() => {
+        throw new Error('media session unavailable');
+      });
+
+      await loadTrack('file:///test.mp3');
+
+      expect(mockCreateAudioPlayer).toHaveBeenCalled();
+      expect(mockRemove).toHaveBeenCalled();
+    });
+
+    it('reports the failure as an error state', async () => {
+      const { loadTrack, getState } = require('../audioEngine');
+
+      mockSetActiveForLockScreen.mockImplementationOnce(() => {
+        throw new Error('media session unavailable');
+      });
+
+      await loadTrack('file:///test.mp3');
+
+      expect(getState().status).toBe('error');
+    });
+
+    // The id is claimed before the load can fail. Left set, a later marker
+    // edit would schedule a save against a track that never loaded.
+    it('does not persist markers against a track that never loaded', async () => {
+      jest.useFakeTimers();
+      try {
+        const { loadTrack, setMarkerA } = require('../audioEngine');
+
+        mockSetActiveForLockScreen.mockImplementationOnce(() => {
+          throw new Error('media session unavailable');
+        });
+
+        await loadTrack('file:///test.mp3', 'track-1');
+        mockSetActiveMarkers.mockClear();
+        setMarkerA(1000);
+        jest.advanceTimersByTime(1000);
+
+        expect(mockSetActiveMarkers).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
   describe('play', () => {
     it('plays the loaded player', async () => {
       const { loadTrack, play } = require('../audioEngine');
@@ -249,6 +301,33 @@ describe('audioEngine', () => {
       const { play } = require('../audioEngine');
 
       await play();
+
+      expect(mockPlay).not.toHaveBeenCalled();
+    });
+
+    // play() is deliberately outside the lifecycle queue, so a teardown can
+    // land during the awaits it makes. Before this was guarded, the trailing
+    // player.play() ran against a released (or replaced) player.
+    it('does not play when the track is unloaded mid-await', async () => {
+      const { loadTrack, play, unloadTrack } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus());
+      mockPlay.mockClear();
+
+      // Unload while play() is parked on the audio-session claim.
+      let releaseSession: () => void = () => undefined;
+      mockSetIsAudioActiveAsync.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseSession = resolve;
+          }),
+      );
+
+      const playing = play();
+      await unloadTrack();
+      releaseSession();
+      await playing;
 
       expect(mockPlay).not.toHaveBeenCalled();
     });
@@ -1184,6 +1263,24 @@ describe('audioEngine', () => {
 
       setVolume(-2);
       expect(getVolume()).toBe(0);
+    });
+
+    // On a cold web load hydrateSettings is a real IndexedDB read, so this can
+    // resolve after the player was already seeded with the default. Reporting
+    // the saved level without applying it left the slider at 20% while the
+    // track played at 100%.
+    it('applies a persisted volume that resolves after the track loaded', async () => {
+      const { loadTrack, loadPersistedVolume } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      mockVolumeSet.mockClear();
+
+      mockGetNumber.mockImplementation((key: string, fallback: number) =>
+        key === 'playback.volume' ? 0.2 : fallback,
+      );
+      await loadPersistedVolume();
+
+      expect(mockVolumeSet).toHaveBeenCalledWith(0.2);
     });
 
     it('setVolume works with no player loaded and still persists', () => {

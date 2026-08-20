@@ -121,8 +121,13 @@ export function useSegmentWorkflow({
       setLoopEnabled(profile.loopEnabled);
       markLoaded(profile);
       // Park at the segment's start, but only once both markers have landed —
-      // committing per-marker would seek twice for a single load.
-      if (profile.markerA != null) void commitMarkerPlacement('A');
+      // committing per-marker would seek twice for a single load. The commit
+      // ends in a seek, which rejects against a player released mid-load, so
+      // catch rather than leave the rejection unhandled: the markers are set
+      // either way, and only the courtesy seek is lost.
+      if (profile.markerA != null) {
+        void commitMarkerPlacement('A').catch(() => undefined);
+      }
     },
     [setMarkerA, setMarkerB, setLoopEnabled, markLoaded, commitMarkerPlacement],
   );
