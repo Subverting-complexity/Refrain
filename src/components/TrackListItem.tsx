@@ -8,6 +8,7 @@ import { useTheme } from '../hooks/useTheme';
 import { radii, spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
+import { listRowStyles } from './listRowStyles';
 import { CenteredDialog } from './CenteredDialog';
 import { DialogButton } from './DialogButton';
 import { RowActionsButton } from './RowActionsButton';
@@ -182,7 +183,7 @@ export function TrackListItem({
       >
         <View
           style={[
-            styles.row,
+            listRowStyles.row,
             {
               backgroundColor: theme.colors.surface,
               borderColor: theme.colors.border,
@@ -195,11 +196,11 @@ export function TrackListItem({
             accessibilityHint={buildHint()}
             onLongPress={handleOpenActions}
             onPress={() => onPress?.(track)}
-            style={styles.main}
+            style={listRowStyles.main}
           >
             <View
               style={[
-                styles.iconContainer,
+                listRowStyles.iconContainer,
                 { backgroundColor: theme.colors.background },
               ]}
             >
@@ -209,7 +210,7 @@ export function TrackListItem({
                 color={theme.colors.accent}
               />
             </View>
-            <View style={styles.info}>
+            <View style={listRowStyles.info}>
               <Text
                 style={[theme.typography.body, styles.filename]}
                 numberOfLines={1}
@@ -272,39 +273,9 @@ export function TrackListItem({
   );
 }
 
+// Row chrome (border, main pressable, icon square, info column) is shared
+// with FolderListItem — see listRowStyles.
 const styles = StyleSheet.create({
-  // The row's chrome sits here rather than on the pressable, because the
-  // actions button is a sibling of that pressable and both belong inside one
-  // border. Nesting it would put a click target inside a click target, which
-  // on web fires the row underneath as well as the menu.
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    paddingRight: spacing.sm,
-  },
-  main: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: spacing.lg,
-    // With the row's own right padding this totals the `lg` the row carried
-    // before the actions button existed.
-    paddingRight: spacing.sm,
-    paddingVertical: spacing.md,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-  },
-  info: {
-    flex: 1,
-  },
   filename: {
     marginBottom: spacing.xs,
   },
