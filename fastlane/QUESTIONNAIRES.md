@@ -38,12 +38,13 @@ first release, with the answer for Refrain and the reason behind it.
 
 | Field                    | Value                                          |
 | ------------------------ | ---------------------------------------------- |
-| App name (iOS)           | Refrain                                        |
+| App name (iOS)           | Refrain: Audio Looper                          |
 | App title (Play)         | Refrain: A/B Loop Player                       |
 | Bundle ID / package      | `com.subvertingcomplexity.refrain`             |
 | Apple Team ID            | `JTUZQBUGVY` — SUBVERTING COMPLEXITY (PTY) LTD |
 | App Store Connect app ID | `6780801245`                                   |
 | Apple ID (account)       | `adrienne.bosch7@icloud.com`                   |
+| SKU                      | `Refrain`                                      |
 | Marketing version        | `1.0.0` (`expo.version` in `app.json`)         |
 | Build number             | managed remotely by EAS, auto-incremented      |
 | Publisher / copyright    | 2026 Subverting Complexity                     |
