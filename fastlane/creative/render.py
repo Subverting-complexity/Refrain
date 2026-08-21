@@ -31,15 +31,19 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 # ---------------------------------------------------------------------------
 # Palette (from src/theme/index.ts darkColors)
 # ---------------------------------------------------------------------------
-BG = (17, 29, 31)  # #111d1f
-BG_DEEP = (9, 17, 18)  # darker for gradient base
+BG_SOFT = (61, 100, 90)  # lighter sage-mint, top-left corner of the backdrop
+BG_DARK = (8, 17, 17)  # deep near-black green, bottom-right corner — same family, more contrast
 SURFACE = (26, 46, 48)  # #1a2e30
 ACCENT = (126, 219, 184)  # #7edbb8 mint
+GLOW_COLOR = (176, 232, 210)  # ACCENT lifted toward white for an airier glow
 TEXT_PRIMARY = (232, 245, 240)  # #e8f5f0
 TEXT_SECONDARY = (139, 168, 158)  # #8ba89e
 BORDER = (42, 74, 78)  # #2a4a4e
 MARKER_A = (255, 176, 46)  # #ffb02e
 MARKER_B = (255, 93, 119)  # #ff5d77
+
+TILT_SCREENSHOT = -4  # degrees; subtle, keeps on-screen text legible
+TILT_BANNER = -6  # a touch more pronounced on wide marketing banners
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -109,6 +113,28 @@ def vertical_gradient(size, top, bottom):
     return base.resize((w, h))
 
 
+def diagonal_gradient(size, top_left, bottom_right):
+    """Top-left -> bottom-right gradient, two colors from the same family —
+    the dominant 2026 App Store background pattern (soft green into a
+    darker green), built from two cheap axis gradients blended together
+    rather than a slow per-pixel loop.
+    """
+    w, h = size
+    hbase = Image.new("RGB", (w, 1))
+    hpx = hbase.load()
+    for x in range(w):
+        hpx[x, 0] = lerp(top_left, bottom_right, x / max(1, w - 1))
+    horiz = hbase.resize((w, h))
+
+    vbase = Image.new("RGB", (1, h))
+    vpx = vbase.load()
+    for y in range(h):
+        vpx[0, y] = lerp(top_left, bottom_right, y / max(1, h - 1))
+    vert = vbase.resize((w, h))
+
+    return Image.blend(horiz, vert, 0.5)
+
+
 def radial_glow(size, center, radius, color, max_alpha):
     """Soft radial glow as an RGBA layer."""
     w, h = size
@@ -173,12 +199,71 @@ def load_icon() -> Image.Image:
     return Image.open(ICON_PATH).convert("RGBA")
 
 
+def build_device_layer(screen, dev_w, dev_h, corner, s, angle_deg) -> Image.Image:
+    """A self-contained, tilted device mockup: drop shadow, the real screen
+    inside a rounded frame, a mint border, and a dynamic-island notch — all
+    original artwork (no third-party mockup asset), rotated as one unit so
+    the shadow tilts naturally with the phone.
+    """
+    pad = int(70 * s)
+    layer_w, layer_h = dev_w + pad * 2, dev_h + pad * 2
+    layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+
+    shadow = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    shadow_pad = int(16 * s)
+    sd.rounded_rectangle(
+        [
+            pad - shadow_pad,
+            pad - shadow_pad + int(22 * s),
+            pad + dev_w + shadow_pad,
+            pad + dev_h + shadow_pad + int(30 * s),
+        ],
+        radius=corner + shadow_pad,
+        fill=(0, 0, 0, 140),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(int(26 * s)))
+    layer = Image.alpha_composite(layer, shadow)
+
+    screen_scaled = screen.resize((dev_w, dev_h), Image.LANCZOS).convert("RGBA")
+    mask = rounded_mask((dev_w, dev_h), corner)
+    device = Image.new("RGBA", (dev_w, dev_h), (0, 0, 0, 0))
+    device.paste(screen_scaled, (0, 0), mask)
+    layer.paste(device, (pad, pad), device)
+
+    bdraw = ImageDraw.Draw(layer)
+    bdraw.rounded_rectangle(
+        [pad, pad, pad + dev_w - 1, pad + dev_h - 1],
+        radius=corner,
+        outline=BORDER + (255,),
+        width=max(2, int(4 * s)),
+    )
+
+    # dynamic-island notch, overlapping the top of the screen like a real device
+    notch_w, notch_h = int(dev_w * 0.30), max(int(10 * s), int(dev_h * 0.014))
+    nx0 = pad + dev_w // 2 - notch_w // 2
+    ny0 = pad + int(dev_h * 0.012)
+    bdraw.rounded_rectangle(
+        [nx0, ny0, nx0 + notch_w, ny0 + notch_h],
+        radius=notch_h // 2,
+        fill=(6, 12, 12, 235),
+    )
+
+    return layer.rotate(angle_deg, resample=Image.BICUBIC, expand=True)
+
+
+def paste_centered(img, layer, center_x, center_y):
+    x = int(center_x - layer.width / 2)
+    y = int(center_y - layer.height / 2)
+    img.paste(layer, (x, y), layer)
+
+
 def compose(slide, size, variant="A", show_status_caption=True) -> Image.Image:
     w, h = size
     s = w / REF_W  # uniform scale from reference design
 
     # --- background gradient ---
-    img = vertical_gradient((w, h), BG_DEEP, BG).convert("RGBA")
+    img = diagonal_gradient((w, h), BG_SOFT, BG_DARK).convert("RGBA")
 
     # --- ambient waveform texture along the lower third ---
     wave = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -205,13 +290,13 @@ def compose(slide, size, variant="A", show_status_caption=True) -> Image.Image:
         i += 1
     img = Image.alpha_composite(img, wave)
 
-    # --- mint radial glow behind the device ---
+    # --- soft mint glow behind the device ---
     glow = radial_glow(
         (w, h),
         center=(int(w * 0.5), int(h * (0.58 if variant == "A" else 0.62))),
-        radius=int(w * 0.85),
-        color=ACCENT,
-        max_alpha=60 if variant == "A" else 46,
+        radius=int(w * 0.9),
+        color=GLOW_COLOR,
+        max_alpha=42 if variant == "A" else 34,
     )
     img = Image.alpha_composite(img, glow)
 
@@ -265,35 +350,8 @@ def compose(slide, size, variant="A", show_status_caption=True) -> Image.Image:
 
     corner = int(70 * s)
 
-    # drop shadow
-    shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
-    pad = int(30 * s)
-    sd.rounded_rectangle(
-        [dev_x - pad, dev_y - pad + int(30 * s), dev_x + dev_w + pad, dev_y + dev_h + pad + int(40 * s)],
-        radius=corner + pad,
-        fill=(0, 0, 0, 150),
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(int(38 * s)))
-    img = Image.alpha_composite(img, shadow)
-
-    # screen scaled to device inner size
-    screen_scaled = screen.resize((dev_w, dev_h), Image.LANCZOS).convert("RGBA")
-    mask = rounded_mask((dev_w, dev_h), corner)
-    device = Image.new("RGBA", (dev_w, dev_h), (0, 0, 0, 0))
-    device.paste(screen_scaled, (0, 0), mask)
-
-    img.paste(device, (dev_x, dev_y), device)
-
-    # crisp mint-tinted border around the device
-    bdraw = ImageDraw.Draw(img)
-    bw = max(2, int(4 * s))
-    bdraw.rounded_rectangle(
-        [dev_x, dev_y, dev_x + dev_w - 1, dev_y + dev_h - 1],
-        radius=corner,
-        outline=BORDER + (255,),
-        width=bw,
-    )
+    device_layer = build_device_layer(screen, dev_w, dev_h, corner, s, TILT_SCREENSHOT)
+    paste_centered(img, device_layer, dev_x + dev_w / 2, dev_y + dev_h / 2)
 
     return img.convert("RGB")
 
@@ -369,7 +427,7 @@ def compose_banner(size, slide_id, tagline, headline="Refrain") -> Image.Image:
     w, h = size
     s = h / 500  # reference scale off the 1024x500 feature-graphic design
 
-    img = vertical_gradient((w, h), BG_DEEP, BG).convert("RGBA")
+    img = diagonal_gradient((w, h), BG_SOFT, BG_DARK).convert("RGBA")
     img = Image.alpha_composite(img, ambient_waveform_layer(size, 0.82, 22))
 
     # --- device frame with the real screen, anchored to the right ---
@@ -386,36 +444,14 @@ def compose_banner(size, slide_id, tagline, headline="Refrain") -> Image.Image:
     glow = radial_glow(
         (w, h),
         center=(dev_x + dev_w // 2, h // 2),
-        radius=int(dev_w * 1.9),
-        color=ACCENT,
-        max_alpha=75,
+        radius=int(dev_w * 2.0),
+        color=GLOW_COLOR,
+        max_alpha=52,
     )
     img = Image.alpha_composite(img, glow)
 
-    shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
-    pad = int(22 * s)
-    sd.rounded_rectangle(
-        [dev_x - pad, dev_y - pad + int(18 * s), dev_x + dev_w + pad, dev_y + dev_h + pad + int(24 * s)],
-        radius=corner + pad,
-        fill=(0, 0, 0, 150),
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(int(24 * s)))
-    img = Image.alpha_composite(img, shadow)
-
-    screen_scaled = screen.resize((dev_w, dev_h), Image.LANCZOS).convert("RGBA")
-    mask = rounded_mask((dev_w, dev_h), corner)
-    device = Image.new("RGBA", (dev_w, dev_h), (0, 0, 0, 0))
-    device.paste(screen_scaled, (0, 0), mask)
-    img.paste(device, (dev_x, dev_y), device)
-
-    bdraw = ImageDraw.Draw(img)
-    bdraw.rounded_rectangle(
-        [dev_x, dev_y, dev_x + dev_w - 1, dev_y + dev_h - 1],
-        radius=corner,
-        outline=BORDER + (255,),
-        width=max(2, int(3 * s)),
-    )
+    device_layer = build_device_layer(screen, dev_w, dev_h, corner, s, TILT_BANNER)
+    paste_centered(img, device_layer, dev_x + dev_w / 2, dev_y + dev_h / 2)
 
     # --- soft surface card behind the wordmark, so the text has a "back" ---
     icon_size = int(90 * s)
