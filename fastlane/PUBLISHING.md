@@ -35,12 +35,21 @@ fastlane/
 | Bank, tax, agreements              | ❌                              | one-time account setup                                             |
 | Content rating (IARC) / age rating | ❌                              | Play Console questionnaire; Apple age rating in ASC                |
 
+Every console-only questionnaire — Apple's age rating, privacy label, export
+compliance and trader status; Play's content rating, target audience, Data
+Safety, advertising ID and foreground-service declaration — has a prepared
+answer with its rationale in **[QUESTIONNAIRES.md](QUESTIONNAIRES.md)**. Fill
+them from there rather than answering ad hoc; that document also lists the
+outstanding submission blockers.
+
 ## Before you run anything — fill these in
 
-1. **URLs** (currently placeholders): edit
-   `metadata/en-US/marketing_url.txt`, `support_url.txt`, `privacy_url.txt`, and
-   the Play privacy-policy field. Host `docs/privacy-policy.md` somewhere public
-   (GitHub Pages works) and use that URL for `privacy_url.txt`.
+1. **URLs** are set to the real domain in `metadata/en-US/` —
+   `marketing_url.txt` (`/refrain/`), `support_url.txt` (`/refrain/support`),
+   and `privacy_url.txt` (`/refrain/privacy`). **All three pages must be live
+   before you submit.** Publish `docs/privacy-policy.md` at `/refrain/privacy`;
+   `precheck` fails on a broken URL, and both stores reject an unreachable
+   privacy policy.
 2. **Review phone number**: `metadata/en-US/review_information/phone_number.txt`
    is a placeholder — set a real number Apple review can reach.
 3. **Categories**: `metadata/primary_category.txt` = `MZGenre.Music`,
