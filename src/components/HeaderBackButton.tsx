@@ -1,37 +1,74 @@
 import { useRouter } from 'expo-router';
+import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { spacing } from '../theme';
 import { IconSquareButton } from './IconSquareButton';
 
-/** Stable handle for end-to-end tests to target the back button. */
+/** Stable handle for tests to target the back button. */
 export const HEADER_BACK_BUTTON_TEST_ID = 'header-back-button';
+
+/**
+ * How long a press suppresses the next one. Long enough to cover the
+ * queue flush and pop transition that a double tap races, short enough
+ * that it is imperceptible if the pop turns out to be blocked.
+ */
+export const POP_GUARD_MS = 500;
 
 /**
  * Icon-only back button for stack headers.
  *
- * The platform's own back button is labelled with the previous screen's
- * title, so its width changes from screen to screen, and where the
- * previous screen has no title it falls back to the raw route name. This
- * replaces it with a fixed square carrying only a chevron.
+ * On iOS and web the platform's own back button is labelled with the
+ * previous screen's title, so its width changes from screen to screen,
+ * and where the previous screen has no title it falls back to the raw
+ * route name. (Android's is already icon-only.) This replaces all of them
+ * with one fixed square carrying a chevron.
  *
  * It reuses `IconSquareButton`, the bordered square this app already uses
- * for icon actions, so the back button is drawn from the same set as the
- * rest of the app rather than in a style of its own.
+ * for icon actions, rather than introducing another button style.
  *
  * Render it only where there is somewhere to go back to — the `headerLeft`
  * option in `app/_layout.tsx` gates it on the navigator's own `canGoBack`.
  */
 export function HeaderBackButton() {
   const router = useRouter();
+  const popping = useRef(false);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Guard at press time as well: unlike the platform button, this one is
-  // not disabled during the pop transition, so a fast double tap would
-  // otherwise pop two screens.
+  useEffect(() => {
+    return () => {
+      if (releaseTimer.current) {
+        clearTimeout(releaseTimer.current);
+      }
+    };
+  }, []);
+
   const handlePress = () => {
-    if (router.canGoBack()) {
-      router.back();
+    // `router.back()` does not pop: it appends a GO_BACK action to
+    // expo-router's routing queue, which is flushed later from an effect
+    // and does not deduplicate. A second press before that flush queues a
+    // second pop and takes two screens off the stack, because
+    // `canGoBack()` still reads true mid-stack. The platform back button
+    // gets this for free by disabling itself for the transition; this one
+    // has to latch.
+    if (popping.current || !router.canGoBack()) {
+      return;
     }
+    popping.current = true;
+
+    // Release on a timer rather than on regaining focus. A pop can be
+    // cancelled without the screen ever blurring — the player's
+    // unsaved-edits guard calls `preventDefault()` on `beforeRemove` and
+    // shows a dialog in the same route — and a focus-based release would
+    // never fire there, leaving the button dead for the life of the
+    // screen. A pop that does succeed unmounts this component, and the
+    // effect above clears the pending timer.
+    releaseTimer.current = setTimeout(() => {
+      popping.current = false;
+      releaseTimer.current = null;
+    }, POP_GUARD_MS);
+
+    router.back();
   };
 
   return (

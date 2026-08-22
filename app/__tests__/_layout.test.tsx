@@ -69,6 +69,12 @@ function screenOptions(): Record<string, unknown> {
   return mockStackOptions.mock.calls[0][0];
 }
 
+type HeaderLeftOption = (props: { canGoBack?: boolean }) => React.ReactNode;
+
+function headerLeftOption(): HeaderLeftOption {
+  return screenOptions().headerLeft as HeaderLeftOption;
+}
+
 describe('RootLayout header options', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -80,9 +86,7 @@ describe('RootLayout header options', () => {
   });
 
   it('renders the app back button when the stack can go back', () => {
-    const headerLeft = screenOptions().headerLeft as (props: {
-      canGoBack: boolean;
-    }) => React.ReactElement | null;
+    const headerLeft = headerLeftOption();
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(<>{headerLeft({ canGoBack: true })}</>);
@@ -97,9 +101,11 @@ describe('RootLayout header options', () => {
     // Returning a real null (rather than a component that renders null)
     // keeps the navigator from creating an empty header-left view, which
     // on Android would displace the title out of the native toolbar.
-    const headerLeft = screenOptions().headerLeft as (props: {
-      canGoBack: boolean;
-    }) => React.ReactElement | null;
-    expect(headerLeft({ canGoBack: false })).toBeNull();
+    expect(headerLeftOption()({ canGoBack: false })).toBeNull();
+  });
+
+  it('supplies no header-left element when canGoBack is absent', () => {
+    // `canGoBack` is optional on the navigator's props type.
+    expect(headerLeftOption()({})).toBeNull();
   });
 });

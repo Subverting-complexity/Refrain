@@ -4,11 +4,11 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import {
   HEADER_BACK_BUTTON_TEST_ID,
   HeaderBackButton,
+  POP_GUARD_MS,
 } from '../HeaderBackButton';
 
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
-
 jest.mock('expo-router', () => ({
   useRouter: () => ({ back: mockBack, canGoBack: mockCanGoBack }),
 }));
@@ -30,13 +30,13 @@ function renderButton(): ReactTestRenderer {
   return tree;
 }
 
-function findPressable(tree: ReactTestRenderer) {
+function pressHandler(tree: ReactTestRenderer): () => void {
   const nodes = tree.root.findAll(
     (node) =>
       node.props.accessibilityLabel === 'Go back' &&
       typeof node.props.onPress === 'function',
   );
-  return nodes[nodes.length - 1];
+  return nodes[nodes.length - 1].props.onPress;
 }
 
 /** Every string rendered anywhere in the tree. */
@@ -55,12 +55,17 @@ function textContentOf(node: unknown): string[] {
 
 describe('HeaderBackButton', () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
     mockCanGoBack.mockReturnValue(true);
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('renders a button labelled Go back', () => {
-    expect(findPressable(renderButton())).toBeDefined();
+    expect(pressHandler(renderButton())).toBeDefined();
   });
 
   it('shows a chevron icon', () => {
@@ -75,7 +80,7 @@ describe('HeaderBackButton', () => {
     expect(textContentOf(renderButton().toJSON())).toEqual([]);
   });
 
-  it('exposes a stable testID for end-to-end tests', () => {
+  it('exposes a stable testID', () => {
     const tagged = renderButton().root.findAll(
       (node) => node.props.testID === HEADER_BACK_BUTTON_TEST_ID,
     );
@@ -83,17 +88,62 @@ describe('HeaderBackButton', () => {
   });
 
   it('goes back when pressed', () => {
-    const tree = renderButton();
-    act(() => findPressable(tree).props.onPress());
+    const press = pressHandler(renderButton());
+    act(() => press());
     expect(mockBack).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores a repeat press once there is nothing left to pop', () => {
-    const tree = renderButton();
-    const press = findPressable(tree).props.onPress;
-    act(() => press());
+  it('pops only once when double-tapped mid-stack', () => {
+    // The real double-tap: `back()` only queues the pop, so `canGoBack()`
+    // still reads true on the second press. Without a latch both presses
+    // would queue a pop and two screens would come off the stack.
+    const press = pressHandler(renderButton());
+    act(() => {
+      press();
+      press();
+    });
+    expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not go back when there is nothing left to pop', () => {
     mockCanGoBack.mockReturnValue(false);
+    const press = pressHandler(renderButton());
+    act(() => press());
+    expect(mockBack).not.toHaveBeenCalled();
+  });
+
+  it('works again once the guard window passes on a pop that was blocked', () => {
+    // A pop can be cancelled without the screen ever blurring: the
+    // player's unsaved-edits guard prevents `beforeRemove` and shows a
+    // dialog in the same route. Releasing on focus would never fire
+    // there, so the button has to come back on its own.
+    const press = pressHandler(renderButton());
     act(() => press());
     expect(mockBack).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      jest.advanceTimersByTime(POP_GUARD_MS);
+    });
+    act(() => press());
+    expect(mockBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('still suppresses a second press just before the window closes', () => {
+    const press = pressHandler(renderButton());
+    act(() => press());
+    act(() => {
+      jest.advanceTimersByTime(POP_GUARD_MS - 1);
+    });
+    act(() => press());
+    expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears its pending timer on unmount', () => {
+    const tree = renderButton();
+    act(() => pressHandler(tree)());
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
+    act(() => tree.unmount());
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
   });
 });
