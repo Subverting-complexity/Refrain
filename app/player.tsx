@@ -367,12 +367,15 @@ export default function PlayerScreen() {
                   this file". The two used to render the same static icon, so a
                   slow analysis was indistinguishable from a failed one. */}
               {waveformPending ? (
-                <ActivityIndicator size="large" color={theme.colors.accent} />
+                <ActivityIndicator
+                  size="large"
+                  color={theme.colors.accentForeground}
+                />
               ) : (
                 <Ionicons
                   name="musical-notes"
                   size={64}
-                  color={theme.colors.accent}
+                  color={theme.colors.accentForeground}
                 />
               )}
             </View>

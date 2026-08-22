@@ -166,7 +166,7 @@ export function FolderListItem({
             <Ionicons
               name={icon ?? 'folder'}
               size={20}
-              color={theme.colors.accent}
+              color={theme.colors.accentForeground}
             />
           </View>
           <View style={listRowStyles.info}>
@@ -183,7 +183,7 @@ export function FolderListItem({
             <Ionicons
               name="pin"
               size={14}
-              color={theme.colors.accent}
+              color={theme.colors.accentForeground}
               style={styles.pin}
               accessibilityElementsHidden
               importantForAccessibility="no"

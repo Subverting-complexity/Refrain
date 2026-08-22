@@ -1,5 +1,8 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
+
+import { darkTheme } from '../../theme';
 
 import {
   HEADER_BACK_BUTTON_TEST_ID,
@@ -51,6 +54,10 @@ function textContentOf(node: unknown): string[] {
     return textContentOf((node as { children: unknown }).children);
   }
   return [];
+}
+
+function chevron(tree: ReactTestRenderer) {
+  return tree.root.findAll((node) => node.props.name === 'chevron-back')[0];
 }
 
 describe('HeaderBackButton', () => {
@@ -145,5 +152,28 @@ describe('HeaderBackButton', () => {
     act(() => tree.unmount());
     expect(clearSpy).toHaveBeenCalled();
     clearSpy.mockRestore();
+  });
+
+  // A header is bare `background` with nothing else on it, so the filled
+  // square this used to render read as a stray tile rather than as one of
+  // the bar's controls.
+  it('renders the chevron without a fill or a border', () => {
+    const tree = renderButton();
+    const nodes = tree.root.findAll(
+      (node) =>
+        node.props.testID === HEADER_BACK_BUTTON_TEST_ID &&
+        typeof node.props.style === 'function',
+    );
+    const flat = StyleSheet.flatten(
+      nodes[nodes.length - 1].props.style({ pressed: false }),
+    );
+    expect(flat.backgroundColor).toBe('transparent');
+    expect(flat.borderColor).toBe('transparent');
+  });
+
+  it('draws the chevron in the header title color', () => {
+    expect(chevron(renderButton()).props.color).toBe(
+      darkTheme.colors.textPrimary,
+    );
   });
 });

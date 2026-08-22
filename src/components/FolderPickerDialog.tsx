@@ -143,11 +143,14 @@ export function FolderPickerDialog({
             <Ionicons
               name="add"
               size={18}
-              color={theme.colors.accent}
+              color={theme.colors.accentForeground}
               style={styles.optionIcon}
             />
             <Text
-              style={[theme.typography.body, { color: theme.colors.accent }]}
+              style={[
+                theme.typography.body,
+                { color: theme.colors.accentForeground },
+              ]}
             >
               New folder…
             </Text>

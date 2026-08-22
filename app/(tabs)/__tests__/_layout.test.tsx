@@ -51,6 +51,15 @@ describe('TabLayout', () => {
     expect((mockScreens[0].options as { title: string }).title).toBe('Library');
   });
 
+  it('renders the settings button without header chrome', () => {
+    // Same reasoning as the stack headers' back button: a filled tile has
+    // nothing to separate itself from in a bare header bar.
+    const options = mockScreens[0].options as {
+      headerRight: () => React.ReactElement<{ variant: string }>;
+    };
+    expect(options.headerRight().props.variant).toBe('ghost');
+  });
+
   it('navigates to the Settings screen from the header button', () => {
     const options = mockScreens[0].options as {
       headerRight: () => React.ReactElement<{ onPress: () => void }>;

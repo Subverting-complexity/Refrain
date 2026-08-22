@@ -153,4 +153,50 @@ describe('IconSquareButton', () => {
     const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
     expect(icon.props.color).toBe(darkTheme.colors.textSecondary);
   });
+
+  describe('ghost variant', () => {
+    it('drops the fill and the border', () => {
+      const tree = renderButton({ variant: 'ghost' });
+      const node = findHost(tree);
+      const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
+      expect(flat.backgroundColor).toBe('transparent');
+      expect(flat.borderColor).toBe('transparent');
+    });
+
+    it('keeps the full touch target', () => {
+      // The border goes transparent rather than away, so a ghost button
+      // occupies and responds over the same area as a filled one.
+      const tree = renderButton({ variant: 'ghost' });
+      const node = findHost(tree);
+      const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
+      expect(flat.width).toBe(44);
+      expect(flat.height).toBe(44);
+      expect(flat.borderWidth).toBe(1);
+    });
+
+    it('draws the icon in the primary text color', () => {
+      // With no fill behind it the icon has to read as a peer of the
+      // header title, which the dimmer secondary color does not manage.
+      const tree = renderButton({ variant: 'ghost' });
+      const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
+      expect(icon.props.color).toBe(darkTheme.colors.textPrimary);
+    });
+
+    it('still fills when active, because the fill is the on-state', () => {
+      const tree = renderButton({ variant: 'ghost', active: true });
+      const node = findHost(tree);
+      const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
+      expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
+      expect(flat.borderColor).toBe(darkTheme.colors.accent);
+      const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
+      expect(icon.props.color).toBe(darkTheme.colors.accentText);
+    });
+
+    it('is not the default', () => {
+      const tree = renderButton();
+      const node = findHost(tree);
+      const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
+      expect(flat.backgroundColor).toBe(darkTheme.colors.surface);
+    });
+  });
 });

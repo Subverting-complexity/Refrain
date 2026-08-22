@@ -41,7 +41,7 @@ export function SnippetPreviewSettings({
           <Ionicons
             name="headset-outline"
             size={18}
-            color={theme.colors.accent}
+            color={theme.colors.accentForeground}
           />
           <Text
             style={[theme.typography.body, { color: theme.colors.textPrimary }]}

@@ -22,7 +22,12 @@ export default function NotFoundScreen() {
           onPress={() => router.replace('/')}
           style={styles.link}
         >
-          <Text style={[theme.typography.body, { color: theme.colors.accent }]}>
+          <Text
+            style={[
+              theme.typography.body,
+              { color: theme.colors.accentForeground },
+            ]}
+          >
             Go to home
           </Text>
         </AccessiblePressable>

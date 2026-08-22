@@ -23,8 +23,11 @@ export default function TabLayout() {
         options={{
           title: 'Library',
           headerRight: () => (
+            // Ghost, like the stack headers' back button: a filled tile
+            // has nothing to separate itself from up here.
             <IconSquareButton
               icon="settings-outline"
+              variant="ghost"
               accessibilityLabel="Settings"
               onPress={() => router.push('/settings')}
             />

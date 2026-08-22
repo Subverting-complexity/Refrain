@@ -46,7 +46,23 @@ export const WaveformBars = React.memo(function WaveformBars({
   loopActive,
 }: WaveformBarsProps) {
   const { theme } = useTheme();
-  const accent = theme.colors.accent;
+  // The foreground accent, not the fill accent: these are translucent
+  // tints laid over `surface`, and a fill-weight accent washes out badly
+  // at low alpha on a light surface.
+  //
+  // This lifts the played tier against a light surface from 1.66..2.89 to
+  // 2.12..5.41 — a range, not a figure, because the tier's alpha is graded
+  // by amplitude, so a quiet played bar sits at the bottom of it and only
+  // a peak reaches the top. It does *not* rescue the two quiet tiers: the
+  // dull tier still sits at 1.18 and the loop-unplayed tier at 1.54, so
+  // the loop window is conveyed by a difference too fine to rely on.
+  //
+  // Fixing that means retuning the alphas, which are shared with dark
+  // mode. Dark is better on both readings — its tiers sit at 1.32 and
+  // 2.07 against its surface, and its steps between tiers are 1.56 and
+  // 1.60 against light's 1.30 and 1.38 — but "better" is not "enough",
+  // and the alphas cannot move for one theme alone. See #268.
+  const accent = theme.colors.accentForeground;
   const denom = peaks.length;
 
   return (

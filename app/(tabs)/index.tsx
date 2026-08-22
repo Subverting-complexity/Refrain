@@ -457,7 +457,7 @@ export default function LibraryScreen() {
               <Ionicons
                 name="folder-open-outline"
                 size={22}
-                color={theme.colors.accent}
+                color={theme.colors.accentForeground}
               />
             </AccessiblePressable>
             <ImportButton onPress={handleImport} loading={importing} />
@@ -497,8 +497,8 @@ export default function LibraryScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              tintColor={theme.colors.accent}
-              colors={[theme.colors.accent]}
+              tintColor={theme.colors.accentForeground}
+              colors={[theme.colors.accentForeground]}
             />
           }
         />
