@@ -8,7 +8,7 @@ text, release notes, keywords).
 
 It does not govern code comments, commit messages, pull request bodies, or
 anything written in chat. Those have their own audience and their own
-conventions, set by `CLAUDE.md`.
+conventions, set by [`docs/writing-style.md`](./writing-style.md).
 
 Ported from a sibling app's writing guide; the rules are general, the
 examples below are Refrain's own.

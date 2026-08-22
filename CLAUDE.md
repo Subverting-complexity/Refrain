@@ -67,3 +67,4 @@ relevant to what you're working on.
 | `fastlane/PUBLISHING.md`     | What store publishing automates vs. what is console-only. Read before touching store metadata or running fastlane.                                                |
 | `fastlane/QUESTIONNAIRES.md` | Prepared answers for every App Store Connect and Play Console questionnaire, with the code evidence behind each. Read before filling anything in a store console. |
 | `docs/ui-writing-style.md`   | House style for on-screen copy and store listing text: plain, no em dashes, no personification. Read before writing UI strings or editing `fastlane/metadata/`.   |
+| `docs/writing-style.md`      | House style for prose communication: updates, docs, emails, chat, tickets, release notes. Read before drafting any written communication outside of UI strings.   |
