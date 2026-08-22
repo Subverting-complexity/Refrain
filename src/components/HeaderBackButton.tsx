@@ -1,5 +1,5 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { spacing } from '../theme';
@@ -7,6 +7,13 @@ import { IconSquareButton } from './IconSquareButton';
 
 /** Stable handle for tests to target the back button. */
 export const HEADER_BACK_BUTTON_TEST_ID = 'header-back-button';
+
+/**
+ * How long a press suppresses the next one. Long enough to cover the
+ * queue flush and pop transition that a double tap races, short enough
+ * that it is imperceptible if the pop turns out to be blocked.
+ */
+export const POP_GUARD_MS = 500;
 
 /**
  * Icon-only back button for stack headers.
@@ -26,27 +33,41 @@ export const HEADER_BACK_BUTTON_TEST_ID = 'header-back-button';
 export function HeaderBackButton() {
   const router = useRouter();
   const popping = useRef(false);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // A popped screen unmounts, so the latch below normally resets by
-  // itself. Clear it on focus as well, so a press that never resulted in
-  // a pop cannot leave the button permanently dead.
-  useFocusEffect(
-    useCallback(() => {
-      popping.current = false;
-    }, []),
-  );
+  useEffect(() => {
+    return () => {
+      if (releaseTimer.current) {
+        clearTimeout(releaseTimer.current);
+      }
+    };
+  }, []);
 
   const handlePress = () => {
-    // `router.back()` only adds a GO_BACK action to expo-router's routing
-    // queue, which is dispatched later in an effect — and the queue does
-    // not deduplicate. So a second press before that flush queues a
-    // second pop and takes two screens off the stack. The platform back
-    // button disables itself during the transition; this one has to latch
-    // instead, because `canGoBack()` still reads true mid-stack.
+    // `router.back()` does not pop: it appends a GO_BACK action to
+    // expo-router's routing queue, which is flushed later from an effect
+    // and does not deduplicate. A second press before that flush queues a
+    // second pop and takes two screens off the stack, because
+    // `canGoBack()` still reads true mid-stack. The platform back button
+    // gets this for free by disabling itself for the transition; this one
+    // has to latch.
     if (popping.current || !router.canGoBack()) {
       return;
     }
     popping.current = true;
+
+    // Release on a timer rather than on regaining focus. A pop can be
+    // cancelled without the screen ever blurring — the player's
+    // unsaved-edits guard calls `preventDefault()` on `beforeRemove` and
+    // shows a dialog in the same route — and a focus-based release would
+    // never fire there, leaving the button dead for the life of the
+    // screen. A pop that does succeed unmounts this component, and the
+    // effect above clears the pending timer.
+    releaseTimer.current = setTimeout(() => {
+      popping.current = false;
+      releaseTimer.current = null;
+    }, POP_GUARD_MS);
+
     router.back();
   };
 
@@ -66,8 +87,7 @@ const styles = StyleSheet.create({
   container: {
     // Android lays a custom header-left element and the title out in one
     // row with no gap between them, so the title would sit flush against
-    // the button. iOS and web space bar items themselves. `marginEnd`
-    // rather than `marginRight` so it follows the writing direction.
-    marginEnd: Platform.OS === 'android' ? spacing.md : 0,
+    // the button. iOS and web space bar items themselves.
+    marginRight: Platform.OS === 'android' ? spacing.md : 0,
   },
 });

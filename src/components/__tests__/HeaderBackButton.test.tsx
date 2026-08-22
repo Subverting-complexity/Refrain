@@ -4,27 +4,14 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import {
   HEADER_BACK_BUTTON_TEST_ID,
   HeaderBackButton,
+  POP_GUARD_MS,
 } from '../HeaderBackButton';
 
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
-/** Focus callbacks registered via the mocked `useFocusEffect`. */
-const focusCallbacks: (() => void)[] = [];
-
-jest.mock('expo-router', () => {
-  const ReactLocal = require('react');
-  return {
-    useRouter: () => ({ back: mockBack, canGoBack: mockCanGoBack }),
-    // Stand in for a screen that is focused on mount: run the effect, and
-    // keep it so a test can simulate the screen being focused again.
-    useFocusEffect: (effect: () => void) => {
-      ReactLocal.useEffect(() => {
-        focusCallbacks.push(effect);
-        effect();
-      }, [effect]);
-    },
-  };
-});
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ back: mockBack, canGoBack: mockCanGoBack }),
+}));
 
 jest.mock('@expo/vector-icons', () => {
   const { View } = require('react-native');
@@ -68,9 +55,13 @@ function textContentOf(node: unknown): string[] {
 
 describe('HeaderBackButton', () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
     mockCanGoBack.mockReturnValue(true);
-    focusCallbacks.length = 0;
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('renders a button labelled Go back', () => {
@@ -111,7 +102,6 @@ describe('HeaderBackButton', () => {
       press();
       press();
     });
-    expect(mockCanGoBack()).toBe(true);
     expect(mockBack).toHaveBeenCalledTimes(1);
   });
 
@@ -122,15 +112,38 @@ describe('HeaderBackButton', () => {
     expect(mockBack).not.toHaveBeenCalled();
   });
 
-  it('works again when the screen is focused after a pop that did not happen', () => {
-    const tree = renderButton();
-    const press = pressHandler(tree);
+  it('works again once the guard window passes on a pop that was blocked', () => {
+    // A pop can be cancelled without the screen ever blurring: the
+    // player's unsaved-edits guard prevents `beforeRemove` and shows a
+    // dialog in the same route. Releasing on focus would never fire
+    // there, so the button has to come back on its own.
+    const press = pressHandler(renderButton());
     act(() => press());
     expect(mockBack).toHaveBeenCalledTimes(1);
 
-    // The screen is still here, so it regains focus rather than unmounting.
-    act(() => focusCallbacks.forEach((cb) => cb()));
+    act(() => {
+      jest.advanceTimersByTime(POP_GUARD_MS);
+    });
     act(() => press());
     expect(mockBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('still suppresses a second press just before the window closes', () => {
+    const press = pressHandler(renderButton());
+    act(() => press());
+    act(() => {
+      jest.advanceTimersByTime(POP_GUARD_MS - 1);
+    });
+    act(() => press());
+    expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears its pending timer on unmount', () => {
+    const tree = renderButton();
+    act(() => pressHandler(tree)());
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
+    act(() => tree.unmount());
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
   });
 });

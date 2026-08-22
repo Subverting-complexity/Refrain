@@ -23,9 +23,6 @@ jest.mock('expo-router', () => {
     Stack,
     ErrorBoundary: () => null,
     useRouter: () => ({ back: jest.fn(), canGoBack: mockCanGoBack }),
-    useFocusEffect: (effect: () => void) => {
-      ReactLocal.useEffect(effect, [effect]);
-    },
   };
 });
 
@@ -89,9 +86,7 @@ describe('RootLayout header options', () => {
   });
 
   it('renders the app back button when the stack can go back', () => {
-    const headerLeft = screenOptions().headerLeft as (props: {
-      canGoBack: boolean;
-    }) => React.ReactElement | null;
+    const headerLeft = headerLeftOption();
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(<>{headerLeft({ canGoBack: true })}</>);
@@ -106,10 +101,7 @@ describe('RootLayout header options', () => {
     // Returning a real null (rather than a component that renders null)
     // keeps the navigator from creating an empty header-left view, which
     // on Android would displace the title out of the native toolbar.
-    const headerLeft = screenOptions().headerLeft as (props: {
-      canGoBack: boolean;
-    }) => React.ReactElement | null;
-    expect(headerLeft({ canGoBack: false })).toBeNull();
+    expect(headerLeftOption()({ canGoBack: false })).toBeNull();
   });
 
   it('supplies no header-left element when canGoBack is absent', () => {
