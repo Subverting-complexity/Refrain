@@ -41,7 +41,7 @@ export function CountdownOverlay({
       <View
         style={[styles.backdrop, { backgroundColor: theme.colors.background }]}
       />
-      <Text style={[styles.numeral, { color: theme.colors.accent }]}>
+      <Text style={[styles.numeral, { color: theme.colors.accentForeground }]}>
         {display}
       </Text>
     </View>

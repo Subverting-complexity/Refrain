@@ -24,8 +24,10 @@ export const POP_GUARD_MS = 500;
  * route name. (Android's is already icon-only.) This replaces all of them
  * with one fixed square carrying a chevron.
  *
- * It reuses `IconSquareButton`, the bordered square this app already uses
- * for icon actions, rather than introducing another button style.
+ * It reuses `IconSquareButton`, the square this app already uses for icon
+ * actions, rather than introducing another button style — in its `ghost`
+ * variant, so the chevron sits in the header bar as a peer of the title
+ * rather than as a filled tile floating in it.
  *
  * Render it only where there is somewhere to go back to — the `headerLeft`
  * option in `app/_layout.tsx` gates it on the navigator's own `canGoBack`.
@@ -75,6 +77,7 @@ export function HeaderBackButton() {
     <View style={styles.container}>
       <IconSquareButton
         icon="chevron-back"
+        variant="ghost"
         accessibilityLabel="Go back"
         onPress={handlePress}
         testID={HEADER_BACK_BUTTON_TEST_ID}

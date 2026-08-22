@@ -46,7 +46,11 @@ export const WaveformBars = React.memo(function WaveformBars({
   loopActive,
 }: WaveformBarsProps) {
   const { theme } = useTheme();
-  const accent = theme.colors.accent;
+  // The foreground accent, not the fill accent: these are translucent
+  // tints laid over `surface`, and the palest tier sits at 12% opacity. A
+  // fill-weight accent disappears at that alpha on a light surface, which
+  // is what made the light-mode waveform read as blank.
+  const accent = theme.colors.accentForeground;
   const denom = peaks.length;
 
   return (

@@ -27,7 +27,11 @@ export function Toast({
   }
 
   const isError = variant === 'error';
-  const accentColor = isError ? theme.colors.error : theme.colors.accent;
+  // The banner is a `surface` card, so the icon and its border need the
+  // foreground accent — the fill accent is too pale to read on it.
+  const accentColor = isError
+    ? theme.colors.error
+    : theme.colors.accentForeground;
   const iconName = isError ? 'alert-circle' : 'checkmark-circle';
 
   return (

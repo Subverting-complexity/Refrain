@@ -457,7 +457,7 @@ export default function LibraryScreen() {
               <Ionicons
                 name="folder-open-outline"
                 size={22}
-                color={theme.colors.accent}
+                color={theme.colors.accentForeground}
               />
             </AccessiblePressable>
             <ImportButton onPress={handleImport} loading={importing} />

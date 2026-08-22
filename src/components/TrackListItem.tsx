@@ -207,7 +207,7 @@ export function TrackListItem({
               <Ionicons
                 name="musical-note"
                 size={20}
-                color={theme.colors.accent}
+                color={theme.colors.accentForeground}
               />
             </View>
             <View style={listRowStyles.info}>
@@ -232,7 +232,7 @@ export function TrackListItem({
               <Ionicons
                 name="star"
                 size={16}
-                color={theme.colors.accent}
+                color={theme.colors.accentForeground}
                 style={styles.star}
                 accessibilityElementsHidden
                 importantForAccessibility="no"

@@ -46,7 +46,7 @@ export function SkipControls({
         <Ionicons
           name="play-skip-forward-outline"
           size={16}
-          color={theme.colors.accent}
+          color={theme.colors.accentForeground}
         />
         <Text
           style={[
