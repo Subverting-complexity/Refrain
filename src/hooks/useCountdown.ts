@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import * as countdownEngine from '../services/countdownEngine';
+import {
+  DEFAULT_COUNTDOWN_CONFIG,
+  getCountdownConfig,
+  sanitizeCountdownConfig,
+  setCountdownConfig as writeCountdownConfig,
+} from '../services/countdownStore';
 import { CountdownConfig, CountdownState } from '../types';
 import { useEngineSubscription } from './useEngineSubscription';
 import { useLatestRef } from './useLatestRef';
+import { usePersistedSetting } from './usePersistedSetting';
 
-const DEFAULT_CONFIG: CountdownConfig = {
-  enabled: false,
-  mode: 'silent',
-  duration: { type: 'seconds', seconds: 3 },
-  repeat: 'once',
+const COUNTDOWN_SETTING = {
+  read: getCountdownConfig,
+  write: writeCountdownConfig,
+  fallback: DEFAULT_COUNTDOWN_CONFIG,
 };
 
 const IDLE_STATE: CountdownState = {
@@ -29,7 +35,19 @@ export function useCountdown({ onPlay }: UseCountdownOptions) {
     countdownEngine.subscribe,
     IDLE_STATE,
   );
-  const [config, setConfig] = useState<CountdownConfig>(DEFAULT_CONFIG);
+  // Persisted so a configured lead-in survives leaving the player screen, a
+  // track change and a reload, like every other playback preference. Held in
+  // component state it reset to "off" on each return to the player.
+  const [config, setValue] = usePersistedSetting(COUNTDOWN_SETTING);
+
+  // Snap here as well as in the store so state and storage never disagree: an
+  // off-list length must not sit in React state waiting for the next reload to
+  // correct it. Mirrors `useSkipInterval`.
+  const setConfig = useCallback(
+    (next: CountdownConfig) => setValue(sanitizeCountdownConfig(next)),
+    [setValue],
+  );
+
   // Keep the latest config/onPlay in refs so the stable callbacks below read
   // current values without being rebuilt.
   const configRef = useLatestRef(config);
