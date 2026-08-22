@@ -23,6 +23,9 @@ jest.mock('expo-router', () => {
     Stack,
     ErrorBoundary: () => null,
     useRouter: () => ({ back: jest.fn(), canGoBack: mockCanGoBack }),
+    useFocusEffect: (effect: () => void) => {
+      ReactLocal.useEffect(effect, [effect]);
+    },
   };
 });
 
@@ -69,6 +72,12 @@ function screenOptions(): Record<string, unknown> {
   return mockStackOptions.mock.calls[0][0];
 }
 
+type HeaderLeftOption = (props: { canGoBack?: boolean }) => React.ReactNode;
+
+function headerLeftOption(): HeaderLeftOption {
+  return screenOptions().headerLeft as HeaderLeftOption;
+}
+
 describe('RootLayout header options', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -101,5 +110,10 @@ describe('RootLayout header options', () => {
       canGoBack: boolean;
     }) => React.ReactElement | null;
     expect(headerLeft({ canGoBack: false })).toBeNull();
+  });
+
+  it('supplies no header-left element when canGoBack is absent', () => {
+    // `canGoBack` is optional on the navigator's props type.
+    expect(headerLeftOption()({})).toBeNull();
   });
 });
