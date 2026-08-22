@@ -54,9 +54,9 @@ outstanding submission blockers.
    is a placeholder — set a real number Apple review can reach.
 3. **Categories**: `metadata/primary_category.txt` = `MZGenre.Music`,
    secondary `MZGenre.Education`. Adjust if you prefer.
-4. **App Store name**: the canonical iOS display name is `Refrain: Audio
-   Looper` (`metadata/en-US/name.txt`), matching App Store Connect. The Play
-   listing title is `Refrain: A/B Loop Player`
+4. **App Store name**: the canonical iOS display name is
+   `Refrain: Audio Looper` (`metadata/en-US/name.txt`), matching App Store
+   Connect. The Play listing title is `Refrain: A/B Loop Player`
    (`metadata/android/en-US/title.txt`) — the two stores intentionally carry
    different titles; don't reconcile them to match each other.
 

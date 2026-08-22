@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { HeaderBackButton } from '@/src/components/HeaderBackButton';
 import { useTheme } from '@/src/hooks/useTheme';
 import { ThemeProvider } from '@/src/theme/ThemeProvider';
 
@@ -26,6 +27,14 @@ function RootLayoutNav() {
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
           contentStyle: { backgroundColor: theme.colors.background },
+          // Replace the platform back button, which is labelled with the
+          // previous screen's title, with the app's own icon-only control.
+          // Set here so every pushed screen inherits it. Gated on the
+          // navigator's own `canGoBack` so a screen with nothing beneath
+          // it gets no header-left element at all.
+          headerBackVisible: false,
+          headerLeft: ({ canGoBack }) =>
+            canGoBack ? <HeaderBackButton /> : null,
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
