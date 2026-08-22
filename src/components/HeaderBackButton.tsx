@@ -103,7 +103,9 @@ export function HeaderBackButton() {
  * it. `UIBarButtonItem.hidesSharedBackground` turns the capsule off, and
  * `unstable_headerLeftItems` is the only option expo-router routes
  * through to it, so on iOS the button goes in as a custom header item
- * with that flag set.
+ * with that flag set. That option carries expo-router's `unstable_`
+ * prefix, so an SDK upgrade is a good moment to check it still exists
+ * and still reaches `hidesSharedBackground`.
  *
  * Android and web have no shared background and ignore
  * `unstable_headerLeftItems` entirely, so they keep the plain

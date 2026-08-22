@@ -180,6 +180,27 @@ describe('HeaderBackButton', () => {
 });
 
 describe('headerBackButtonOptions', () => {
+  let replacedPlatform: { restore: () => void } | undefined;
+
+  /**
+   * Runs the rest of the test as though it were on `os`.
+   *
+   * The replacement is undone by hand in `afterEach`. Jest does not
+   * restore it on its own here: `restoreMocks` is off, and
+   * `jest.restoreAllMocks()` would also undo the `Animated.timing` spy
+   * that `jest.setup.js` installs for every suite. Left in place, the
+   * last platform set here would silently apply to any test added after
+   * this block.
+   */
+  function onPlatform(os: 'ios' | 'android' | 'web'): void {
+    replacedPlatform = jest.replaceProperty(Platform, 'OS', os);
+  }
+
+  afterEach(() => {
+    replacedPlatform?.restore();
+    replacedPlatform = undefined;
+  });
+
   /** Renders a header-left element and reports whether it holds the button. */
   function hasBackButton(element: React.ReactNode): boolean {
     let tree!: ReactTestRenderer;
@@ -194,7 +215,7 @@ describe('headerBackButtonOptions', () => {
 
   describe('on iOS', () => {
     beforeEach(() => {
-      jest.replaceProperty(Platform, 'OS', 'ios');
+      onPlatform('ios');
     });
 
     // iOS 26 wraps a plain `headerLeft` view in the navigation bar's
@@ -238,7 +259,7 @@ describe('headerBackButtonOptions', () => {
 
   describe.each(['android', 'web'] as const)('on %s', (platform) => {
     beforeEach(() => {
-      jest.replaceProperty(Platform, 'OS', platform);
+      onPlatform(platform);
     });
 
     // Neither platform has a shared background, and both ignore
