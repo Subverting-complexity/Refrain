@@ -4,6 +4,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import PlayerScreen from '../player';
 import { updateTrackDuration } from '@/src/services/trackStore';
+import { CountdownConfig } from '@/src/types';
 
 const mockSetMarkerB = jest.fn<boolean, [number]>();
 
@@ -105,10 +106,16 @@ jest.mock('@/src/hooks/useSkipInterval', () => ({
   SKIP_PRESETS: [1, 3, 5, 10, 15, 30, 60, 300],
 }));
 
+// Mutable so a test can start the screen with a count-in config already in
+// force. Since the config became persisted (#262) that is a real starting
+// state, not just something a tap can reach: the player can now mount with
+// `everyLoop` already set, which registers the loop-restart handler
+// immediately rather than after an interaction.
+let mockCountdownConfig: Partial<CountdownConfig> = {};
 jest.mock('@/src/hooks/useCountdown', () => ({
   useCountdown: () => ({
     countdownState: { phase: 'idle' },
-    countdownConfig: {},
+    countdownConfig: mockCountdownConfig,
     setCountdownConfig: jest.fn(),
     playWithCountdown: jest.fn(),
     cancelCountdown: jest.fn(),
@@ -285,6 +292,7 @@ beforeEach(() => {
   mockSaveDialogProps = null;
   mockGuardProps = null;
   mockBeforeRemoveCb = null;
+  mockCountdownConfig = {};
   mockParams.trackId = 't1';
   mockParams.uri = 'file:///test.mp3';
   mockUseAudioPlayerArgs = [];
@@ -462,6 +470,52 @@ describe('PlayerScreen header title', () => {
     });
 
     expect(mockSetOptions).toHaveBeenCalledWith({ title: 'test.mp3' });
+  });
+});
+
+// The count-in config is persisted (#262), so the screen can mount with one
+// already in force rather than only reaching that state through a tap. These
+// pin what the loop-restart registration does on that first render.
+describe('PlayerScreen count-in loop handler', () => {
+  it('registers the loop-restart handler on mount for a persisted everyLoop count-in', () => {
+    mockCountdownConfig = {
+      enabled: true,
+      mode: 'metronome',
+      duration: { type: 'seconds', seconds: 3 },
+      repeat: 'everyLoop',
+    };
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    // A function, not null: the engine pauses at A and hands off to the
+    // count-in on every loop pass.
+    const registered =
+      mockAudioPlayerState.setLoopRestartHandler.mock.calls.at(-1)?.[0];
+    expect(typeof registered).toBe('function');
+  });
+
+  it('leaves the loop seamless for a persisted count-in set to once', () => {
+    mockCountdownConfig = {
+      enabled: true,
+      mode: 'metronome',
+      duration: { type: 'seconds', seconds: 3 },
+      repeat: 'once',
+    };
+
+    act(() => {
+      create(<PlayerScreen />);
+    });
+
+    expect(mockAudioPlayerState.setLoopRestartHandler).toHaveBeenCalledWith(
+      null,
+    );
+    expect(
+      mockAudioPlayerState.setLoopRestartHandler.mock.calls.every(
+        ([handler]: [unknown]) => handler === null,
+      ),
+    ).toBe(true);
   });
 });
 
