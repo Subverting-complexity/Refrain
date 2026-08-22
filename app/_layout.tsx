@@ -27,11 +27,14 @@ function RootLayoutNav() {
           headerTintColor: theme.colors.textPrimary,
           headerShadowVisible: false,
           contentStyle: { backgroundColor: theme.colors.background },
-          // Replace the platform back button — a pill carrying the
-          // previous screen's title — with the app's own icon-only
-          // control. Set here so every pushed screen inherits it.
+          // Replace the platform back button, which is labelled with the
+          // previous screen's title, with the app's own icon-only control.
+          // Set here so every pushed screen inherits it. Gated on the
+          // navigator's own `canGoBack` so a screen with nothing beneath
+          // it gets no header-left element at all.
           headerBackVisible: false,
-          headerLeft: () => <HeaderBackButton />,
+          headerLeft: ({ canGoBack }) =>
+            canGoBack ? <HeaderBackButton /> : null,
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

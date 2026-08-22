@@ -79,15 +79,27 @@ describe('RootLayout header options', () => {
     expect(screenOptions().headerBackVisible).toBe(false);
   });
 
-  it('supplies the app back button as the header left element', () => {
-    const headerLeft = screenOptions().headerLeft as () => React.ReactElement;
+  it('renders the app back button when the stack can go back', () => {
+    const headerLeft = screenOptions().headerLeft as (props: {
+      canGoBack: boolean;
+    }) => React.ReactElement | null;
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(headerLeft());
+      tree = create(<>{headerLeft({ canGoBack: true })}</>);
     });
     const buttons = tree.root.findAll(
       (node) => node.props.accessibilityLabel === 'Go back',
     );
     expect(buttons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('supplies no header-left element when there is nothing beneath', () => {
+    // Returning a real null (rather than a component that renders null)
+    // keeps the navigator from creating an empty header-left view, which
+    // on Android would displace the title out of the native toolbar.
+    const headerLeft = screenOptions().headerLeft as (props: {
+      canGoBack: boolean;
+    }) => React.ReactElement | null;
+    expect(headerLeft({ canGoBack: false })).toBeNull();
   });
 });
