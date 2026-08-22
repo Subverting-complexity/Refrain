@@ -34,9 +34,13 @@ const ELEVATION_MIN = 1.15;
 /**
  * How far an outline has to sit from what surrounds it. Well below the
  * 3:1 that 1.4.11 wants for a control identified by its border alone —
- * neither palette reaches that (dark 1.79, light 1.50) and #267 tracks
- * it. This floor only holds the line at what they do manage, so the
- * border cannot quietly drift back towards invisible.
+ * neither palette reaches that and #267 tracks it. This floor only holds
+ * the line at what they do manage.
+ *
+ * Against the page: dark 1.79, light 1.50. Against a card: dark 1.48,
+ * light 1.77. Dark-on-card is the binding case and clears this floor by
+ * 0.03, so the headroom is thin in one direction even though the other
+ * three have room.
  */
 const OUTLINE_MIN = 1.45;
 
@@ -68,19 +72,27 @@ const TEXT_PAIRS: Pair[] = [
   ['the B tile label on a card', 'markerB', 'surface'],
 ];
 
-/** Marks that carry meaning on their own, with no label to identify them. */
+/**
+ * Marks that carry meaning on their own, with no label to identify them.
+ *
+ * Only pairs whose strictest requirement is the 3:1 one belong here. Three
+ * further marks are held to 4.5 by `TEXT_PAIRS` instead, because the same
+ * two tokens also meet as text somewhere: the toggle knob when on
+ * (`accentText` on `accent`, also a label on an accent fill) and the A and
+ * B lines ruled down the waveform card (`markerA`/`markerB` on `surface`,
+ * also the A/B tile labels). Repeating them at 3:1 would add rows that
+ * cannot fail while the stricter ones pass.
+ *
+ * Worth noting for the marker lines: where a line crosses the bars its
+ * backdrop is a tinted bar rather than bare `surface`, so even the
+ * stricter row is not the worst case for them.
+ */
 const NON_TEXT_PAIRS: Pair[] = [
   // The seek and volume fills. Their track is painted in `border`, and
   // the edge between the two is the whole of the position readout.
   ['a slider fill against its track', 'accentForeground', 'border'],
   // The toggle's knob against its off track, which is also `border`.
   ['the toggle knob when off', 'textSecondary', 'border'],
-  ['the toggle knob when on', 'accentText', 'accent'],
-  // The A/B lines ruled down the waveform card. Where a line crosses the
-  // bars it is against a tinted bar rather than bare `surface`, so this
-  // is the easier of the two backdrops, not the worst case.
-  ['the A marker line on the waveform card', 'markerA', 'surface'],
-  ['the B marker line on the waveform card', 'markerB', 'surface'],
 ];
 
 /** Every token asserted above, plus the ones covered by a named test. */

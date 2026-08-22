@@ -25,11 +25,18 @@ function linearize(value: number): number {
 /**
  * Relative luminance of an opaque `#rrggbb` colour, per WCAG 2.1.
  *
- * Six-digit hex only. Anything else — a three-digit hex, an `rgba()`
- * string — yields `NaN` rather than a wrong number, so a caller that
- * passes one fails loudly instead of quietly comparing against garbage.
+ * Six-digit hex only; anything else yields `NaN`. The rejection is
+ * deliberate rather than incidental: an eight-digit `#rrggbbaa` would
+ * otherwise parse happily and return the luminance of the colour *without*
+ * its alpha, which is a plausible-looking number that overstates contrast.
+ * `withAlpha` above produces exactly that form, so the trap is one import
+ * away. Compositing a translucent colour over its backdrop is the caller's
+ * job, and there is no correct single answer to give them here.
  */
 export function luminance(hex: string): number {
+  if (!/^#?[0-9a-fA-F]{6}$/.test(hex)) {
+    return NaN;
+  }
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
