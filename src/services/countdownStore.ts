@@ -72,16 +72,16 @@ export const COUNTDOWN_SECONDS_PRESETS = [1, 3, 5, 10, 15, 30] as const;
 export type CountdownSecondsPreset = (typeof COUNTDOWN_SECONDS_PRESETS)[number];
 
 /** Selectable bar counts, matching the `bars` arm of {@link CountdownDuration}. */
-export const COUNTDOWN_BARS_PRESETS = [1, 2, 4] as const;
+const COUNTDOWN_BARS_PRESETS = [1, 2, 4] as const;
 
 /** A bar count the duration type can represent. */
 export type CountdownBarsPreset = (typeof COUNTDOWN_BARS_PRESETS)[number];
 
 /** Lead-in length used when nothing usable is stored. */
-export const DEFAULT_COUNTDOWN_SECONDS: CountdownSecondsPreset = 3;
+const DEFAULT_COUNTDOWN_SECONDS: CountdownSecondsPreset = 3;
 
 /** Bar count used when a bars duration is stored without a usable amount. */
-export const DEFAULT_COUNTDOWN_BARS: CountdownBarsPreset = 1;
+const DEFAULT_COUNTDOWN_BARS: CountdownBarsPreset = 1;
 
 /**
  * The config used when nothing usable is stored. Frozen because it is handed
