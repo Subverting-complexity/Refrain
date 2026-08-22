@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 
+import { headerBackButtonOptions } from '@/src/components/HeaderBackButton';
+
 import RootLayout from '../_layout';
 
 const mockStackOptions = jest.fn();
@@ -69,12 +71,6 @@ function screenOptions(): Record<string, unknown> {
   return mockStackOptions.mock.calls[0][0];
 }
 
-type HeaderLeftOption = (props: { canGoBack?: boolean }) => React.ReactNode;
-
-function headerLeftOption(): HeaderLeftOption {
-  return screenOptions().headerLeft as HeaderLeftOption;
-}
-
 describe('RootLayout header options', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -85,27 +81,16 @@ describe('RootLayout header options', () => {
     expect(screenOptions().headerBackVisible).toBe(false);
   });
 
-  it('renders the app back button when the stack can go back', () => {
-    const headerLeft = headerLeftOption();
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(<>{headerLeft({ canGoBack: true })}</>);
-    });
-    const buttons = tree.root.findAll(
-      (node) => node.props.accessibilityLabel === 'Go back',
-    );
-    expect(buttons.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('supplies no header-left element when there is nothing beneath', () => {
-    // Returning a real null (rather than a component that renders null)
-    // keeps the navigator from creating an empty header-left view, which
-    // on Android would displace the title out of the native toolbar.
-    expect(headerLeftOption()({ canGoBack: false })).toBeNull();
-  });
-
-  it('supplies no header-left element when canGoBack is absent', () => {
-    // `canGoBack` is optional on the navigator's props type.
-    expect(headerLeftOption()({})).toBeNull();
+  // Which option carries the back button depends on the platform, so the
+  // layout only has to spread in whatever the button's own module gives
+  // it. `HeaderBackButton.test.tsx` covers the per-platform shapes and
+  // what each one renders.
+  it('spreads in the app back button options', () => {
+    const options = screenOptions();
+    const keys = Object.keys(headerBackButtonOptions());
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(typeof options[key]).toBe('function');
+    }
   });
 });

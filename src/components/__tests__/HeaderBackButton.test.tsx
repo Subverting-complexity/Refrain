@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { darkTheme } from '../../theme';
@@ -7,6 +7,7 @@ import { darkTheme } from '../../theme';
 import {
   HEADER_BACK_BUTTON_TEST_ID,
   HeaderBackButton,
+  headerBackButtonOptions,
   POP_GUARD_MS,
 } from '../HeaderBackButton';
 
@@ -175,5 +176,87 @@ describe('HeaderBackButton', () => {
     expect(chevron(renderButton()).props.color).toBe(
       darkTheme.colors.textPrimary,
     );
+  });
+});
+
+describe('headerBackButtonOptions', () => {
+  /** Renders a header-left element and reports whether it holds the button. */
+  function hasBackButton(element: React.ReactNode): boolean {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<>{element}</>);
+    });
+    return (
+      tree.root.findAll((node) => node.props.accessibilityLabel === 'Go back')
+        .length > 0
+    );
+  }
+
+  describe('on iOS', () => {
+    beforeEach(() => {
+      jest.replaceProperty(Platform, 'OS', 'ios');
+    });
+
+    // iOS 26 wraps a plain `headerLeft` view in the navigation bar's
+    // shared background, which paints as a light capsule over this app's
+    // dark header. Only a custom header item can turn that off.
+    it('supplies the button as a header item, not as headerLeft', () => {
+      const options = headerBackButtonOptions();
+      expect(options.unstable_headerLeftItems).toBeDefined();
+      expect(options.headerLeft).toBeUndefined();
+    });
+
+    it('hides the shared background behind the item', () => {
+      const items = headerBackButtonOptions().unstable_headerLeftItems?.({
+        canGoBack: true,
+      });
+      expect(items).toHaveLength(1);
+      expect(items?.[0]).toMatchObject({
+        type: 'custom',
+        hidesSharedBackground: true,
+      });
+    });
+
+    it('carries the app back button as the item element', () => {
+      const item = headerBackButtonOptions().unstable_headerLeftItems?.({
+        canGoBack: true,
+      })?.[0];
+      expect(item?.type).toBe('custom');
+      expect(hasBackButton(item?.type === 'custom' ? item.element : null)).toBe(
+        true,
+      );
+    });
+
+    it('supplies no items when there is nothing beneath', () => {
+      const options = headerBackButtonOptions();
+      expect(options.unstable_headerLeftItems?.({ canGoBack: false })).toEqual(
+        [],
+      );
+      expect(options.unstable_headerLeftItems?.({})).toEqual([]);
+    });
+  });
+
+  describe.each(['android', 'web'] as const)('on %s', (platform) => {
+    beforeEach(() => {
+      jest.replaceProperty(Platform, 'OS', platform);
+    });
+
+    // Neither platform has a shared background, and both ignore
+    // `unstable_headerLeftItems`, so the button goes in as headerLeft.
+    it('supplies the button as headerLeft', () => {
+      const options = headerBackButtonOptions();
+      expect(options.unstable_headerLeftItems).toBeUndefined();
+      expect(hasBackButton(options.headerLeft?.({ canGoBack: true }))).toBe(
+        true,
+      );
+    });
+
+    it('supplies a real null when there is nothing beneath', () => {
+      // A component that renders null still creates a header-left view,
+      // which on Android displaces the title out of the native toolbar.
+      const options = headerBackButtonOptions();
+      expect(options.headerLeft?.({ canGoBack: false })).toBeNull();
+      expect(options.headerLeft?.({})).toBeNull();
+    });
   });
 });
