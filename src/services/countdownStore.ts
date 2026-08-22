@@ -18,19 +18,36 @@ import {
  * a configured lead-in back to off. For a practice looper the count-in is
  * part of the routine, not a per-visit choice.
  *
- * The config has four parts, each under its own key:
+ * The config has four parts, spread over six keys because `duration` needs
+ * three of them:
  *
  *   - `enabled` — whether a count-in runs at all;
  *   - `mode` — a silent lead-in or an audible metronome;
- *   - `duration` — how long the lead-in lasts, either a number of seconds or
- *     a number of bars;
+ *   - `duration` — how long the lead-in lasts. The type key says whether
+ *     seconds or bars are in force, and each amount has its own key;
  *   - `repeat` — before the first play only, or before every loop pass.
  *
- * Separate keys (rather than one serialised blob) match `skipIntervalStore`
- * and buy the same two things: an install that predates any one key keeps
- * everything else it had, and the seconds and bars amounts are both retained
- * across a duration-type switch, so going back restores the amount last
- * picked instead of the default.
+ * Flat scalar keys rather than one serialised blob, because that is how every
+ * other preference in the app is stored (`skipIntervalStore`,
+ * `snippetPreviewStore`, `themeStore`) and `settingsStore` has no JSON helper.
+ * Note this store gains nothing from the forward-compatibility argument that
+ * motivated the split in `skipIntervalStore`: the count-in has never been
+ * persisted before, so no install exists with a partial set of `countdown.*`
+ * keys and there is nothing to migrate. The keys are split for consistency,
+ * and for the amount-retention below.
+ *
+ * Giving seconds and bars their own keys means switching duration type and
+ * back restores the amount last picked rather than the default — the same
+ * reasoning as the skip preference keeping its interval while in `full` mode.
+ * The `bars` arm is part of the {@link CountdownDuration} model and the
+ * count-in engine honours it, but no control currently offers it, so that
+ * path is carried for the model rather than exercised by the UI.
+ *
+ * Because the parts are written separately, a storage failure part-way
+ * through `setCountdownConfig` can leave an older value alongside newer ones.
+ * Every part is independently sanitized on read, so the result is a valid
+ * config with some fields stale rather than a corrupt one, and the next
+ * successful write repairs it.
  *
  * Reads and writes propagate storage failures to the caller, matching the
  * other preference stores. Best-effort recovery is the calling hook's job.
@@ -44,9 +61,10 @@ const BARS_KEY = 'countdown.bars';
 const REPEAT_KEY = 'countdown.repeat';
 
 /**
- * Selectable lead-in lengths in seconds, mirroring the chips in
- * `CountdownSettings`. Seconds read more clearly than musical bars for a
- * practice lead-in and avoid coupling the duration to a tempo.
+ * Selectable lead-in lengths in seconds, and the whole contract for what
+ * counts as a valid one. `CountdownSettings` builds its Length chips from
+ * this list, so the control and the sanitizer below cannot drift: a length
+ * offered on screen is by construction a length that survives a write.
  */
 export const COUNTDOWN_SECONDS_PRESETS = [1, 3, 5, 10, 15, 30] as const;
 
@@ -65,13 +83,20 @@ export const DEFAULT_COUNTDOWN_SECONDS: CountdownSecondsPreset = 3;
 /** Bar count used when a bars duration is stored without a usable amount. */
 export const DEFAULT_COUNTDOWN_BARS: CountdownBarsPreset = 1;
 
-/** The config used when nothing usable is stored. */
-export const DEFAULT_COUNTDOWN_CONFIG: CountdownConfig = {
+/**
+ * The config used when nothing usable is stored. Frozen because it is handed
+ * out as the shared fallback for every reader, so a caller that mutated what
+ * it received would change the default for the rest of the session.
+ */
+export const DEFAULT_COUNTDOWN_CONFIG: CountdownConfig = Object.freeze({
   enabled: false,
   mode: 'silent',
-  duration: { type: 'seconds', seconds: DEFAULT_COUNTDOWN_SECONDS },
+  duration: Object.freeze({
+    type: 'seconds',
+    seconds: DEFAULT_COUNTDOWN_SECONDS,
+  }),
   repeat: 'once',
-};
+} as const);
 
 /**
  * Snaps any stored string onto a known mode; anything unrecognised is

@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
+import { COUNTDOWN_SECONDS_PRESETS } from '../services/countdownStore';
 import { MIN_TOUCH_TARGET, spacing } from '../theme';
 import {
   CountdownConfig,
@@ -18,14 +19,17 @@ interface CountdownSettingsProps {
 
 // Lead-in length presets, in seconds. Seconds read more clearly than musical
 // bars for a practice lead-in, and avoid coupling the duration to the BPM.
-const DURATION_OPTIONS: ChipOption<CountdownDuration>[] = [
-  { label: '1s', value: { type: 'seconds', seconds: 1 } },
-  { label: '3s', value: { type: 'seconds', seconds: 3 } },
-  { label: '5s', value: { type: 'seconds', seconds: 5 } },
-  { label: '10s', value: { type: 'seconds', seconds: 10 } },
-  { label: '15s', value: { type: 'seconds', seconds: 15 } },
-  { label: '30s', value: { type: 'seconds', seconds: 30 } },
-];
+//
+// Derived from the store's preset list rather than written out again, the way
+// `SkipControls` builds its chips from `SKIP_PRESETS`. The store sanitizes a
+// stored length by snapping it onto that same list, so a chip listed here but
+// missing there would persist as the default and never read back as selected —
+// a silent no-op with nothing to catch it. Deriving makes that impossible.
+const DURATION_OPTIONS: ChipOption<CountdownDuration>[] =
+  COUNTDOWN_SECONDS_PRESETS.map((seconds) => ({
+    label: `${seconds}s`,
+    value: { type: 'seconds', seconds },
+  }));
 
 const MODE_OPTIONS: ChipOption<CountdownMode>[] = [
   { label: 'Silent', value: 'silent' },

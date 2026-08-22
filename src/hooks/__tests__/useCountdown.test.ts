@@ -17,6 +17,12 @@ jest.mock('expo-audio', () => ({
 // write-on-change can be asserted without a working SQLite/IndexedDB behind
 // it. The sanitizers stay real — the hook is supposed to route values through
 // them, and a stubbed passthrough would hide it if it stopped.
+//
+// The two are backed by one variable rather than being independent stubs, so
+// a read genuinely returns what a previous write stored. Stubbing the read
+// with the expected answer would make the write inert and the "survives a
+// remount" test below could not fail.
+let mockStored: CountdownConfig;
 const mockGetCountdownConfig = jest.fn<CountdownConfig, []>();
 const mockSetCountdownConfig = jest.fn<void, [CountdownConfig]>();
 
@@ -25,6 +31,16 @@ jest.mock('../../services/countdownStore', () => ({
   getCountdownConfig: () => mockGetCountdownConfig(),
   setCountdownConfig: (config: CountdownConfig) =>
     mockSetCountdownConfig(config),
+}));
+
+// `usePersistedSetting` awaits this before its post-mount re-read. Mocked so
+// the hydration path is under the test's control rather than reaching the real
+// native store (see `useSkipInterval.test.ts`, which does the same).
+const mockHydrateSettings = jest.fn<Promise<void>, []>();
+
+jest.mock('../../services/settingsStore', () => ({
+  ...jest.requireActual('../../services/settingsStore'),
+  hydrateSettings: () => mockHydrateSettings(),
 }));
 
 const STORED_CONFIG: CountdownConfig = {
@@ -42,9 +58,13 @@ function TestComponent() {
   return null;
 }
 
-function renderTestHook(): ReactTestRenderer {
+// Async act so the post-hydration re-read effect (a resolved-promise
+// microtask) flushes before assertions, as in `useSkipInterval.test.ts`.
+// Rendering synchronously leaves that re-read to land after the test has
+// asserted, which both hides the hydration path and logs an act warning.
+async function renderTestHook(): Promise<ReactTestRenderer> {
   let tree!: ReactTestRenderer;
-  act(() => {
+  await act(async () => {
     tree = create(createElement(TestComponent));
   });
   return tree;
@@ -54,26 +74,36 @@ describe('useCountdown', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
-    // Nothing stored unless a test says otherwise.
-    mockGetCountdownConfig.mockReturnValue(DEFAULT_COUNTDOWN_CONFIG);
+    // `clearAllMocks` drops recorded calls but keeps implementations, so a
+    // test that makes the writer throw would poison every test after it
+    // (the same trap `skipIntervalStore.test.ts` documents). Reset both, then
+    // rebuild the stateful store from empty.
+    mockGetCountdownConfig.mockReset();
+    mockSetCountdownConfig.mockReset();
+    mockStored = DEFAULT_COUNTDOWN_CONFIG;
+    mockGetCountdownConfig.mockImplementation(() => mockStored);
+    mockSetCountdownConfig.mockImplementation((config) => {
+      mockStored = config;
+    });
+    mockHydrateSettings.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  it('returns idle state initially', () => {
-    renderTestHook();
+  it('returns idle state initially', async () => {
+    await renderTestHook();
     expect(lastResult.countdownState.phase).toBe('idle');
   });
 
-  it('returns default config with countdown disabled', () => {
-    renderTestHook();
+  it('returns default config with countdown disabled', async () => {
+    await renderTestHook();
     expect(lastResult.countdownConfig.enabled).toBe(false);
   });
 
   it('plays audio directly when countdown is disabled', async () => {
-    renderTestHook();
+    await renderTestHook();
 
     await act(async () => {
       await lastResult.playWithCountdown();
@@ -83,7 +113,7 @@ describe('useCountdown', () => {
   });
 
   it('starts countdown when enabled and play is called', async () => {
-    renderTestHook();
+    await renderTestHook();
 
     const config: CountdownConfig = {
       enabled: true,
@@ -104,7 +134,7 @@ describe('useCountdown', () => {
   });
 
   it('calls audioEngine.play after countdown completes', async () => {
-    renderTestHook();
+    await renderTestHook();
 
     act(() => {
       lastResult.setCountdownConfig({
@@ -128,7 +158,7 @@ describe('useCountdown', () => {
   });
 
   it('cancels countdown', async () => {
-    renderTestHook();
+    await renderTestHook();
 
     act(() => {
       lastResult.setCountdownConfig({
@@ -151,8 +181,8 @@ describe('useCountdown', () => {
     expect(mockPlay).not.toHaveBeenCalled();
   });
 
-  it('updates config', () => {
-    renderTestHook();
+  it('updates config', async () => {
+    await renderTestHook();
 
     act(() => {
       lastResult.setCountdownConfig({
@@ -174,16 +204,16 @@ describe('useCountdown', () => {
   // The count-in used to live in component state, so leaving the player
   // screen dropped it and every return started from "off" again.
   describe('persistence', () => {
-    it('seeds from the stored config on mount', () => {
-      mockGetCountdownConfig.mockReturnValue(STORED_CONFIG);
+    it('seeds from the stored config on mount', async () => {
+      mockStored = STORED_CONFIG;
 
-      renderTestHook();
+      await renderTestHook();
 
       expect(lastResult.countdownConfig).toEqual(STORED_CONFIG);
     });
 
-    it('persists a config change', () => {
-      renderTestHook();
+    it('persists a config change', async () => {
+      await renderTestHook();
 
       act(() => {
         lastResult.setCountdownConfig(STORED_CONFIG);
@@ -192,23 +222,47 @@ describe('useCountdown', () => {
       expect(mockSetCountdownConfig).toHaveBeenCalledWith(STORED_CONFIG);
     });
 
-    it('keeps the configured count-in across a remount of the player screen', () => {
-      renderTestHook();
+    // The regression from #262, end to end: configure the count-in on one
+    // mount of the player, leave, come back, and find it still set. Nothing
+    // here hands the second mount the answer — it reads what the first one
+    // wrote, so removing the write below makes this fail.
+    it('keeps the configured count-in across a remount of the player screen', async () => {
+      const first = await renderTestHook();
 
       act(() => {
         lastResult.setCountdownConfig(STORED_CONFIG);
       });
 
       // Leaving the player unmounts the screen; coming back mounts a fresh
-      // one, which reads the store rather than the previous component.
-      mockGetCountdownConfig.mockReturnValue(STORED_CONFIG);
-      renderTestHook();
+      // one, which has no memory of the previous component's state.
+      act(() => {
+        first.unmount();
+      });
+      await renderTestHook();
 
       expect(lastResult.countdownConfig).toEqual(STORED_CONFIG);
     });
 
-    it('snaps an off-list length before it reaches state or storage', () => {
-      renderTestHook();
+    it('reapplies the stored config once hydration resolves', async () => {
+      // The web cold-load path (#163): the synchronous seed runs while the
+      // settings cache is still filling, so it reads the default, and only
+      // the post-hydration re-read produces the stored value. Modelled by
+      // leaving the store empty until hydration is awaited.
+      let hydrated = false;
+      mockGetCountdownConfig.mockImplementation(() =>
+        hydrated ? STORED_CONFIG : DEFAULT_COUNTDOWN_CONFIG,
+      );
+      mockHydrateSettings.mockImplementation(async () => {
+        hydrated = true;
+      });
+
+      await renderTestHook();
+
+      expect(lastResult.countdownConfig).toEqual(STORED_CONFIG);
+    });
+
+    it('snaps an off-list length before it reaches state or storage', async () => {
+      await renderTestHook();
 
       act(() => {
         lastResult.setCountdownConfig({
@@ -225,22 +279,22 @@ describe('useCountdown', () => {
       expect(mockSetCountdownConfig).toHaveBeenCalledWith(expected);
     });
 
-    it('falls back to the default when the stored config cannot be read', () => {
+    it('falls back to the default when the stored config cannot be read', async () => {
       mockGetCountdownConfig.mockImplementation(() => {
         throw new Error('storage unavailable');
       });
 
-      renderTestHook();
+      await renderTestHook();
 
       expect(lastResult.countdownConfig).toEqual(DEFAULT_COUNTDOWN_CONFIG);
     });
 
-    it('keeps working when the write fails', () => {
+    it('keeps working when the write fails', async () => {
       mockSetCountdownConfig.mockImplementation(() => {
         throw new Error('storage unavailable');
       });
 
-      renderTestHook();
+      await renderTestHook();
 
       expect(() =>
         act(() => {

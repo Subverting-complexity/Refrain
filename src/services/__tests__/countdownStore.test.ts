@@ -215,5 +215,69 @@ describe('countdownStore', () => {
 
       expect(mockStore.get('countdown.seconds')).toBe('3');
     });
+
+    // Pin every key by literal name. The round-trip tests above go through
+    // whatever constant the store uses, so they would still pass if a key were
+    // renamed or made to collide with another store's — `playback.skipSeconds`,
+    // say. These are what would catch that.
+    it('writes each part under its own namespaced key', () => {
+      setCountdownConfig({
+        enabled: true,
+        mode: 'metronome',
+        duration: { type: 'seconds', seconds: 15 },
+        repeat: 'everyLoop',
+      });
+
+      expect(mockStore.get('countdown.enabled')).toBe('true');
+      expect(mockStore.get('countdown.mode')).toBe('metronome');
+      expect(mockStore.get('countdown.durationType')).toBe('seconds');
+      expect(mockStore.get('countdown.seconds')).toBe('15');
+      expect(mockStore.get('countdown.repeat')).toBe('everyLoop');
+    });
+
+    it('writes the bars amount under its own key', () => {
+      setCountdownConfig({
+        ...DEFAULT_COUNTDOWN_CONFIG,
+        duration: { type: 'bars', bars: 4 },
+      });
+
+      expect(mockStore.get('countdown.durationType')).toBe('bars');
+      expect(mockStore.get('countdown.bars')).toBe('4');
+    });
+
+    it('every key it writes sits in the countdown namespace', () => {
+      setCountdownConfig({
+        enabled: true,
+        mode: 'metronome',
+        duration: { type: 'bars', bars: 2 },
+        repeat: 'everyLoop',
+      });
+
+      for (const key of mockStore.keys()) {
+        expect(key.startsWith('countdown.')).toBe(true);
+      }
+    });
+
+    // A write that fails part-way leaves older values beside newer ones. The
+    // result must still read back as a valid config rather than something the
+    // UI cannot render — the tear costs freshness, not integrity.
+    it('reads a torn write back as a valid config', () => {
+      setCountdownConfig({
+        enabled: true,
+        mode: 'metronome',
+        duration: { type: 'seconds', seconds: 15 },
+        repeat: 'everyLoop',
+      });
+      // Simulate storage dying after the first two keys of a later write.
+      mockStore.set('countdown.enabled', 'false');
+      mockStore.set('countdown.mode', 'silent');
+
+      expect(getCountdownConfig()).toEqual({
+        enabled: false,
+        mode: 'silent',
+        duration: { type: 'seconds', seconds: 15 },
+        repeat: 'everyLoop',
+      });
+    });
   });
 });
