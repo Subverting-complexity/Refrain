@@ -17,7 +17,9 @@ import { AccessiblePressable } from './AccessiblePressable';
  * stray chip floating in the bar rather than as one of its controls. The
  * box is still laid out at the full touch-target size; only its paint is
  * dropped, so a ghost button occupies and responds over exactly the same
- * area as a filled one.
+ * area as a filled one. Note that a *disabled* ghost button is therefore
+ * a dimmed icon with nothing around it — legible enough as an unavailable
+ * control, but no call site relies on that today.
  */
 export type IconSquareButtonVariant = 'filled' | 'ghost';
 

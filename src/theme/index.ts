@@ -116,15 +116,26 @@ const lightColors: ThemeColors = {
   accent: '#3fae87',
   accentText: '#08211a',
   accentForeground: '#1c7757',
-  border: '#c6ded3',
+  // Deeper than the page by more than the surface is, so an outlined
+  // control still has an edge once the page itself is tinted. It stops
+  // short of the 3:1 that WCAG 1.4.11 asks of a control identified by its
+  // outline alone: a border that dark reads as a box drawn around every
+  // input. Dark mode does not reach 3:1 either (1.79), so this is a
+  // standing limit of both palettes rather than something light mode
+  // gives up — see #267. The value is also capped from the other side, by
+  // the seek and volume tracks, which are painted in it: darken it much
+  // further and the accent fill sitting on the track drops below 3:1.
+  border: '#a6c9b8',
   error: '#c62828',
   errorText: '#ffffff',
-  // Both flags follow one rule: the label takes the dark end of the pair
-  // when the fill is bright, the light end when the fill is deep. Amber is
-  // inherently light, so it cannot carry white text at AA no matter how far
-  // it is darkened without ceasing to read as amber.
-  markerA: '#b8791f',
-  markerAText: '#2a1a00',
+  // Both marker colours have to work as text, not only as a fill: the A/B
+  // tiles in `MarkerControls` label themselves with the marker colour at
+  // 13px bold. That is the binding constraint here and it is what sets how
+  // deep the amber goes — a lighter, more obviously amber hue reads fine as
+  // a flag but fails AA as a label. Once it is that deep the flag takes a
+  // white label, same as B.
+  markerA: '#9c6618',
+  markerAText: '#ffffff',
   markerB: '#b03a52',
   markerBText: '#ffffff',
   // Tinted to the palette and lighter than dark mode's scrim: a flat black

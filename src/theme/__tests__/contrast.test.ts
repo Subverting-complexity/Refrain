@@ -1,16 +1,24 @@
 /**
  * Contrast guarantees for both palettes.
  *
- * These pin the *pairings the app actually renders* — a foreground token
- * against the token it is drawn on at that call site — rather than the hex
- * values themselves, so the palette stays free to move as long as it stays
- * legible. Retuning a colour and quietly dropping a pair below AA is the
- * failure this is here to catch: it is invisible in a screenshot and
- * invisible in a diff, and it is exactly what both palettes had drifted
- * into before #264.
+ * These pin a foreground against the token it is actually drawn on at a
+ * given call site, rather than pinning the hex values, so the palette
+ * stays free to move as long as it stays legible. Silent contrast
+ * regressions are invisible in a screenshot and invisible in a diff,
+ * which is how three of them survived in the palettes before #264.
+ *
+ * The pair lists below are hand-maintained and are NOT a guarantee of
+ * exhaustiveness — a call site nobody adds a row for is a call site
+ * nobody checks. `covers every colour token` is the backstop: it fails
+ * when a token is added to `ThemeColors` and never asserted anywhere,
+ * which is the failure mode that let the accent go unchecked as a
+ * foreground for as long as it did. It cannot catch a *new call site*
+ * that reuses an already-covered token in a new role, so adding one
+ * still means adding a row here.
  */
 import { darkTheme, lightTheme, Theme, ThemeColors } from '..';
 import { pillColors } from '../../components/chipStyles';
+import { contrastRatio } from '../../utils/color';
 
 /** WCAG 2.1 AA for body text and icons that carry meaning. */
 const AA_TEXT = 4.5;
@@ -23,55 +31,67 @@ const AA_NON_TEXT = 3;
  * light mode's near-white-on-white pairing had (1.06).
  */
 const ELEVATION_MIN = 1.15;
-/** A fill has to be tellable from the page it sits on. */
-const FILL_MIN = 1.5;
-
-function channel(value: number): number {
-  const c = value / 255;
-  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-/** Relative luminance of an opaque `#rrggbb` colour, per WCAG 2.1. */
-export function luminance(hex: string): number {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-
-/** WCAG contrast ratio between two opaque colours, from 1 to 21. */
-export function contrastRatio(a: string, b: string): number {
-  const la = luminance(a);
-  const lb = luminance(b);
-  const hi = Math.max(la, lb);
-  const lo = Math.min(la, lb);
-  return (hi + 0.05) / (lo + 0.05);
-}
+/**
+ * How far an outline has to sit from what surrounds it. Well below the
+ * 3:1 that 1.4.11 wants for a control identified by its border alone —
+ * neither palette reaches that (dark 1.79, light 1.50) and #267 tracks
+ * it. This floor only holds the line at what they do manage, so the
+ * border cannot quietly drift back towards invisible.
+ */
+const OUTLINE_MIN = 1.45;
 
 type Pair = [name: string, fg: keyof ThemeColors, bg: keyof ThemeColors];
 
-/** Text and icons, each against the surface its call site draws it on. */
+/**
+ * Text and icons, each against the surface its call site draws it on.
+ *
+ * The marker rows are here rather than among the non-text marks because
+ * `MarkerControls` labels its A/B tiles with the marker colour at 13px
+ * bold, which is ordinary text as far as WCAG is concerned. Holding them
+ * to the 3:1 mark threshold instead is what let light mode's A marker sit
+ * at 3.57 and read as covered.
+ */
 const TEXT_PAIRS: Pair[] = [
   ['body text on the page', 'textPrimary', 'background'],
   ['body text on a card', 'textPrimary', 'surface'],
   ['secondary text on the page', 'textSecondary', 'background'],
   ['secondary text on a card', 'textSecondary', 'surface'],
-  ['label on an accent fill', 'accentText', 'accent'],
-  ['accent icons on the page', 'accentForeground', 'background'],
+  ['a label on an accent fill', 'accentText', 'accent'],
+  ['accent icons and links on the page', 'accentForeground', 'background'],
   ['accent icons on a card', 'accentForeground', 'surface'],
   ['error text on the page', 'error', 'background'],
   ['error text on a card', 'error', 'surface'],
-  ['label on an error fill', 'errorText', 'error'],
+  ['a label on an error fill', 'errorText', 'error'],
   ['the A flag label', 'markerAText', 'markerA'],
   ['the B flag label', 'markerBText', 'markerB'],
+  ['the A tile label on a card', 'markerA', 'surface'],
+  ['the B tile label on a card', 'markerB', 'surface'],
 ];
 
 /** Marks that carry meaning on their own, with no label to identify them. */
 const NON_TEXT_PAIRS: Pair[] = [
-  ['the A marker line over the waveform', 'markerA', 'surface'],
-  ['the B marker line over the waveform', 'markerB', 'surface'],
+  // The seek and volume fills. Their track is painted in `border`, and
+  // the edge between the two is the whole of the position readout.
+  ['a slider fill against its track', 'accentForeground', 'border'],
+  // The toggle's knob against its off track, which is also `border`.
+  ['the toggle knob when off', 'textSecondary', 'border'],
+  ['the toggle knob when on', 'accentText', 'accent'],
+  // The A/B lines ruled down the waveform card. Where a line crosses the
+  // bars it is against a tinted bar rather than bare `surface`, so this
+  // is the easier of the two backdrops, not the worst case.
+  ['the A marker line on the waveform card', 'markerA', 'surface'],
+  ['the B marker line on the waveform card', 'markerB', 'surface'],
 ];
+
+/** Every token asserted above, plus the ones covered by a named test. */
+const COVERED = new Set<keyof ThemeColors>([
+  ...TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
+  ...NON_TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
+  'accent',
+  'border',
+  'surface',
+  'background',
+]);
 
 describe.each([
   ['dark', darkTheme],
@@ -97,10 +117,13 @@ describe.each([
     ).toBeGreaterThanOrEqual(ELEVATION_MIN);
   });
 
-  it('keeps an accent fill tellable from the page behind it', () => {
-    expect(
-      contrastRatio(colors.accent, colors.background),
-    ).toBeGreaterThanOrEqual(FILL_MIN);
+  it.each([
+    ['the page', 'background' as const],
+    ['a card', 'surface' as const],
+  ])('keeps an outline visible against %s', (_label, bg) => {
+    expect(contrastRatio(colors.border, colors[bg])).toBeGreaterThanOrEqual(
+      OUTLINE_MIN,
+    );
   });
 
   // The chip resolves its own foreground per theme, so ask the real code
@@ -111,20 +134,22 @@ describe.each([
       AA_TEXT,
     );
   });
-});
 
-describe('accentForeground', () => {
-  it('is the accent itself in dark mode', () => {
-    // A light mint on a near-black page already clears AA as a foreground,
-    // so splitting the two would be a distinction with no difference.
-    expect(darkTheme.colors.accentForeground).toBe(darkTheme.colors.accent);
+  it('clears AA for an unselected chip label', () => {
+    const { textColor } = pillColors(theme, false);
+    // An unselected pill is transparent, so its label is on the page.
+    expect(contrastRatio(textColor, colors.background)).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
   });
 
-  it('is darker than the fill accent in light mode', () => {
-    // The inverse: the light accent is tuned to sit *behind* dark text, so
-    // it cannot double as a foreground on a light page.
-    expect(luminance(lightTheme.colors.accentForeground)).toBeLessThan(
-      luminance(lightTheme.colors.accent),
+  it('covers every colour token', () => {
+    // `overlay` is the one exemption: it is an `rgba()` scrim rather than
+    // an opaque hex, so it has no single ratio to assert. Everything else
+    // has to appear in a pairing above.
+    const uncovered = (Object.keys(colors) as (keyof ThemeColors)[]).filter(
+      (token) => token !== 'overlay' && !COVERED.has(token),
     );
+    expect(uncovered).toEqual([]);
   });
 });

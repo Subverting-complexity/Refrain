@@ -522,8 +522,8 @@ export default function TracksScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor={theme.colors.accent}
-            colors={[theme.colors.accent]}
+            tintColor={theme.colors.accentForeground}
+            colors={[theme.colors.accentForeground]}
           />
         }
       />

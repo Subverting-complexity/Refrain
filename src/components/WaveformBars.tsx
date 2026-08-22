@@ -47,9 +47,14 @@ export const WaveformBars = React.memo(function WaveformBars({
 }: WaveformBarsProps) {
   const { theme } = useTheme();
   // The foreground accent, not the fill accent: these are translucent
-  // tints laid over `surface`, and the palest tier sits at 12% opacity. A
-  // fill-weight accent disappears at that alpha on a light surface, which
-  // is what made the light-mode waveform read as blank.
+  // tints laid over `surface`, and a fill-weight accent washes out badly
+  // at low alpha on a light surface. This fixes the played fill, which is
+  // the tier that carries the playhead (2.89 -> 5.41 against a light
+  // surface). It does *not* rescue the two quiet tiers: the dull tier
+  // still sits at 1.18 and the loop-unplayed tier at 1.54, so the loop
+  // window is conveyed by a difference too fine to rely on. Fixing that
+  // means retuning the alphas themselves, which are shared with dark mode
+  // and no better there (1.56 and 1.60) — see #268.
   const accent = theme.colors.accentForeground;
   const denom = peaks.length;
 
