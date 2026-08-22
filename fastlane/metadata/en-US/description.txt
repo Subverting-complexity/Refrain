@@ -1,18 +1,18 @@
-Refrain is a focused loop player for anyone who learns by repetition — musicians working out a solo, language learners drilling a phrase, dancers counting an eight, transcribers catching every word.
+Refrain is a focused loop player for anyone who learns by repetition: musicians working out a solo, language learners drilling a phrase, dancers counting an eight, transcribers catching every word.
 
 Import any audio file from your device, set an A and a B point right on the waveform, and loop that section on repeat until you've got it. Save the sections you keep coming back to, and jump straight to them next time.
 
 FEATURES
-• A/B loop — drop A and B markers on the waveform and loop that section instantly
-• Waveform view — see the shape of the audio and place your markers precisely
-• Saved segments — store the loops you practice most and reload them in a tap
-• Snippet preview — audition a segment before you commit to it
-• Precise skip — jump forward or back by 1, 3, 5, 10, 15, or 30 seconds
-• Count-in timer — get a lead-in before playback so you're ready to come in
-• Bookmarks — mark the spots you want to find again
-• Volume control — set a comfortable practice level
-• Your library — everything you import, organized and ready to pick up again
+• A/B loop: drop A and B markers on the waveform and loop that section instantly
+• Waveform view: see the shape of the audio and place your markers precisely
+• Saved segments: store the loops you practice most and reload them in a tap
+• Snippet preview: audition a segment before you commit to it
+• Precise skip: jump forward or back by 1, 3, 5, 10, 15, or 30 seconds, or 1 or 5 minutes
+• Count-in timer: get a lead-in before playback so you're ready to come in
+• Bookmarks: mark the spots you want to find again
+• Volume control: set a comfortable practice level
+• Your library: everything you import, organized and ready to pick up again
 
-Everything happens on your device. Refrain works fully offline and collects no data — no account, no sign-up, no tracking.
+Everything happens on your device. Refrain works fully offline and collects no data. No account, no sign-up, no tracking.
 
 Bring in a track and start looping.

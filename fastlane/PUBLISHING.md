@@ -116,5 +116,8 @@ Sizes are verified programmatically on write (a 1px miss is an Apple rejection).
 ## Feature check (keep copy honest)
 
 Refrain has: A/B loop, waveform, saved segments, snippet preview, precise skip
-(1–30s), count-in timer, bookmarks, volume, local library. It does **not** have
-tempo/speed or pitch change — don't add those claims to the copy or captions.
+(1s–5m), count-in timer, bookmarks, volume, local library. It does **not** have
+tempo/speed or pitch change; don't add those claims to the copy or captions.
+
+Store copy follows [`docs/ui-writing-style.md`](../docs/ui-writing-style.md):
+plain descriptions, no em dashes, no personification.
