@@ -21,6 +21,7 @@ Dimensions verified programmatically before writing.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -49,43 +50,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 RAW_DIR = os.path.join(REPO, "assets", "appstore_images")
 ICON_PATH = os.path.join(REPO, "assets", "logo", "png", "icon-transparent.png")
+SLIDES_PATH = os.path.join(HERE, "slides.json")
 
-# Raw screenshots mapped to a stable ordering + captions.
-# order is the store slide order (slide 1 is the most-seen image).
-# Each caption is a single centered line: `lead` (primary) + `accent` (mint),
-# kept short so the type stays large and legible at thumbnail size.
-SLIDES = [
-    {
-        "id": "IMG_2203",
-        "cap_lead": "Loop any",
-        "cap_accent": "section",
-    },
-    {
-        "id": "IMG_2205",
-        "cap_lead": "Save your",
-        "cap_accent": "loops",
-    },
-    {
-        "id": "IMG_2199",
-        "cap_lead": "Your",
-        "cap_accent": "library",
-    },
-    {
-        "id": "IMG_2208",
-        "cap_lead": "Skip",
-        "cap_accent": "precisely",
-    },
-    {
-        "id": "IMG_2206",
-        "cap_lead": "Count you",
-        "cap_accent": "in",
-    },
-    {
-        "id": "IMG_2198",
-        "cap_lead": "Play your",
-        "cap_accent": "favourites",
-    },
-]
+
+def load_slides():
+    """Slide order + captions live in slides.json, not in code, so swapping
+    or adding a screenshot is a one-line edit: drop the new file in
+    assets/appstore_images/, add/edit its {id, cap_lead, cap_accent} entry
+    here, then rerun `python render.py full` — no Python changes needed.
+    `id` is the raw filename without extension (case-insensitive .png/.PNG).
+    Google Play caps phone screenshots at 8, so keep this list at 8 or fewer.
+    """
+    with open(SLIDES_PATH, "r", encoding="utf-8") as f:
+        slides = json.load(f)
+    if len(slides) > 8:
+        raise ValueError(
+            f"{len(slides)} slides in slides.json, but Google Play allows at most 8 phone screenshots"
+        )
+    return slides
+
+
+SLIDES = load_slides()
 
 # ---------------------------------------------------------------------------
 # Fonts
@@ -315,6 +300,17 @@ def compose(slide, size, variant="A", show_status_caption=True) -> Image.Image:
     lw, lh = measure(draw, lead + space, f_lead)
     aw, ah = measure(draw, accent, f_lead)
     total_w = lw + aw
+
+    # auto-shrink so a longer caption plugged into slides.json can never
+    # clip off the canvas edge
+    max_caption_w = w - int(140 * s)
+    if total_w > max_caption_w:
+        lead_size = max(int(lead_size * max_caption_w / total_w), int(70 * s))
+        f_lead = font("segoeuib.ttf", lead_size)
+        lw, lh = measure(draw, lead + space, f_lead)
+        aw, ah = measure(draw, accent, f_lead)
+        total_w = lw + aw
+
     line_h = max(lh, ah)
 
     # small mint underline flourish above the headline

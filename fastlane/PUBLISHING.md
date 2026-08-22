@@ -98,7 +98,14 @@ bundle exec fastlane android listing
 
 ## Regenerating screenshots
 
-Edit captions or palette in `creative/render.py`, then:
+Slides are data, not code: drop the new raw capture in
+`assets/appstore_images/`, then add or edit its entry in
+`creative/slides.json` (`id` = filename without extension, `cap_lead` /
+`cap_accent` = the two-part caption). No Python changes needed for a normal
+swap — only touch `creative/render.py` to change the palette, device frame,
+or banner layout. Google Play caps phone screenshots at 8, so keep
+`slides.json` at 8 entries or fewer (`render.py` raises if you exceed it).
+Then:
 
 ```bash
 cd fastlane/creative && python render.py full B    # B = chosen device treatment
