@@ -66,3 +66,4 @@ relevant to what you're working on.
 | `docs/GRAPH_REPORT.md`       | Graphify codebase knowledge-graph report — community structure and key modules. Generated; refresh with `graphify . --update`.                                    |
 | `fastlane/PUBLISHING.md`     | What store publishing automates vs. what is console-only. Read before touching store metadata or running fastlane.                                                |
 | `fastlane/QUESTIONNAIRES.md` | Prepared answers for every App Store Connect and Play Console questionnaire, with the code evidence behind each. Read before filling anything in a store console. |
+| `docs/ui-writing-style.md`   | House style for on-screen copy and store listing text: plain, no em dashes, no personification. Read before writing UI strings or editing `fastlane/metadata/`.   |
