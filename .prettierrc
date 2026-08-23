@@ -3,5 +3,11 @@
   "trailingComma": "all",
   "tabWidth": 2,
   "semi": true,
-  "endOfLine": "lf"
+  "endOfLine": "lf",
+  "overrides": [
+    {
+      "files": "**/*.mjs",
+      "options": { "printWidth": 100 }
+    }
+  ]
 }

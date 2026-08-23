@@ -13,6 +13,19 @@ export const TOAST_DURATION_MS = 4000;
 export interface UseToastResult {
   toast: ToastState | null;
   showToast: (message: string, variant?: ToastVariant) => void;
+  /**
+   * Raise an error toast. Identical to `showToast(message, 'error')`.
+   *
+   * This and `showSuccess` exist because the screens were spelling the
+   * variant out positionally at every call site, where it is easy to read
+   * past and easy to get wrong. `showError` is also directly usable as an
+   * `onError` handler, which is what two screens were wrapping by hand.
+   * `showToast` remains for the rare caller that picks its variant at
+   * runtime.
+   */
+  showError: (message: string) => void;
+  /** Raise a success toast. The counterpart to {@link UseToastResult.showError}. */
+  showSuccess: (message: string) => void;
   hideToast: () => void;
 }
 
@@ -58,7 +71,17 @@ export function useToast(
     [clearTimer, durationMs],
   );
 
+  const showError = useCallback(
+    (message: string) => showToast(message, 'error'),
+    [showToast],
+  );
+
+  const showSuccess = useCallback(
+    (message: string) => showToast(message, 'success'),
+    [showToast],
+  );
+
   useEffect(() => clearTimer, [clearTimer]);
 
-  return { toast, showToast, hideToast };
+  return { toast, showToast, showError, showSuccess, hideToast };
 }

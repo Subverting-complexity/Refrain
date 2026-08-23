@@ -68,15 +68,15 @@ assets/        App icons, splash screen, fonts
 
 ## Scripts
 
-| Command | Description |
-|---|---|
-| `npm start` | Start the Expo dev server |
-| `npm test` | Run the test suite |
+| Command                 | Description                    |
+| ----------------------- | ------------------------------ |
+| `npm start`             | Start the Expo dev server      |
+| `npm test`              | Run the test suite             |
 | `npm run test:coverage` | Run tests with coverage report |
-| `npm run lint` | Lint with ESLint |
-| `npm run format` | Format with Prettier |
-| `npm run format:check` | Check formatting |
-| `npm run typecheck` | Type-check with TypeScript |
+| `npm run lint`          | Lint with ESLint               |
+| `npm run format`        | Format with Prettier           |
+| `npm run format:check`  | Check formatting               |
+| `npm run typecheck`     | Type-check with TypeScript     |
 
 ## Licence
 

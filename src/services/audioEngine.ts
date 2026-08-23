@@ -187,6 +187,43 @@ function reportSeekFailure(target: AudioPlayer | null, err: unknown): void {
 }
 
 /**
+ * Runs a step whose failure the caller has already decided is acceptable, and
+ * swallows anything it throws.
+ *
+ * Teardown is where most of these live. Unloading a track pauses the player,
+ * drops the lock-screen controls, removes the player and releases audio focus,
+ * and every one of those can fail on a native hiccup or on a player that was
+ * released underneath us. None of them may stop the ones after it: a failed
+ * `remove()` that aborted the sequence would leave a resident, audible player,
+ * which is the exact outcome unloading exists to prevent.
+ *
+ * Naming the pattern makes the decision visible. A bare `try`/`catch` with an
+ * empty body reads like an oversight, and there is no way to tell at a glance
+ * whether the silence was intended. `bestEffort(...)` says it was, and says it
+ * the same way every time. Each call site still carries its own comment for
+ * *why* that particular step is safe to lose.
+ */
+function bestEffort(step: () => void): void {
+  try {
+    step();
+  } catch {
+    // By design. See the doc comment above.
+  }
+}
+
+/**
+ * {@link bestEffort} for a step that returns a promise: a rejection is
+ * swallowed the same way a throw is.
+ */
+async function bestEffortAsync(step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch {
+    // By design. See {@link bestEffort}.
+  }
+}
+
+/**
  * The persisted skip preference, or the default when storage is unreachable.
  * A failed settings read must never break the transport — the buttons still
  * have to move the playhead.
@@ -594,17 +631,12 @@ async function loadTrackImpl(
     // Release a player that never became the live one, and drop any listener
     // that was attached to it, so a failed load leaves nothing behind.
     if (created && player !== created) {
-      try {
-        statusSubscription?.remove();
-      } catch {
-        // Best-effort teardown: report the original failure, not this one.
-      }
+      // Both are best-effort so the original load failure is what surfaces,
+      // not whatever the teardown of a half-built player throws.
+      const orphan = created;
+      bestEffort(() => statusSubscription?.remove());
       statusSubscription = null;
-      try {
-        created.remove();
-      } catch {
-        // Same.
-      }
+      bestEffort(() => orphan.remove());
     }
     // The id was claimed before the load could fail. Leaving it set would let
     // a later marker edit schedule a save against a track that never loaded.
@@ -646,11 +678,9 @@ export async function play(): Promise<void> {
   // only: a failure here must never block playback. (On web, session focus is
   // managed by the browser.)
   if (Platform.OS !== 'web') {
-    try {
-      await setIsAudioActiveAsync(true);
-    } catch {
-      // best-effort: fall through to play regardless.
-    }
+    // Fall through to play regardless: worst case the track plays without
+    // having taken focus from whatever else is making sound.
+    await bestEffortAsync(() => setIsAudioActiveAsync(true));
   }
 
   if (player !== target) return;
@@ -694,22 +724,20 @@ export async function stop(): Promise<void> {
   // mid-call (e.g. tapping Stop then immediately navigating away) — pausing or
   // seeking a released player would reject. Best-effort so that race can never
   // surface as an unhandled rejection.
-  try {
+  // The player may have been released mid-stop, in which case there is
+  // nothing left to pause or rewind and nothing to report.
+  await bestEffortAsync(async () => {
     outgoing.pause();
     markInternalSeek(markerA ?? 0);
     await outgoing.seekTo(msToSec(markerA ?? 0));
-  } catch {
-    // best-effort: the player may have been released mid-stop.
-  }
+  });
   // Deactivate the audio session so iOS/Android restores focus to other apps
   // (music, podcasts, etc.). pause() intentionally leaves the session active so
   // a quick resume doesn't re-interrupt; stop() is a deliberate "done" action.
   if (Platform.OS !== 'web') {
-    try {
-      await setIsAudioActiveAsync(false);
-    } catch {
-      // best-effort: a failed deactivate must not reject; audio is paused.
-    }
+    // A failed deactivate must not reject: audio is already paused, so the
+    // only cost is that other apps regain focus a moment later than intended.
+    await bestEffortAsync(() => setIsAudioActiveAsync(false));
   } else {
     // Web has no audio session to release; mirror the native "done" intent by
     // clearing the OS overlay's active-playback state rather than leaving it
@@ -1047,34 +1075,20 @@ async function unloadTrackImpl(): Promise<void> {
     // Halt playback immediately. We must not rely on remove() alone to silence
     // audio, and the session-deactivate below can reject on a native hiccup —
     // pausing first guarantees the track stops even if a later step fails.
-    try {
-      outgoing.pause();
-    } catch {
-      // best-effort
-    }
+    bestEffort(() => outgoing.pause());
     if (Platform.OS !== 'web') {
-      try {
-        outgoing.clearLockScreenControls();
-      } catch {
-        // best-effort
-      }
+      // A stale lock-screen control is cosmetic next to a player that is
+      // still resident, so this must not stop the removal below.
+      bestEffort(() => outgoing.clearLockScreenControls());
     }
     // Remove the player before the (awaitable, failable) session-deactivate so
     // a rejected/hung setIsAudioActiveAsync can never leave the player resident
     // and audible.
-    try {
-      outgoing.remove();
-    } catch {
-      // best-effort
-    }
+    bestEffort(() => outgoing.remove());
     if (Platform.OS !== 'web') {
       // Release audio focus so other apps can resume. Best-effort: if it fails,
       // the player is already paused and removed, so audio has stopped.
-      try {
-        await setIsAudioActiveAsync(false);
-      } catch {
-        // best-effort
-      }
+      await bestEffortAsync(() => setIsAudioActiveAsync(false));
     }
   }
   markerA = null;
@@ -1120,12 +1134,15 @@ function applyVolume(resumeContext: boolean): void {
     if (resumeContext) webAudioGain.resume();
   } else if (player) {
     // Setting volume can throw if the player was released mid-flight; swallow
-    // so a volume tweak can never surface as a playback error.
-    try {
-      player.volume = volume;
-    } catch {
-      // best-effort
-    }
+    // so a volume tweak can never surface as a playback error. `bestEffort`
+    // runs its callback immediately; the const capture is only there to keep
+    // the null check above alive inside the closure, since `player` is a
+    // mutable module-level binding that TypeScript will not narrow through
+    // one.
+    const target = player;
+    bestEffort(() => {
+      target.volume = volume;
+    });
   }
 }
 
@@ -1134,11 +1151,8 @@ export function setVolume(value: number): void {
   // Resume on this user gesture so a drag can wake a context the autoplay
   // policy left suspended.
   applyVolume(true);
-  try {
-    settingsStore.setNumber(VOLUME_SETTING_KEY, volume);
-  } catch {
-    // Persistence is best-effort: a failed write must not break playback.
-  }
+  // Persistence is best-effort: a failed write must not break playback.
+  bestEffort(() => settingsStore.setNumber(VOLUME_SETTING_KEY, volume));
   currentState = { ...currentState, volume };
   notify(currentState);
 }

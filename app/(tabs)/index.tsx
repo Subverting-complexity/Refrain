@@ -27,10 +27,10 @@ import {
   renameFolder as renameFolderStore,
   reorderPinnedFolders,
 } from '@/src/services/folderStore';
+import { newFolder } from '@/src/services/folderStoreHelpers';
 import { getTrackCountsByFolder } from '@/src/services/trackStore';
 import { spacing } from '@/src/theme';
 import { Folder, TrackCounts } from '@/src/types';
-import { generateId } from '@/src/utils/generateId';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -82,7 +82,7 @@ export default function LibraryScreen() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [counts, setCounts] = useState<TrackCounts>(EMPTY_COUNTS);
   const [searchQuery, setSearchQuery] = useState('');
-  const { toast, showToast, hideToast } = useToast();
+  const { toast, showToast, showError, showSuccess, hideToast } = useToast();
 
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<{
@@ -106,16 +106,11 @@ export default function LibraryScreen() {
     [],
   );
 
-  const reportLoadError = useCallback(
-    (message: string) => showToast(message, 'error'),
-    [showToast],
-  );
-
   const { refreshing, handleRefresh, reload, invalidateLoads } =
     useTokenedReload({
       load: loadLibrary,
       onLoaded: applyLibrary,
-      onError: reportLoadError,
+      onError: showError,
       announcement: 'Library refreshed',
       loadFailureMessage: 'Failed to load library',
       refreshFailureMessage: 'Failed to refresh library',
@@ -133,17 +128,13 @@ export default function LibraryScreen() {
     }));
   }, [invalidateLoads]);
 
-  const { importing, importFile } = useTrackImport({
+  const { importing, handleImport } = useTrackImport({
     destinationFolderId: null,
     destinationName: 'Unfiled',
     shareEnabled: focused,
     onImported: handleImported,
     showToast,
   });
-
-  const handleImport = useCallback(() => {
-    void importFile();
-  }, [importFile]);
 
   const searching = searchQuery.trim().length > 0;
 
@@ -216,18 +207,7 @@ export default function LibraryScreen() {
   const handleCreateFolder = useCallback(
     async (name: string) => {
       try {
-        const createdAt = Date.now();
-        const folder: Folder = {
-          id: generateId(),
-          name,
-          createdAt,
-          pinOrder: null,
-          // Match what the store actually writes: `insertFolder` defaults
-          // this to `createdAt`. Holding null here would claim a value the
-          // database does not have, and would sort the folder to the
-          // never-opened tail until the next reload moved it.
-          lastOpenedAt: createdAt,
-        };
+        const folder = newFolder(name);
         await insertFolder(folder);
         invalidateLoads();
         // A new folder belongs at the top of the unpinned block, not at the
@@ -241,13 +221,13 @@ export default function LibraryScreen() {
             ...prev.slice(pinnedCount),
           ];
         });
-        showToast(`Created folder "${name}"`, 'success');
+        showSuccess(`Created folder "${name}"`);
       } catch {
-        showToast('Failed to create folder', 'error');
+        showError('Failed to create folder');
       }
       setCreatingFolder(false);
     },
-    [showToast, invalidateLoads],
+    [invalidateLoads, showError, showSuccess],
   );
 
   // `loadFolders` already returns pinned folders first, in `pinOrder`, so the
@@ -270,7 +250,7 @@ export default function LibraryScreen() {
       try {
         await reorderPinnedFolders(orderedIds);
       } catch {
-        showToast(failureMessage, 'error');
+        showError(failureMessage);
         return false;
       }
       // The write landed, but the read back may not have. `reloadData`
@@ -278,7 +258,7 @@ export default function LibraryScreen() {
       // top of "Failed to load library" would contradict it.
       return reload();
     },
-    [showToast, reload],
+    [reload, showError],
   );
 
   const handleTogglePin = useCallback(
@@ -299,15 +279,14 @@ export default function LibraryScreen() {
       if (!wasPinned && nextIds.length > PIN_SOFT_CAP) {
         // The pin went through, so this reports success and carries the
         // hint. Refusing the ninth pin would be worse than mentioning it.
-        showToast(
+        showSuccess(
           `${nextIds.length} folders pinned — a long pinned block leaves little for recent order to do`,
-          'success',
         );
       } else {
-        showToast(wasPinned ? 'Folder unpinned' : 'Folder pinned', 'success');
+        showSuccess(wasPinned ? 'Folder unpinned' : 'Folder pinned');
       }
     },
-    [pinnedIds, writePinnedOrder, showToast],
+    [pinnedIds, writePinnedOrder, showSuccess],
   );
 
   const handleMovePinned = useCallback(
@@ -326,16 +305,16 @@ export default function LibraryScreen() {
     async (id: string) => {
       try {
         await deleteFolder(id);
-        showToast('Folder deleted', 'success');
+        showSuccess('Folder deleted');
       } catch {
-        showToast('Failed to delete folder', 'error');
+        showError('Failed to delete folder');
         return;
       }
       // Deleting a folder unfiles its tracks, so the tallies move too — read
       // them back rather than guessing.
       await reload();
     },
-    [showToast, reload],
+    [reload, showError, showSuccess],
   );
 
   const handleRenameFolder = useCallback(
@@ -346,13 +325,13 @@ export default function LibraryScreen() {
         setFolders((prev) =>
           prev.map((f) => (f.id === id ? { ...f, name: newName } : f)),
         );
-        showToast('Folder renamed', 'success');
+        showSuccess('Folder renamed');
       } catch {
-        showToast('Failed to rename folder', 'error');
+        showError('Failed to rename folder');
       }
       setRenamingFolder(null);
     },
-    [showToast, invalidateLoads],
+    [invalidateLoads, showError, showSuccess],
   );
 
   const renderItem = useCallback(

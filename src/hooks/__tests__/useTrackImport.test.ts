@@ -49,7 +49,7 @@ const track: Track = {
 const onImported = jest.fn();
 const showToast = jest.fn();
 
-let result: { importing: boolean; importFile: () => Promise<void> };
+let result: ReturnType<typeof useTrackImport>;
 
 function TestComponent(props: Omit<UseTrackImportOptions, 'onImported'>) {
   result = useTrackImport({ ...props, onImported, showToast });
@@ -86,7 +86,7 @@ describe('useTrackImport via the file picker', () => {
     });
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(mockInsertTrack).toHaveBeenCalledWith({ ...track, folderId: 'f-1' });
@@ -106,7 +106,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(mockInsertTrack).toHaveBeenCalledWith(
@@ -129,7 +129,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).not.toHaveBeenCalled();
@@ -146,7 +146,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -161,7 +161,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -184,7 +184,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -249,6 +249,64 @@ describe('useTrackImport via the system share sheet', () => {
   it('listens by default', async () => {
     const tree = await renderHook();
     expect(shareOptions.enabled).toBe(true);
+    act(() => tree.unmount());
+  });
+});
+
+describe('useTrackImport handleImport', () => {
+  it('imports and files the chosen track', async () => {
+    mockPickAndImportFile.mockResolvedValueOnce({ success: true, track });
+    const tree = await renderHook({
+      destinationFolderId: 'f-1',
+      destinationName: 'Scales',
+    });
+
+    await act(async () => {
+      result.handleImport();
+    });
+
+    expect(mockInsertTrack).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(
+      'Imported riff.mp3 to Scales',
+      'success',
+    );
+    act(() => tree.unmount());
+  });
+
+  // The hook deliberately does not expose the awaitable form: nothing a
+  // caller could do with the outcome, since every failure is already a toast.
+  it('returns nothing to await, so a press handler cannot float a promise', async () => {
+    mockPickAndImportFile.mockResolvedValueOnce({
+      success: false,
+      error: 'cancelled',
+      message: 'File selection cancelled',
+    });
+    const tree = await renderHook();
+
+    let returned: unknown = 'unset';
+    await act(async () => {
+      returned = result.handleImport();
+    });
+
+    expect(returned).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('stays stable across renders so it can be a dependency', async () => {
+    const tree = await renderHook();
+    const first = result.handleImport;
+
+    await act(async () => {
+      tree.update(
+        createElement(TestComponent, {
+          destinationFolderId: null,
+          destinationName: 'Unfiled',
+          showToast,
+        }),
+      );
+    });
+
+    expect(result.handleImport).toBe(first);
     act(() => tree.unmount());
   });
 });

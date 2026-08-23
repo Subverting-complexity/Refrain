@@ -42,7 +42,17 @@ All checks must pass on PRs to `main`:
 
 1. **Type check** — `npm run typecheck`
 2. **Lint** — `npm run lint`
-3. **Format** — `npm run format:check`
+3. **Format** — `npm run format:check`, covering `.ts`, `.tsx`, `.mjs`,
+   `.json` and `.md`.
+
+   `.prettierrc` gives `**/*.mjs` a `printWidth` of 100 while the rest of
+   the repo uses Prettier's default 80. The release tooling under `tools/`
+   was written at 100 columns before the format gate covered `.mjs` at all.
+   The override is what lets the gate include those files without rewriting
+   all nine of them, which would bury the release logic under a formatting
+   diff. Do not remove it without reformatting `tools/` in a commit of its
+   own.
+
 4. **Tests + coverage** — `npm test -- --coverage`. Thresholds are
    enforced by `jest.config.js` over `src/**` and `app/**`:
    - `src/services/` (core business logic): **80%** on
