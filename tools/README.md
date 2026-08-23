@@ -33,6 +33,31 @@ Every entry below has a clickable `tools\<name>.cmd` launcher and the underlying
 | `BuildAndDeployiOS`          | Cloud iOS build via EAS. Use `-Profile development` for a dev-client IPA, `-Profile preview` for an internal IPA, or the default `-Profile production` for TestFlight. No Mac needed.                               |
 | `LaunchWeb`                  | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                  |
 
+## Release tooling (`tools/ps/ReleaseBranch.ps1`, `tools/ps/VersionBump.ps1`)
+
+`BuildAndDeployiOS` and `BuildAndDeployAndroidStore` dot-source these two
+internal helpers (no `.cmd` launcher of their own — they only make sense as
+part of a store deploy) for two things every production run does before it
+builds:
+
+- **Version bump** — `VersionBump.ps1` calls `tools/version-bump.mjs`, which
+  bumps `expo.version` in `app.json` and `version` in `package.json` together
+  (minor by default; `-Patch` / `-Major` on the deploy script override it), on
+  a throwaway branch that gets fast-forward merged into `main` and pushed. If
+  `HEAD` is already a commit this tool wrote, it's a no-op — that's what keeps
+  a same-sitting iOS-then-Android release from bumping twice.
+- **Release branch + outcome tag** — `ReleaseBranch.ps1` calls
+  `tools/release-branch.mjs`, which cuts and pushes a `release/<platform>/<timestamp>`
+  branch before the build and writes a `-success` / `-failed` outcome tag
+  after it, so every release attempt — including one that never finishes —
+  leaves a record in git.
+
+Both are Node tools (`tools/version-bump.mjs`, `tools/release-branch.mjs`,
+and the pure logic under `tools/lib/`) rather than PowerShell, so their rules
+can be unit-tested — see `tools/__tests__/`. See
+[`docs/RELEASING.md`](../docs/RELEASING.md) for the full scheme, including
+how to skip either step and what each one refuses to do.
+
 ## Phase steps (`tools/ps/steps/`)
 
 `QualityGate` dispatches to focused scripts in `tools/ps/steps/` so each phase is
