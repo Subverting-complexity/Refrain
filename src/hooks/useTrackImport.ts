@@ -32,6 +32,13 @@ export interface UseTrackImportResult {
   importing: boolean;
   /** Opens the system file picker and imports the chosen file. */
   importFile: () => Promise<void>;
+  /**
+   * `importFile` as a fire-and-forget press handler, for the Import button.
+   * Failures are already reported as toasts by `importFile` itself, so there
+   * is nothing for a caller to await or handle — every screen was wrapping it
+   * identically to say so.
+   */
+  handleImport: () => void;
 }
 
 /**
@@ -116,5 +123,9 @@ export function useTrackImport({
     onError: handleShareError,
   });
 
-  return { importing, importFile };
+  const handleImport = useCallback(() => {
+    void importFile();
+  }, [importFile]);
+
+  return { importing, importFile, handleImport };
 }

@@ -8,12 +8,8 @@ import { SortDirection, SortKey, SortOption, Track } from '../types';
  * read as broken when they go wrong and are invisible in a render test.
  */
 
-export const SORT_KEYS: readonly SortKey[] = [
-  'added',
-  'played',
-  'name',
-  'length',
-];
+/** The keys the list can be ordered by. Only `parseSortOption` reads this. */
+const SORT_KEYS: readonly SortKey[] = ['added', 'played', 'name', 'length'];
 
 /**
  * The direction a key starts in when the reader switches to it. Each is the

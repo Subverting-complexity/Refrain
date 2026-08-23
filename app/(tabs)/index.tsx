@@ -82,7 +82,7 @@ export default function LibraryScreen() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [counts, setCounts] = useState<TrackCounts>(EMPTY_COUNTS);
   const [searchQuery, setSearchQuery] = useState('');
-  const { toast, showToast, hideToast } = useToast();
+  const { toast, showToast, showError, hideToast } = useToast();
 
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<{
@@ -106,16 +106,11 @@ export default function LibraryScreen() {
     [],
   );
 
-  const reportLoadError = useCallback(
-    (message: string) => showToast(message, 'error'),
-    [showToast],
-  );
-
   const { refreshing, handleRefresh, reload, invalidateLoads } =
     useTokenedReload({
       load: loadLibrary,
       onLoaded: applyLibrary,
-      onError: reportLoadError,
+      onError: showError,
       announcement: 'Library refreshed',
       loadFailureMessage: 'Failed to load library',
       refreshFailureMessage: 'Failed to refresh library',
@@ -133,17 +128,13 @@ export default function LibraryScreen() {
     }));
   }, [invalidateLoads]);
 
-  const { importing, importFile } = useTrackImport({
+  const { importing, handleImport } = useTrackImport({
     destinationFolderId: null,
     destinationName: 'Unfiled',
     shareEnabled: focused,
     onImported: handleImported,
     showToast,
   });
-
-  const handleImport = useCallback(() => {
-    void importFile();
-  }, [importFile]);
 
   const searching = searchQuery.trim().length > 0;
 
@@ -243,11 +234,11 @@ export default function LibraryScreen() {
         });
         showToast(`Created folder "${name}"`, 'success');
       } catch {
-        showToast('Failed to create folder', 'error');
+        showError('Failed to create folder');
       }
       setCreatingFolder(false);
     },
-    [showToast, invalidateLoads],
+    [showToast, invalidateLoads, showError],
   );
 
   // `loadFolders` already returns pinned folders first, in `pinOrder`, so the
@@ -270,7 +261,7 @@ export default function LibraryScreen() {
       try {
         await reorderPinnedFolders(orderedIds);
       } catch {
-        showToast(failureMessage, 'error');
+        showError(failureMessage);
         return false;
       }
       // The write landed, but the read back may not have. `reloadData`
@@ -278,7 +269,7 @@ export default function LibraryScreen() {
       // top of "Failed to load library" would contradict it.
       return reload();
     },
-    [showToast, reload],
+    [reload, showError],
   );
 
   const handleTogglePin = useCallback(
@@ -328,14 +319,14 @@ export default function LibraryScreen() {
         await deleteFolder(id);
         showToast('Folder deleted', 'success');
       } catch {
-        showToast('Failed to delete folder', 'error');
+        showError('Failed to delete folder');
         return;
       }
       // Deleting a folder unfiles its tracks, so the tallies move too — read
       // them back rather than guessing.
       await reload();
     },
-    [showToast, reload],
+    [showToast, reload, showError],
   );
 
   const handleRenameFolder = useCallback(
@@ -348,11 +339,11 @@ export default function LibraryScreen() {
         );
         showToast('Folder renamed', 'success');
       } catch {
-        showToast('Failed to rename folder', 'error');
+        showError('Failed to rename folder');
       }
       setRenamingFolder(null);
     },
-    [showToast, invalidateLoads],
+    [showToast, invalidateLoads, showError],
   );
 
   const renderItem = useCallback(

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { LayoutChangeEvent } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
 
@@ -8,7 +8,7 @@ import {
 } from '../components/waveformLayout';
 import { clampToBounds, markerBounds } from '../utils/markerBounds';
 import { useDragThrottle } from './useDragThrottle';
-import { useLatestRef } from './useLatestRef';
+import { usePanGesture } from './usePanGesture';
 
 /** What an in-flight waveform gesture is moving. */
 export type DragTarget = 'markerA' | 'markerB' | 'seek';
@@ -286,33 +286,11 @@ export function useWaveformGesture({
     setDrag(null);
   }, [dragThrottle, onPlaceComplete, onMarkerCommit, onPreviewEnd]);
 
-  // Route the gesture through refs to the latest callbacks so the Pan object
-  // itself is created once.
-  const beginRef = useLatestRef(beginDrag);
-  const moveRef = useLatestRef(moveDrag);
-  const endRef = useLatestRef(endDrag);
-
-  // A single Pan drives taps and drags. `minDistance(0)` makes it claim the
-  // touch the instant a finger lands on the waveform, so the surrounding
-  // ScrollView can't steal a drag (the bug where markers wouldn't move).
-  // `runOnJS` keeps the callbacks on the JS thread so they can touch React
-  // state and the throttle directly. RNGH invokes these callbacks on touch
-  // (after render), never during render, so reading the latest-callback refs
-  // here is safe — the rule can't see that the handlers defer execution.
-  const gesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .runOnJS(true)
-        .minDistance(0)
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onBegin((e) => beginRef.current(e.x, e.y))
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onUpdate((e) => moveRef.current(e.x))
-        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
-        .onFinalize(() => endRef.current()),
-    // Ref identities never change, so the Pan is still built exactly once.
-    [beginRef, moveRef, endRef],
-  );
+  const gesture = usePanGesture({
+    onBegin: beginDrag,
+    onUpdate: moveDrag,
+    onFinalize: endDrag,
+  });
 
   return { gesture, drag, onLayout };
 }

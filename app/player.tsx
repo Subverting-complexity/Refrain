@@ -104,7 +104,7 @@ export default function PlayerScreen() {
     stopMonitor,
   } = useAudioPlayer(uri, trackId, filename);
 
-  const { toast, showToast, hideToast } = useToast();
+  const { toast, showToast, showError, hideToast } = useToast();
 
   // The named-segment side of the player: the saved list, which one is loaded,
   // both dialogs, and the unsaved-edit guard (including the leave-the-screen
@@ -174,12 +174,12 @@ export default function PlayerScreen() {
   const applyMarkerB = useCallback(
     (positionMs: number): boolean => {
       if (!setMarkerB(positionMs)) {
-        showToast(MARKER_B_BEFORE_A_MESSAGE, 'error');
+        showError(MARKER_B_BEFORE_A_MESSAGE);
         return false;
       }
       return true;
     },
-    [setMarkerB, showToast],
+    [setMarkerB, showError],
   );
 
   const { clearLoaded } = segments;

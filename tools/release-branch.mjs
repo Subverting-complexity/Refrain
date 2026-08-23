@@ -32,8 +32,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { capture } from './lib/exec.mjs';
 import { configureColour, detail, fail, formatTimestamp, ok, say, warn } from './lib/format.mjs';
+import { findRepoRoot, git, GitError, gitLine, modifiedTrackedFiles } from './lib/git.mjs';
 import { parseArgs, UsageError, usage } from './lib/release-branch-options.mjs';
 import { retireBranch, summarisePrune } from './lib/release-branch-prune.mjs';
 import {
@@ -46,14 +46,6 @@ import {
   selectPrunable,
   tagNameFor,
 } from './lib/release-branch.mjs';
-
-/** Where `start` leaves the branch it cut for `finish` to find. */
-const STATE_FILE = join('tools', 'release-state.json');
-
-const DEFAULT_REMOTE = 'origin';
-
-/** Thrown when git itself refuses. Carries the output so the operator sees it. */
-class GitError extends Error {}
 
 /**
  * What `start` recorded about a run in flight.
@@ -68,45 +60,10 @@ class GitError extends Error {}
  * @property {boolean} [dirty]
  */
 
-/**
- * Runs git and returns what it said.
- *
- * Quiet by default: a single `finish` asks git for a SHA, three ref lists and
- * a tag, and echoing all of that would bury the two lines the operator needs.
- *
- * @param {string} repoRoot
- * @param {string[]} args
- * @param {{ allowFailure?: boolean }} [options]
- */
-function git(repoRoot, args, options = {}) {
-  const result = capture('git', args, { cwd: repoRoot, quiet: true, shell: false });
-  if (result.code !== 0 && !options.allowFailure) {
-    throw new GitError(
-      `git ${args.join(' ')} failed (exit ${result.code})\n${result.output.trim()}`,
-    );
-  }
-  return result;
-}
+/** Where `start` leaves the branch it cut for `finish` to find. */
+const STATE_FILE = join('tools', 'release-state.json');
 
-/** @param {string} repoRoot @param {string[]} args */
-function gitLine(repoRoot, args) {
-  return git(repoRoot, args).output.trim();
-}
-
-/**
- * The root of the repository this is being run from.
- *
- * In a git worktree this is the worktree's own root, which is where
- * `package.json` and `tools/` live, so the state file lands beside the build
- * logs exactly as it does in a normal clone.
- */
-function findRepoRoot() {
-  const result = capture('git', ['rev-parse', '--show-toplevel'], { quiet: true, shell: false });
-  if (result.code !== 0) {
-    throw new GitError('Not inside a git repository, so there is nothing to cut a branch from.');
-  }
-  return result.output.trim();
-}
+const DEFAULT_REMOTE = 'origin';
 
 /**
  * Release branch names, from local refs and from one remote's tracking refs.
@@ -265,11 +222,11 @@ function pushRef(repoRoot, remote, ref, options = {}) {
  * @param {import('./lib/release-branch-options.mjs').ReleaseOptions} options
  */
 function start(options) {
-  const repoRoot = findRepoRoot();
+  const repoRoot = findRepoRoot('there is nothing to cut a branch from.');
   const platform = assertPlatform(options.platform ?? '');
   const remote = options.remote ?? DEFAULT_REMOTE;
 
-  const modified = gitLine(repoRoot, ['status', '--porcelain', '--untracked-files=no']);
+  const modified = modifiedTrackedFiles(repoRoot);
   if (modified.length > 0) {
     if (!options.allowDirty) {
       fail('Tracked files have been modified, so a release branch would name a commit');
@@ -323,7 +280,7 @@ function start(options) {
  * @param {import('./lib/release-branch-options.mjs').ReleaseOptions} options
  */
 function finish(options) {
-  const repoRoot = findRepoRoot();
+  const repoRoot = findRepoRoot('there is no release branch to tag.');
   const platform = assertPlatform(options.platform ?? '');
   // The parser has already refused anything but these two, so this narrows a
   // string to the outcome type rather than deciding anything. Failure is the
@@ -422,7 +379,7 @@ function pruneOperations(repoRoot, remote, branches) {
  * @param {import('./lib/release-branch-options.mjs').ReleaseOptions} options
  */
 function prune(options) {
-  const repoRoot = findRepoRoot();
+  const repoRoot = findRepoRoot('there are no release branches to prune.');
   const remote = options.remote ?? DEFAULT_REMOTE;
   const keepDays = options.keepDays ?? DEFAULT_KEEP_DAYS;
 

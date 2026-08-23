@@ -55,8 +55,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { capture } from './lib/exec.mjs';
 import { configureColour, detail, fail, ok, say, warn } from './lib/format.mjs';
+import { findRepoRoot, git, GitError, gitLine, modifiedTrackedFiles } from './lib/git.mjs';
 import {
   bumpCommitMessage,
   bumpCommitVersion,
@@ -73,39 +73,8 @@ const DEFAULT_LEVEL = 'minor';
 const APP_JSON = 'app.json';
 const PACKAGE_JSON = 'package.json';
 
-/** Thrown when git itself refuses. Carries the output so the operator sees it. */
-class GitError extends Error {}
-
 /** Thrown for a command line this module cannot make sense of. */
 class UsageError extends Error {}
-
-/**
- * @param {string} repoRoot
- * @param {string[]} args
- * @param {{ allowFailure?: boolean }} [options]
- */
-function git(repoRoot, args, options = {}) {
-  const result = capture('git', args, { cwd: repoRoot, quiet: true, shell: false });
-  if (result.code !== 0 && !options.allowFailure) {
-    throw new GitError(
-      `git ${args.join(' ')} failed (exit ${result.code})\n${result.output.trim()}`,
-    );
-  }
-  return result;
-}
-
-/** @param {string} repoRoot @param {string[]} args */
-function gitLine(repoRoot, args) {
-  return git(repoRoot, args).output.trim();
-}
-
-function findRepoRoot() {
-  const result = capture('git', ['rev-parse', '--show-toplevel'], { quiet: true, shell: false });
-  if (result.code !== 0) {
-    throw new GitError('Not inside a git repository, so there is no version to bump.');
-  }
-  return result.output.trim();
-}
 
 /**
  * The version this repository is currently at, read from `app.json`.
@@ -193,7 +162,7 @@ function parseArgs(argv) {
  * @returns {number} exit code
  */
 function bump(options) {
-  const repoRoot = findRepoRoot();
+  const repoRoot = findRepoRoot('there is no version to bump.');
 
   const currentBranch = gitLine(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
   if (currentBranch !== options.base) {
@@ -217,7 +186,7 @@ function bump(options) {
     return 0;
   }
 
-  const modified = gitLine(repoRoot, ['status', '--porcelain', '--untracked-files=no']);
+  const modified = modifiedTrackedFiles(repoRoot);
   if (modified.length > 0) {
     fail('Tracked files have been modified. A version bump commits to the base branch');
     fail('automatically, so it refuses to sweep unrelated changes in with it:');

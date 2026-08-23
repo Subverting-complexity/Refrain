@@ -13,6 +13,14 @@ export const TOAST_DURATION_MS = 4000;
 export interface UseToastResult {
   toast: ToastState | null;
   showToast: (message: string, variant?: ToastVariant) => void;
+  /**
+   * Raise an error toast. Identical to `showToast(message, 'error')`, and
+   * exists because the screens raise far more error toasts than any other
+   * kind and each one was spelling the variant out positionally. It is also
+   * directly usable as an `onError` handler, which is what the screens were
+   * each wrapping by hand.
+   */
+  showError: (message: string) => void;
   hideToast: () => void;
 }
 
@@ -58,7 +66,12 @@ export function useToast(
     [clearTimer, durationMs],
   );
 
+  const showError = useCallback(
+    (message: string) => showToast(message, 'error'),
+    [showToast],
+  );
+
   useEffect(() => clearTimer, [clearTimer]);
 
-  return { toast, showToast, hideToast };
+  return { toast, showToast, showError, hideToast };
 }

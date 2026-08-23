@@ -117,7 +117,7 @@ export default function TracksScreen() {
   // filter that survives navigation hides rows rather than reordering them,
   // so a forgotten one reads as data loss rather than as a filter.
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const { toast, showToast, hideToast } = useToast();
+  const { toast, showToast, showError, hideToast } = useToast();
 
   const [renamingTrack, setRenamingTrack] = useState<Track | null>(null);
   const [actionsTrack, setActionsTrack] = useState<Track | null>(null);
@@ -146,15 +146,10 @@ export default function TracksScreen() {
     () => loadTracks(loadOptions),
     [loadOptions],
   );
-  const reportLoadError = useCallback(
-    (message: string) => showToast(message, 'error'),
-    [showToast],
-  );
-
   const { refreshing, handleRefresh, invalidateLoads } = useTokenedReload({
     load: loadTracksForEntry,
     onLoaded: setTracks,
-    onError: reportLoadError,
+    onError: showError,
     announcement: 'Tracks refreshed',
     loadFailureMessage: 'Failed to load tracks',
     refreshFailureMessage: 'Failed to refresh tracks',
@@ -194,17 +189,13 @@ export default function TracksScreen() {
     [scope, invalidateLoads],
   );
 
-  const { importing, importFile } = useTrackImport({
+  const { importing, handleImport } = useTrackImport({
     destinationFolderId,
     destinationName,
     shareEnabled: focused,
     onImported: handleImported,
     showToast,
   });
-
-  const handleImport = useCallback(() => {
-    void importFile();
-  }, [importFile]);
 
   // Inside Favourites every row is already starred, so the filter would be a
   // no-op and the star is hidden.
@@ -248,10 +239,10 @@ export default function TracksScreen() {
         );
         showToast(`Renamed to ${filename}`, 'success');
       } catch {
-        showToast('Failed to rename track', 'error');
+        showError('Failed to rename track');
       }
     },
-    [showToast, invalidateLoads],
+    [showToast, invalidateLoads, showError],
   );
 
   const handleDelete = useCallback(
@@ -262,10 +253,10 @@ export default function TracksScreen() {
         setTracks((prev) => prev.filter((t) => t.id !== id));
         showToast('Track deleted', 'success');
       } catch {
-        showToast('Failed to delete track', 'error');
+        showError('Failed to delete track');
       }
     },
-    [showToast, invalidateLoads],
+    [showToast, invalidateLoads, showError],
   );
 
   const handleMoveTrack = useCallback(
@@ -289,11 +280,11 @@ export default function TracksScreen() {
         }
         showToast('Track moved', 'success');
       } catch {
-        showToast('Failed to move track', 'error');
+        showError('Failed to move track');
       }
       setMovingTrack(null);
     },
-    [showToast, invalidateLoads, scope, folderId],
+    [showToast, invalidateLoads, scope, folderId, showError],
   );
 
   /**
@@ -318,14 +309,14 @@ export default function TracksScreen() {
         };
         await insertFolder(folder);
       } catch {
-        showToast('Failed to create folder', 'error');
+        showError('Failed to create folder');
         setFilingIntoNewFolder(null);
         return;
       }
       setFilingIntoNewFolder(null);
       await handleMoveTrack(track.id, folder.id);
     },
-    [showToast, handleMoveTrack],
+    [handleMoveTrack, showError],
   );
 
   const handleTrackPress = useCallback(
@@ -403,7 +394,7 @@ export default function TracksScreen() {
         // state the database does not hold.
         invalidateLoads();
         applyLocally(track.isFavorite);
-        showToast('Failed to update favourite', 'error');
+        showError('Failed to update favourite');
         return;
       }
 
@@ -421,7 +412,7 @@ export default function TracksScreen() {
         'success',
       );
     },
-    [scope, invalidateLoads, showToast],
+    [scope, invalidateLoads, showToast, showError],
   );
 
   // Where the never-played tracks begin, under the Played sort. Marking the

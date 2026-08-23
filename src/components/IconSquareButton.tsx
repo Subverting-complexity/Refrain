@@ -21,7 +21,7 @@ import { AccessiblePressable } from './AccessiblePressable';
  * a dimmed icon with nothing around it — legible enough as an unavailable
  * control, but no call site relies on that today.
  */
-export type IconSquareButtonVariant = 'filled' | 'ghost';
+type IconSquareButtonVariant = 'filled' | 'ghost';
 
 interface IconSquareButtonProps {
   icon: keyof typeof Ionicons.glyphMap;

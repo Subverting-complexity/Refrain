@@ -204,4 +204,43 @@ describe('useToast', () => {
       }),
     ).not.toThrow();
   });
+  it('showError raises the same toast as the error variant of showToast', () => {
+    renderTestHook();
+
+    act(() => {
+      lastResult.showError('Failed to delete track');
+    });
+
+    expect(lastResult.toast).toEqual({
+      message: 'Failed to delete track',
+      variant: 'error',
+    });
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      'Failed to delete track',
+    );
+  });
+
+  it('keeps showError stable across renders so it can be a dependency', () => {
+    const tree = renderTestHook();
+    const first = lastResult.showError;
+
+    act(() => {
+      tree.update(createElement(TestComponent));
+    });
+
+    expect(lastResult.showError).toBe(first);
+  });
+
+  it('showError auto-dismisses on the same timer as any other toast', () => {
+    renderTestHook();
+
+    act(() => {
+      lastResult.showError('Failed to load tracks');
+    });
+    act(() => {
+      jest.advanceTimersByTime(TOAST_DURATION_MS);
+    });
+
+    expect(lastResult.toast).toBeNull();
+  });
 });
