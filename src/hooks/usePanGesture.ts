@@ -16,15 +16,10 @@ export interface PanGestureCallbacks {
  * A Pan gesture that claims the touch immediately and calls back on the JS
  * thread, built once and never rebuilt.
  *
- * Both direct-manipulation surfaces in the app want exactly this shape — the
- * seek and volume sliders, and the waveform — and both had their own copy,
- * including the three lint suppressions below. The suppressions are the real
- * reason to have one of these rather than two: each is a claim about when
- * react-native-gesture-handler runs a callback, and a claim like that is
- * worth stating once, where it can be checked, rather than in six places
- * where it reads as boilerplate to skip over.
- *
- * The three settings are load-bearing:
+ * Shared by the two position-driven surfaces: the seek and volume sliders
+ * (`useSliderGesture`) and the waveform (`useWaveformGesture`). Both read a
+ * coordinate off the event and turn it into a position, so both need the same
+ * three settings, and all three are load-bearing:
  *
  *  - **`minDistance(0)`** makes the gesture claim the touch the instant a
  *    finger lands, so an enclosing `ScrollView` cannot steal a drag. Without
@@ -37,15 +32,17 @@ export interface PanGestureCallbacks {
  *    (ref identities are stable) while still calling the newest closures. A
  *    gesture rebuilt mid-drag drops the drag.
  *
- * Reading `.current` in the handlers is safe, and is what the suppressions
- * say: RNGH invokes them on touch, always after commit, never during render.
- * The lint rule cannot see that the handlers defer execution.
+ * Reading `.current` in the handlers is safe, and is what the three
+ * suppressions below say: RNGH invokes them on touch, always after commit,
+ * never during render. The lint rule cannot see that the handlers defer
+ * execution.
  *
- * This deliberately does not cover the long-press reorder drag in
- * `DraggablePinnedFolderList`, which activates differently
- * (`activateAfterLongPress`) and works in translation rather than position.
- * Folding it in would mean parameterising which event field each handler
- * reads, which costs more clarity than the sharing would buy back.
+ * The long-press reorder drag in `DraggablePinnedFolderList` is a third Pan
+ * gesture and is deliberately not routed through here. It activates
+ * differently (`activateAfterLongPress` rather than `minDistance(0)`) and
+ * works in translation rather than position, so sharing it would mean
+ * parameterising which event field each handler reads. It keeps its own
+ * copy, and its own suppressions, which point back at this comment.
  */
 export function usePanGesture({
   onBegin,

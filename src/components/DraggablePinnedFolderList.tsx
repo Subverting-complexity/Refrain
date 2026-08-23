@@ -57,16 +57,20 @@ function DraggableItem({
   const moveRef = useLatestRef((offsetY: number) => onMoveDrag(offsetY));
   const endRef = useLatestRef(() => onEndDrag());
 
+  // A long-press drag rather than the immediate Pan the sliders and waveform
+  // share, so this does not use `usePanGesture`: it activates on a hold and
+  // works in translation, not position. See that hook's comment for why
+  // reading the latest-callback refs from these handlers is safe.
   const panGesture = useMemo(() => {
     return (
       Gesture.Pan()
         .runOnJS(true)
         .activateAfterLongPress(300)
-        // eslint-disable-next-line react-hooks/refs -- gesture handler callback
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onStart(() => startRef.current())
-        // eslint-disable-next-line react-hooks/refs -- gesture handler callback
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onUpdate((e) => moveRef.current(e.translationY))
-        // eslint-disable-next-line react-hooks/refs -- gesture handler callback
+        // eslint-disable-next-line react-hooks/refs -- deferred gesture callback, runs on touch not render
         .onFinalize(() => endRef.current())
     );
   }, [startRef, moveRef, endRef]);

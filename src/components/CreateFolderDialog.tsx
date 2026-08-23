@@ -21,6 +21,10 @@ export function CreateFolderDialog({
   onSave,
   onCancel,
 }: CreateFolderDialogProps) {
+  function handleConfirm(name: string) {
+    if (name) onSave(name);
+  }
+
   return (
     <NameEntryDialog
       title="New folder"
@@ -29,9 +33,7 @@ export function CreateFolderDialog({
       fieldAccessibilityLabel="Folder name"
       confirmLabel="Create"
       confirmAccessibilityLabel="Create folder"
-      onConfirm={(name) => {
-        if (name) onSave(name);
-      }}
+      onConfirm={handleConfirm}
       onCancel={onCancel}
     />
   );

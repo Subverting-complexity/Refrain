@@ -12,8 +12,8 @@ jest.mock('react-native-gesture-handler', () => {
     const handlers: Record<string, (e: unknown) => void> = {};
     const settings: string[] = [];
     const api = {
-      runOnJS: () => {
-        settings.push('runOnJS');
+      runOnJS: (on: boolean) => {
+        settings.push(`runOnJS:${on}`);
         return api;
       },
       minDistance: (d: number) => {
@@ -76,8 +76,8 @@ function renderHook(calls: Calls) {
   return {
     tree,
     rerender: () => act(() => tree.update(createElement(TestComponent))),
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    gesture: () => gesture!,
+    // Assigned during the render above, which `act` has already flushed.
+    gesture: () => gesture as ReturnType<typeof usePanGesture>,
     renderCount: () => renders,
   };
 }
@@ -91,9 +91,16 @@ describe('usePanGesture', () => {
     RNGH.__reset();
   });
 
-  it('claims the touch immediately and runs callbacks on the JS thread', () => {
+  // Asserted individually rather than as an ordered list: which order the
+  // builder is called in is implementation, the values are the contract.
+  it('claims the touch the instant a finger lands', () => {
     renderHook(emptyCalls());
-    expect(last().settings).toEqual(['runOnJS', 'minDistance:0']);
+    expect(last().settings).toContain('minDistance:0');
+  });
+
+  it('runs its callbacks on the JS thread', () => {
+    renderHook(emptyCalls());
+    expect(last().settings).toContain('runOnJS:true');
   });
 
   it('forwards both coordinates to onBegin and onUpdate', () => {

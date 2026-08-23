@@ -43,9 +43,14 @@ export interface NameEntryDialogProps {
  *
  * Most callers open this on a name that already exists — a segment's current
  * name, the next suggested one, a track's filename — so the field selects its
- * contents on focus and typing replaces the old name in one go. On an empty
- * field (a brand-new folder) there is nothing to select, so the same setting
- * simply does nothing.
+ * contents on focus and typing replaces the old name in one go.
+ *
+ * Select-on-focus is switched off when `initialName` is empty, which is the
+ * naming of something brand new. It fires on *every* focus, not only the
+ * first, so on a field the reader is filling in themselves it would discard
+ * a half-typed name the moment they came back to it — after dismissing the
+ * keyboard, say. There is nothing to replace in that case, so there is
+ * nothing for the setting to buy.
  *
  * **Remount contract:** `initialName` seeds the draft once, on mount. Callers
  * must mount this dialog per open — `{visible ? <Dialog … /> : null}`, as the
@@ -82,7 +87,7 @@ export function NameEntryDialog({
           { color: theme.colors.textPrimary, borderColor: theme.colors.border },
         ]}
         autoFocus
-        selectTextOnFocus
+        selectTextOnFocus={initialName.length > 0}
         returnKeyType="done"
         onSubmitEditing={confirm}
       />

@@ -167,7 +167,9 @@ function bump(options) {
   const currentBranch = gitLine(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
   if (currentBranch !== options.base) {
     fail(`Version bump only runs from ${options.base}. Currently on ${currentBranch}.`);
-    detail(`Check out ${options.base} first, or pass --base ${currentBranch} if that's deliberate.`);
+    detail(
+      `Check out ${options.base} first, or pass --base ${currentBranch} if that's deliberate.`,
+    );
     return 1;
   }
 
@@ -200,10 +202,7 @@ function bump(options) {
   const fetched = git(repoRoot, ['fetch', options.remote, options.base], { allowFailure: true });
   if (fetched.code === 0) {
     const local = gitLine(repoRoot, ['rev-parse', options.base]);
-    const upstream = gitLine(repoRoot, [
-      'rev-parse',
-      `${options.remote}/${options.base}`,
-    ]);
+    const upstream = gitLine(repoRoot, ['rev-parse', `${options.remote}/${options.base}`]);
     if (local !== upstream) {
       fail(`${options.base} is not in sync with ${options.remote}/${options.base}. Pull first.`);
       return 1;
@@ -254,7 +253,9 @@ function main(argv) {
   if (command !== 'bump') {
     fail(`Unknown command '${command ?? ''}'. Expected: bump.`);
     say();
-    say('Usage: node tools/version-bump.mjs bump [--level patch|minor|major] [--base main] [--remote origin]');
+    say(
+      'Usage: node tools/version-bump.mjs bump [--level patch|minor|major] [--base main] [--remote origin]',
+    );
     return 2;
   }
 

@@ -631,17 +631,12 @@ async function loadTrackImpl(
     // Release a player that never became the live one, and drop any listener
     // that was attached to it, so a failed load leaves nothing behind.
     if (created && player !== created) {
-      try {
-        statusSubscription?.remove();
-      } catch {
-        // Best-effort teardown: report the original failure, not this one.
-      }
+      // Both are best-effort so the original load failure is what surfaces,
+      // not whatever the teardown of a half-built player throws.
+      const orphan = created;
+      bestEffort(() => statusSubscription?.remove());
       statusSubscription = null;
-      try {
-        created.remove();
-      } catch {
-        // Same.
-      }
+      bestEffort(() => orphan.remove());
     }
     // The id was claimed before the load could fail. Leaving it set would let
     // a later marker edit schedule a save against a track that never loaded.
@@ -683,11 +678,9 @@ export async function play(): Promise<void> {
   // only: a failure here must never block playback. (On web, session focus is
   // managed by the browser.)
   if (Platform.OS !== 'web') {
-    try {
-      await setIsAudioActiveAsync(true);
-    } catch {
-      // best-effort: fall through to play regardless.
-    }
+    // Fall through to play regardless: worst case the track plays without
+    // having taken focus from whatever else is making sound.
+    await bestEffortAsync(() => setIsAudioActiveAsync(true));
   }
 
   if (player !== target) return;
@@ -731,22 +724,20 @@ export async function stop(): Promise<void> {
   // mid-call (e.g. tapping Stop then immediately navigating away) — pausing or
   // seeking a released player would reject. Best-effort so that race can never
   // surface as an unhandled rejection.
-  try {
+  // The player may have been released mid-stop, in which case there is
+  // nothing left to pause or rewind and nothing to report.
+  await bestEffortAsync(async () => {
     outgoing.pause();
     markInternalSeek(markerA ?? 0);
     await outgoing.seekTo(msToSec(markerA ?? 0));
-  } catch {
-    // best-effort: the player may have been released mid-stop.
-  }
+  });
   // Deactivate the audio session so iOS/Android restores focus to other apps
   // (music, podcasts, etc.). pause() intentionally leaves the session active so
   // a quick resume doesn't re-interrupt; stop() is a deliberate "done" action.
   if (Platform.OS !== 'web') {
-    try {
-      await setIsAudioActiveAsync(false);
-    } catch {
-      // best-effort: a failed deactivate must not reject; audio is paused.
-    }
+    // A failed deactivate must not reject: audio is already paused, so the
+    // only cost is that other apps regain focus a moment later than intended.
+    await bestEffortAsync(() => setIsAudioActiveAsync(false));
   } else {
     // Web has no audio session to release; mirror the native "done" intent by
     // clearing the OS overlay's active-playback state rather than leaving it
@@ -1086,6 +1077,8 @@ async function unloadTrackImpl(): Promise<void> {
     // pausing first guarantees the track stops even if a later step fails.
     bestEffort(() => outgoing.pause());
     if (Platform.OS !== 'web') {
+      // A stale lock-screen control is cosmetic next to a player that is
+      // still resident, so this must not stop the removal below.
       bestEffort(() => outgoing.clearLockScreenControls());
     }
     // Remove the player before the (awaitable, failable) session-deactivate so
@@ -1141,8 +1134,11 @@ function applyVolume(resumeContext: boolean): void {
     if (resumeContext) webAudioGain.resume();
   } else if (player) {
     // Setting volume can throw if the player was released mid-flight; swallow
-    // so a volume tweak can never surface as a playback error. Captured into a
-    // const so the null check still holds inside the deferred callback.
+    // so a volume tweak can never surface as a playback error. `bestEffort`
+    // runs its callback immediately; the const capture is only there to keep
+    // the null check above alive inside the closure, since `player` is a
+    // mutable module-level binding that TypeScript will not narrow through
+    // one.
     const target = player;
     bestEffort(() => {
       target.volume = volume;

@@ -75,7 +75,7 @@ export type CountdownSecondsPreset = (typeof COUNTDOWN_SECONDS_PRESETS)[number];
 const COUNTDOWN_BARS_PRESETS = [1, 2, 4] as const;
 
 /** A bar count the duration type can represent. */
-export type CountdownBarsPreset = (typeof COUNTDOWN_BARS_PRESETS)[number];
+type CountdownBarsPreset = (typeof COUNTDOWN_BARS_PRESETS)[number];
 
 /** Lead-in length used when nothing usable is stored. */
 const DEFAULT_COUNTDOWN_SECONDS: CountdownSecondsPreset = 3;

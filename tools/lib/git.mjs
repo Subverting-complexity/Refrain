@@ -4,10 +4,7 @@
  * `tools/release-branch.mjs` and `tools/version-bump.mjs` are separate
  * commands with separate jobs, but both are a thin layer of policy over the
  * same four primitives: run git, take one line of its output, find the repo,
- * and refuse to touch a dirty tree. Each used to carry its own copy of all
- * four. They were identical, which is the problem: a fix to the quoting, the
- * error text or the failure handling landed in one and not the other, and
- * nothing pointed that out.
+ * and refuse to touch a dirty tree.
  *
  * Deliberately not a general-purpose git wrapper. It covers what these two
  * commands need and stops there.
@@ -25,9 +22,8 @@ export class GitError extends Error {}
  * a tag, and echoing all of that would bury the two lines the operator needs.
  *
  * `shell: false` so arguments reach git as given. Tag messages, branch names
- * and refspecs all contain characters a shell would take an interest in, and
- * this runs on Windows where the quoting rules are not the ones most of us
- * carry in our heads.
+ * and refspecs can all contain shell metacharacters, and this runs on Windows,
+ * where the quoting rules differ from POSIX.
  *
  * @param {string} repoRoot
  * @param {string[]} args
@@ -44,8 +40,12 @@ export function git(repoRoot, args, options = {}) {
 }
 
 /**
- * git's output with the trailing newline taken off, for the many commands
+ * git's output with surrounding whitespace removed, for the many commands
  * whose whole answer is one line.
+ *
+ * A full trim, not a trailing one. Contrast `modifiedTrackedFiles` below,
+ * which keeps leading whitespace because its output is a block of lines
+ * whose first column is significant.
  *
  * @param {string} repoRoot
  * @param {string[]} args

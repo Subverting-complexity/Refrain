@@ -100,4 +100,10 @@ describe('CreateFolderDialog', () => {
     expect(onCancel).toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
   });
+  // The rename dialogs select their seeded name on focus. This one starts
+  // empty, so the same setting would only discard what the reader had typed
+  // if they refocused the field.
+  it('does not select on focus, so a refocus cannot wipe a half-typed name', () => {
+    expect(input(render()).props.selectTextOnFocus).toBe(false);
+  });
 });

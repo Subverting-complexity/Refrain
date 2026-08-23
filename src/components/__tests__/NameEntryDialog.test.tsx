@@ -133,4 +133,28 @@ describe('NameEntryDialog', () => {
 
     expect(input(tree).props.value).toBe('My edit');
   });
+  // Select-on-focus fires on every focus, not only the first. Replacing an
+  // existing name is what it is for; on a field the reader is filling in from
+  // empty it would wipe a half-typed name when they came back to it.
+  describe('select on focus', () => {
+    it('selects the seeded name so typing replaces it', () => {
+      const tree = render({ initialName: 'Chorus' });
+      expect(input(tree).props.selectTextOnFocus).toBe(true);
+    });
+
+    it('leaves an empty field alone', () => {
+      const tree = render({ initialName: '' });
+      expect(input(tree).props.selectTextOnFocus).toBe(false);
+    });
+  });
+
+  it('labels the confirm button Save unless told otherwise', () => {
+    const labels = (tree: ReactTestRenderer) =>
+      tree.root
+        .findAll((node) => typeof node.props.label === 'string')
+        .map((node) => node.props.label);
+
+    expect(labels(render())).toContain('Save');
+    expect(labels(render({ confirmLabel: 'Create' }))).toContain('Create');
+  });
 });

@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
 import { LayoutChangeEvent } from 'react-native';
-import { Gesture } from 'react-native-gesture-handler';
 
 import {
   HORIZONTAL_PADDING,
@@ -49,7 +48,7 @@ export interface UseWaveformGestureParams {
 
 export interface UseWaveformGesture {
   /** The Pan gesture to hand to a `GestureDetector`. Built once. */
-  gesture: ReturnType<typeof Gesture.Pan>;
+  gesture: ReturnType<typeof usePanGesture>;
   /**
    * The element being dragged and its live position, or `null` when no drag is
    * in flight. Drives the visual every frame while native calls stay throttled.

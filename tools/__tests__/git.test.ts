@@ -13,13 +13,13 @@ jest.mock('../lib/exec.mjs', () => ({ capture: jest.fn() }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { capture } = require('../lib/exec.mjs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const {
   findRepoRoot,
   git,
   GitError,
   gitLine,
   modifiedTrackedFiles,
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
 } = require('../lib/git.mjs');
 
 type CaptureResult = { code: number; output: string; timedOut?: boolean };
