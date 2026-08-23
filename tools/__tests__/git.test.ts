@@ -74,7 +74,7 @@ describe('git', () => {
 });
 
 describe('gitLine', () => {
-  it('trims the trailing newline git puts on a one-line answer', () => {
+  it('strips the whitespace around a one-line answer', () => {
     nextCapture({ code: 0, output: '  abc123  \n' });
     expect(gitLine('/repo', ['rev-parse', 'HEAD'])).toBe('abc123');
   });

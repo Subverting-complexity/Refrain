@@ -5,6 +5,10 @@ jest.mock('../../utils/generateId', () => ({
 }));
 
 describe('newFolder', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('gives the folder an id and the name it was asked for', () => {
     const folder = newFolder('Scales', 1_000);
     expect(folder.id).toBe('generated-id');
@@ -26,13 +30,14 @@ describe('newFolder', () => {
   });
 
   it('reads the clock once, so both stamps always agree', () => {
-    const now = jest.spyOn(Date, 'now');
-    now.mockReturnValueOnce(5_000).mockReturnValueOnce(9_999);
+    jest
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(5_000)
+      .mockReturnValueOnce(9_999);
 
     const folder = newFolder('Scales');
 
     expect(folder.createdAt).toBe(5_000);
     expect(folder.lastOpenedAt).toBe(5_000);
-    now.mockRestore();
   });
 });

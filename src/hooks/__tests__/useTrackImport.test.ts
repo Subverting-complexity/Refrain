@@ -86,7 +86,7 @@ describe('useTrackImport via the file picker', () => {
     });
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(mockInsertTrack).toHaveBeenCalledWith({ ...track, folderId: 'f-1' });
@@ -106,7 +106,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(mockInsertTrack).toHaveBeenCalledWith(
@@ -129,7 +129,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).not.toHaveBeenCalled();
@@ -146,7 +146,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -161,7 +161,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -184,7 +184,7 @@ describe('useTrackImport via the file picker', () => {
     const tree = await renderHook();
 
     await act(async () => {
-      await result.importFile();
+      result.handleImport();
     });
 
     expect(showToast).toHaveBeenCalledWith(
@@ -254,7 +254,7 @@ describe('useTrackImport via the system share sheet', () => {
 });
 
 describe('useTrackImport handleImport', () => {
-  it('runs the same import as importFile, without the caller awaiting it', async () => {
+  it('imports and files the chosen track', async () => {
     mockPickAndImportFile.mockResolvedValueOnce({ success: true, track });
     const tree = await renderHook({
       destinationFolderId: 'f-1',
@@ -273,6 +273,8 @@ describe('useTrackImport handleImport', () => {
     act(() => tree.unmount());
   });
 
+  // The hook deliberately does not expose the awaitable form: nothing a
+  // caller could do with the outcome, since every failure is already a toast.
   it('returns nothing to await, so a press handler cannot float a promise', async () => {
     mockPickAndImportFile.mockResolvedValueOnce({
       success: false,

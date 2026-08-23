@@ -30,13 +30,14 @@ export interface UseTrackImportOptions {
 export interface UseTrackImportResult {
   /** True while the file picker flow is running. */
   importing: boolean;
-  /** Opens the system file picker and imports the chosen file. */
-  importFile: () => Promise<void>;
   /**
-   * `importFile` as a fire-and-forget press handler, for the Import button.
-   * Failures are already reported as toasts by `importFile` itself, so there
-   * is nothing for a caller to await or handle — every screen was wrapping it
-   * identically to say so.
+   * Opens the system file picker and imports the chosen file.
+   *
+   * Returns nothing to await on purpose. Every failure is already reported to
+   * the reader as a toast before this settles, so there is no outcome for a
+   * caller to inspect and nothing it could usefully do with one. Both screens
+   * were wrapping the awaitable form in an identical `() => void` to say
+   * exactly that; the wrapper lives here now, and the promise stays internal.
    */
   handleImport: () => void;
 }
@@ -127,5 +128,5 @@ export function useTrackImport({
     void importFile();
   }, [importFile]);
 
-  return { importing, importFile, handleImport };
+  return { importing, handleImport };
 }

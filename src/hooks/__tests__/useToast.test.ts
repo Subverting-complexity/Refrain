@@ -243,4 +243,56 @@ describe('useToast', () => {
 
     expect(lastResult.toast).toBeNull();
   });
+  it('showSuccess raises the same toast as the success variant of showToast', () => {
+    renderTestHook();
+
+    act(() => {
+      lastResult.showSuccess('Folder deleted');
+    });
+
+    expect(lastResult.toast).toEqual({
+      message: 'Folder deleted',
+      variant: 'success',
+    });
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      'Folder deleted',
+    );
+  });
+
+  it('keeps showSuccess stable across renders so it can be a dependency', () => {
+    const tree = renderTestHook();
+    const first = lastResult.showSuccess;
+
+    act(() => {
+      tree.update(createElement(TestComponent));
+    });
+
+    expect(lastResult.showSuccess).toBe(first);
+  });
+
+  it('showSuccess auto-dismisses on the same timer as any other toast', () => {
+    renderTestHook();
+
+    act(() => {
+      lastResult.showSuccess('Folder renamed');
+    });
+    act(() => {
+      jest.advanceTimersByTime(TOAST_DURATION_MS);
+    });
+
+    expect(lastResult.toast).toBeNull();
+  });
+
+  // The two named helpers must not be able to drift apart from each other.
+  it('showError and showSuccess replace one another like any other toast', () => {
+    renderTestHook();
+
+    act(() => lastResult.showSuccess('Folder created'));
+    act(() => lastResult.showError('Failed to rename folder'));
+
+    expect(lastResult.toast).toEqual({
+      message: 'Failed to rename folder',
+      variant: 'error',
+    });
+  });
 });

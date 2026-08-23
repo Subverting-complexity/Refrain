@@ -83,11 +83,11 @@ export function findRepoRoot(nothingToDo) {
  * of that claim. `release-branch` warns about untracked files separately, for
  * a different reason (EAS builds committed state, so they will not ship).
  *
- * Only the trailing newline is trimmed, not leading whitespace: porcelain
+ * Trailing whitespace is stripped, leading whitespace is kept: porcelain
  * lines start with a two-column status field that is blank on the left for
  * an unstaged change, and both callers print these lines straight to the
- * operator. Trimming the block as a whole took that column off the first line
- * only, leaving a list that did not line up with itself.
+ * operator. A full trim took that column off the first line only, leaving a
+ * list that did not line up with itself.
  *
  * @param {string} repoRoot
  */
