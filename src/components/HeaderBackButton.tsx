@@ -1,4 +1,10 @@
 import { useRouter } from 'expo-router';
+import type {
+  NativeStackHeaderBackProps,
+  NativeStackHeaderItem,
+  NativeStackHeaderItemProps,
+  NativeStackNavigationOptions,
+} from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
@@ -84,6 +90,58 @@ export function HeaderBackButton() {
       />
     </View>
   );
+}
+
+/**
+ * Stack `screenOptions` that put {@link HeaderBackButton} in the header.
+ *
+ * The button has to reach the header by a different option on iOS. From
+ * iOS 26, UIKit draws a shared background capsule behind the items in a
+ * navigation bar, and a custom `headerLeft` view is wrapped in one like
+ * any other bar button item. Over this app's dark header that capsule
+ * paints as a solid light blob with the chevron all but invisible inside
+ * it. `UIBarButtonItem.hidesSharedBackground` turns the capsule off, and
+ * `unstable_headerLeftItems` is the only option expo-router routes
+ * through to it, so on iOS the button goes in as a custom header item
+ * with that flag set. That option carries expo-router's `unstable_`
+ * prefix, so an SDK upgrade is a good moment to check it still exists
+ * and still reaches `hidesSharedBackground`.
+ *
+ * Android and web have no shared background and ignore
+ * `unstable_headerLeftItems` entirely, so they keep the plain
+ * `headerLeft`. The key is left out on those platforms rather than set
+ * everywhere, because the web header spreads the options it does not
+ * recognise onto its own header element.
+ *
+ * Both forms gate on the navigator's own `canGoBack`, so a screen with
+ * nothing beneath it gets no header-left element at all. Note the two
+ * gates return different empty values: `headerLeft` has to return a real
+ * `null`, because a component that renders null still creates a
+ * header-left view and on Android that displaces the title out of the
+ * native toolbar, while `unstable_headerLeftItems` returns an empty list.
+ */
+export function headerBackButtonOptions(): NativeStackNavigationOptions {
+  if (Platform.OS === 'ios') {
+    return {
+      unstable_headerLeftItems: ({
+        canGoBack,
+      }: NativeStackHeaderItemProps): NativeStackHeaderItem[] =>
+        canGoBack
+          ? [
+              {
+                type: 'custom',
+                element: <HeaderBackButton />,
+                hidesSharedBackground: true,
+              },
+            ]
+          : [],
+    };
+  }
+
+  return {
+    headerLeft: ({ canGoBack }: NativeStackHeaderBackProps) =>
+      canGoBack ? <HeaderBackButton /> : null,
+  };
 }
 
 const styles = StyleSheet.create({
