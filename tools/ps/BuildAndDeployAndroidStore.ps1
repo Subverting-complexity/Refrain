@@ -8,14 +8,25 @@
     Run without prompts (requires cached EAS + Play credentials).
 .PARAMETER SkipChecks
     Skip prerequisite verification.
+.PARAMETER Patch
+    Bump the patch version instead of the default minor.
+.PARAMETER Major
+    Bump the major version instead of the default minor.
+.PARAMETER AllowDirty
+    Cut the release branch from a dirty working tree anyway. Never skips the
+    version bump's own dirty-tree check -- see tools/version-bump.mjs.
 .EXAMPLE
     .\tools\BuildAndDeployAndroidStore.ps1
     .\tools\BuildAndDeployAndroidStore.ps1 -NoSubmit
+    .\tools\BuildAndDeployAndroidStore.ps1 -Patch
 #>
 param(
     [switch]$NoSubmit,
     [switch]$NonInteractive,
-    [switch]$SkipChecks
+    [switch]$SkipChecks,
+    [switch]$Patch,
+    [switch]$Major,
+    [switch]$AllowDirty
 )
 Set-StrictMode -Version Latest
 
@@ -31,6 +42,18 @@ function Wait-AndExit {
     try { $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { Start-Sleep 5 }
     exit $Code
 }
+
+if ($Patch -and $Major) {
+    Write-Err "-Patch and -Major are mutually exclusive."
+    Wait-AndExit 1
+}
+$BumpLevel = if ($Major) { 'major' } elseif ($Patch) { 'patch' } else { 'minor' }
+
+# Version bump (Invoke-VersionBump) and release-branch tracking
+# (Start-ReleaseBranch, Complete-ReleaseBranch, Get-LatestEasBuild). Both use
+# the Write-* helpers above.
+. (Join-Path $PSScriptRoot 'VersionBump.ps1')
+. (Join-Path $PSScriptRoot 'ReleaseBranch.ps1')
 
 # Load KEY=VALUE pairs from a local .env file into the process environment.
 # Existing environment values win, so an explicitly-set EXPO_TOKEN is never
@@ -134,6 +157,23 @@ if (-not $SkipChecks) {
     Write-Ok "Logged in: $((eas whoami 2>&1 | Out-String).Trim())"
 }
 
+# -- Bump the release version --------------------------------------------------
+# Before the release branch is cut, so the branch (and the build it names)
+# carries the bumped version rather than the one it is about to replace.
+# Invoke-VersionBump is a no-op if HEAD is already a bump commit -- see
+# tools/version-bump.mjs -- so running this and BuildAndDeployiOS.cmd back to
+# back for the same version bumps exactly once.
+if (-not (Invoke-VersionBump -AppDir $AppDir -Level $BumpLevel)) {
+    Pop-Location; Wait-AndExit 1
+}
+
+# -- Cut the release branch ---------------------------------------------------
+# Before the build rather than after it, so that a run which never comes back
+# still left a record of having been attempted.
+if (-not (Start-ReleaseBranch -AppDir $AppDir -Platform 'android' -BuildProfile 'production' -AllowDirty:$AllowDirty)) {
+    Pop-Location; Wait-AndExit 1
+}
+
 Write-Step "Starting EAS production build for Android (cloud)"
 Write-Host "  Output: signed AAB for Play Console." -ForegroundColor DarkGray
 Write-Host "  Typical build time: 10-20 minutes." -ForegroundColor DarkGray
@@ -159,6 +199,22 @@ if ($buildExitCode -eq 0) {
     Add-BuildEntry -Status "failed" -Notes "Exit $buildExitCode. Duration: $buildDuration" | Out-Null
     Write-Err "EAS build failed (exit $buildExitCode). Duration: $buildDuration"
 }
+
+# -- Record the outcome on the release branch ---------------------------------
+$release = @{
+    AppDir        = $AppDir
+    Platform      = 'android'
+    Outcome       = $(if ($buildExitCode -eq 0) { 'success' } else { 'failed' })
+    BuildExitCode = $buildExitCode
+    Duration      = $buildDuration
+    Submitted     = ((-not $NoSubmit) -and ($buildExitCode -eq 0))
+}
+$easBuild = Get-LatestEasBuild -EasCommand 'eas' -Platform 'android' -Since $buildStart
+if ($easBuild) {
+    $release['EasBuildId']  = $easBuild.Id
+    $release['EasBuildUrl'] = $easBuild.Url
+}
+Complete-ReleaseBranch @release
 
 Pop-Location
 Wait-AndExit $buildExitCode

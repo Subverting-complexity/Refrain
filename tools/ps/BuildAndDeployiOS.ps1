@@ -15,6 +15,14 @@
     EAS build profile: 'development' (dev-client for device testing),
     'preview' (internal distribution IPA), or 'production' (TestFlight).
     Defaults to 'production'. Development + preview builds do NOT auto-submit.
+.PARAMETER Patch
+    Production builds only: bump the patch version instead of the default minor.
+.PARAMETER Major
+    Production builds only: bump the major version instead of the default minor.
+.PARAMETER AllowDirty
+    Production builds only: cut the release branch from a dirty working tree
+    anyway. Never skips the version bump's own dirty-tree check -- see
+    tools/version-bump.mjs.
 .EXAMPLE
     .\tools\BuildAndDeployiOS.ps1
     .\tools\BuildAndDeployiOS.ps1 -Profile development
@@ -22,6 +30,7 @@
     .\tools\BuildAndDeployiOS.ps1 -SkipChecks
     .\tools\BuildAndDeployiOS.ps1 -NoSubmit
     .\tools\BuildAndDeployiOS.ps1 -NonInteractive
+    .\tools\BuildAndDeployiOS.ps1 -Patch
 #>
 param(
     [switch]$SkipChecks,
@@ -29,13 +38,26 @@ param(
     [switch]$NoSubmit,
     [switch]$NonInteractive,
     [ValidateSet('development', 'preview', 'production')]
-    [string]$Profile = 'production'
+    [string]$Profile = 'production',
+    [switch]$Patch,
+    [switch]$Major,
+    [switch]$AllowDirty
 )
 
 # Non-production builds never submit.
 if ($Profile -ne 'production') {
     $NoSubmit = $true
 }
+if ($Patch -and $Major) {
+    Write-Host "  [ERR] -Patch and -Major are mutually exclusive." -ForegroundColor Red
+    exit 1
+}
+$BumpLevel = if ($Major) { 'major' } elseif ($Patch) { 'patch' } else { 'minor' }
+
+# Store releases only. A development or preview build is not something
+# anyone ships, so it earns neither a version bump nor a branch/tag record --
+# recording either would fill both with attempts nobody will ever look up.
+$IsRelease = ($Profile -eq 'production')
 Set-StrictMode -Version Latest
 
 # -- Helper functions ---------------------------------------------------------
@@ -55,6 +77,12 @@ function Wait-AndExit {
     exit $Code
 }
 function Test-Command { param([string]$cmd) $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
+
+# Version bump (Invoke-VersionBump) and release-branch tracking
+# (Start-ReleaseBranch, Complete-ReleaseBranch, Get-LatestEasBuild). Both use
+# the Write-* helpers above.
+. (Join-Path $PSScriptRoot 'VersionBump.ps1')
+. (Join-Path $PSScriptRoot 'ReleaseBranch.ps1')
 
 # Load KEY=VALUE pairs from a local .env file into the process environment.
 # Existing environment values win, so an explicitly-set EXPO_TOKEN is never
@@ -328,6 +356,29 @@ if (-not $env:EXPO_APPLE_ID) {
     Write-Ok "Apple ID from EXPO_APPLE_ID: $env:EXPO_APPLE_ID"
 }
 
+# -- Bump the release version --------------------------------------------------
+# Before the release branch is cut, so the branch (and the build it names)
+# carries the bumped version rather than the one it is about to replace.
+# Invoke-VersionBump is a no-op if HEAD is already a bump commit -- see
+# tools/version-bump.mjs -- so running this and BuildAndDeployAndroidStore.cmd
+# back to back for the same version bumps exactly once.
+if ($IsRelease) {
+    if (-not (Invoke-VersionBump -AppDir $AppDir -Level $BumpLevel)) {
+        Pop-Location
+        Wait-AndExit 1
+    }
+}
+
+# -- Cut the release branch ---------------------------------------------------
+# Before the build rather than after it, so that a run which never comes back
+# still left a record of having been attempted.
+if ($IsRelease) {
+    if (-not (Start-ReleaseBranch -AppDir $AppDir -Platform 'ios' -BuildProfile $Profile -AllowDirty:$AllowDirty)) {
+        Pop-Location
+        Wait-AndExit 1
+    }
+}
+
 # -- Build --------------------------------------------------------------------
 Write-Step "Starting EAS $Profile build for iOS (cloud)"
 Write-Host "  Build runs on Expo's macOS cloud runners." -ForegroundColor DarkGray
@@ -383,6 +434,24 @@ if ($buildExitCode -eq 0) {
     Write-Err "  - Run 'eas login' to re-authenticate with Expo"
     Write-Err "  - Check build logs at https://expo.dev"
     Write-Err "  - If Apple credentials expired, re-run without -NonInteractive"
+}
+
+# -- Record the outcome on the release branch ---------------------------------
+if ($IsRelease) {
+    $release = @{
+        AppDir        = $AppDir
+        Platform      = 'ios'
+        Outcome       = $(if ($buildExitCode -eq 0) { 'success' } else { 'failed' })
+        BuildExitCode = $buildExitCode
+        Duration      = $buildDuration
+        Submitted     = ((-not $NoSubmit) -and ($buildExitCode -eq 0))
+    }
+    $easBuild = Get-LatestEasBuild -EasCommand 'eas' -Platform 'ios' -Since $buildStart
+    if ($easBuild) {
+        $release['EasBuildId']  = $easBuild.Id
+        $release['EasBuildUrl'] = $easBuild.Url
+    }
+    Complete-ReleaseBranch @release
 }
 
 # -- Final summary ------------------------------------------------------------

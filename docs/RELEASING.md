@@ -55,12 +55,16 @@ not need Admin for a normal release.
 ## Version management
 
 - `expo.version` in `app.json` is the user-facing marketing version
-  (`1.0.0`). Bump it by hand for each release.
+  (`1.0.0`), mirrored in `package.json`'s `version`. Running
+  `tools\BuildAndDeployiOS.cmd` or `tools\BuildAndDeployAndroidStore.cmd`
+  bumps it **automatically** — a minor bump by default — before the build
+  starts. See [Automatic version bump](#automatic-version-bump) below.
 - The **build number** (iOS `CFBundleVersion` / Android `versionCode`)
   is managed **remotely by EAS** (`cli.appVersionSource: "remote"` in
   `eas.json`) and auto-incremented per production build
   (`build.production.autoIncrement: true`). It is _not_ stored in this
-  repo — `app.json` intentionally has no `ios.buildNumber`.
+  repo — `app.json` intentionally has no `ios.buildNumber` — and the
+  version-bump tooling below does not touch it either, for the same reason.
 
 Read the current remote value at any time:
 
@@ -70,9 +74,23 @@ eas build:version:get --platform ios
 
 ## Normal release flow
 
+The deploy scripts are the normal path, not the raw `eas` CLI: they bump the
+version, record the release branch and outcome tag (see below), and only then
+build and submit.
+
+```powershell
+.\tools\BuildAndDeployiOS.cmd
+.\tools\BuildAndDeployAndroidStore.cmd
+```
+
+Calling `eas build` / `eas submit` directly still works, but skips both the
+version bump and the release-branch/tag bookkeeping — use it only for a
+build that deliberately should not carry either, and bump `app.json` /
+`package.json` by hand first if it needs a new version:
+
 ```bash
 # 1. Confirm auth (see above) — eas whoami must show the robot.
-# 2. Build. autoIncrement bumps the remote counter automatically.
+# 2. Build. autoIncrement bumps the remote build-number counter automatically.
 eas build --platform ios --profile production
 
 # 3. Submit the build you just made.
@@ -98,6 +116,109 @@ questionnaire.
 
 After a successful submit, Apple still has to process the binary before
 it appears in TestFlight — typically 5–15 minutes.
+
+## Automatic version bump
+
+Every production run of `BuildAndDeployiOS.cmd` / `BuildAndDeployAndroidStore.cmd`
+bumps `expo.version` in `app.json` and `version` in `package.json` together,
+before the release branch is cut and before the build starts:
+
+1. Reads the current version from `app.json`.
+2. Computes the next one — **minor by default**, e.g. `1.2.3` → `1.3.0`.
+3. Commits it on a throwaway `version-bump/<next>` branch cut from `main`,
+   fast-forward merges that branch into `main`, deletes the throwaway branch,
+   and pushes `main`.
+
+```powershell
+.\tools\BuildAndDeployiOS.cmd              # minor bump (default)
+.\tools\BuildAndDeployiOS.cmd -Patch       # patch bump instead
+.\tools\BuildAndDeployiOS.cmd -Major       # major bump instead
+```
+
+**Shipping both platforms at the same version:** the bump runs once per
+platform script, so running both in a sitting calls it twice — but the
+second call is a no-op, not a second bump. Before doing anything, the tool
+checks whether `HEAD`'s own commit is already a bump it wrote; if so, it logs
+that and stops, because nothing has landed on `main` since and there is
+nothing new to release. Run the platforms in either order, back to back, and
+only the first one actually bumps:
+
+```powershell
+.\tools\BuildAndDeployiOS.cmd
+.\tools\BuildAndDeployAndroidStore.cmd     # sees its own prior commit, skips
+```
+
+This is verified end to end (two runs in a row, real git operations, in a
+throwaway repo) in
+`tools/__tests__/versionBump.integration.test.ts`.
+
+The bump refuses rather than guessing when:
+
+- **Not on `main`.** It only ever commits to the base branch; check it out
+  first.
+- **The working tree is dirty.** Unlike the release-branch tracking below,
+  there is no `-AllowDirty` escape hatch here — this commits to `main`
+  automatically, so it will not risk sweeping unrelated changes in with it.
+  Commit or stash first.
+- **`main` is behind or has diverged from `origin/main`.** Pull first.
+
+The logic lives in `tools/version-bump.mjs` (side effects: reading and
+writing the two files, the git branch/merge/push, the already-bumped check)
+and `tools/lib/version-bump.mjs` (the pure semver arithmetic and the
+bump-commit pattern, unit-tested in `tools/__tests__/versionBump.test.ts`).
+`tools/ps/VersionBump.ps1` is the one call site the deploy scripts use.
+
+## Release branches and outcome tags
+
+Every attempt to put a build in front of a store also leaves a record in
+git, independent of whether it succeeds. A deploy cuts a branch at the
+commit it is about to build (after the version bump above, so the branch
+carries the bumped version), named for the platform and the minute the run
+began, and pushes it immediately — before the build starts, so a run that
+never comes back still left a record of having been attempted:
+
+```
+release/ios/2026-08-13-1432
+release/android/2026-08-13-1432
+```
+
+When the run finishes, an annotated tag is written at the same commit and
+pushed, naming the outcome:
+
+```
+release/ios/2026-08-13-1432-success
+release/android/2026-08-13-1432-failed
+```
+
+The tag's message holds what a name cannot: the profile, the full commit,
+the duration, the exit code, whether the build was handed to the store, and
+the EAS build id when the tool could discover one.
+
+```bash
+git tag -n20 -l 'release/*'
+```
+
+A successful branch is kept for good — it may still be needed to cut a
+hotfix from. A failed or unfinished branch is pruned automatically 30 days
+after the fact; its tag is kept regardless, so nothing about the attempt is
+actually lost. Pruning runs at the end of every `finish`, or by itself:
+
+```bash
+node tools/release-branch.mjs prune --dry-run
+```
+
+A deploy refuses to start from a dirty working tree, for the same reason
+the version bump does: a branch cut from one names a commit that is not
+what gets built. `-AllowDirty` on the deploy script overrides this and
+says so in the tag's notes — the version bump above has no equivalent
+override.
+
+The logic lives in `tools/lib/release-branch.mjs` (naming and retention
+rules, unit-tested in `tools/__tests__/releaseBranch.test.ts`),
+`tools/lib/release-branch-prune.mjs` (the deletion rule, tested in
+`tools/__tests__/releaseBranchPrune.test.ts`), and `tools/release-branch.mjs`
+(the git side effects). `tools/ps/ReleaseBranch.ps1` is the three call sites
+the deploy scripts use.
 
 ## Troubleshooting
 

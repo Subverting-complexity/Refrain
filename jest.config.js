@@ -13,6 +13,16 @@ module.exports = {
     '\\.(wav|mp3|aac|m4a)$': '<rootDir>/src/__mocks__/audioFileMock.js',
     '^@/(.*)$': '<rootDir>/$1',
   },
+  // The release tooling under tools/ is plain ESM (.mjs), so it can run
+  // directly under Node without a bundler. jest-expo's own transform only
+  // matches .js/.jsx/.ts/.tsx, so .mjs needs its own entry here or Jest tries
+  // to `require()` it as CommonJS and fails on the first `export`. No project
+  // babel.config.js exists to give babel-jest a default, so the one plugin
+  // that matters -- turning `import`/`export` into `require`/`module.exports`
+  // -- is named explicitly rather than assumed.
+  transform: {
+    '\\.mjs$': ['babel-jest', { plugins: ['@babel/plugin-transform-modules-commonjs'] }],
+  },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     'app/**/*.{ts,tsx}',
