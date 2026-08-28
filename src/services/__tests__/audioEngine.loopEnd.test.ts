@@ -231,6 +231,8 @@ describe('audioEngine: looping around the end of the track', () => {
     releaseParkedSeeks();
     await settleSeeks();
 
+    // The rewind still ran: the restart was cancelled, not skipped.
+    expect(fake.position).toBe(0);
     expect(fake.playing).toBe(false);
   });
 
@@ -249,6 +251,8 @@ describe('audioEngine: looping around the end of the track', () => {
     await stopping;
     await settleSeeks();
 
+    // The rewind still ran: the restart was cancelled, not skipped.
+    expect(fake.position).toBe(0);
     expect(fake.playing).toBe(false);
   });
 

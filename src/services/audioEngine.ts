@@ -784,18 +784,18 @@ export async function pause(): Promise<void> {
 export async function stop(): Promise<void> {
   const outgoing = player;
   if (!outgoing) return;
+  // Counted like any other deliberate stop, so a loop restart still waiting on
+  // its rewind cannot resume the track the user just stopped. Recorded before
+  // the best-effort block below, because the intent to stop stands whether or
+  // not the pause reaches a still-live player.
+  transportStopCount += 1;
   // expo-audio has no stop(); emulate by pausing and rewinding. stop() runs
   // unserialized relative to load/unload, so the player can be removed
   // mid-call (e.g. tapping Stop then immediately navigating away) — pausing or
   // seeking a released player would reject. Best-effort so that race can never
-  // surface as an unhandled rejection.
-  // The player may have been released mid-stop, in which case there is
-  // nothing left to pause or rewind and nothing to report.
-  // Counted like any other deliberate stop, so a loop restart still waiting on
-  // its rewind cannot resume the track the user just stopped. Bumped outside
-  // the best-effort block because the intent to stop stands whether or not the
-  // pause below reaches a still-live player.
-  transportStopCount += 1;
+  // surface as an unhandled rejection: the player may have been released
+  // mid-stop, in which case there is nothing left to pause or rewind and
+  // nothing to report.
   await bestEffortAsync(async () => {
     outgoing.pause();
     markInternalSeek(markerA ?? 0);
