@@ -355,6 +355,29 @@ function detectLockScreenSkip(
   return { direction: delta > 0 ? 1 : -1, fromMs: previous };
 }
 
+/**
+ * Rewind `target` to the loop start, reporting a failed seek as an error.
+ *
+ * Resolves to whether the rewind actually landed, and only once it has. A
+ * caller that has to resume playback afterwards must wait for that: a player
+ * sitting at the end of its item ignores play, so pressing play alongside the
+ * seek rather than after it leaves the transport paused. Never rejects, so the
+ * result can be ignored by the callers that only need the seek issued.
+ */
+function rewindToLoopStart(
+  target: AudioPlayer,
+  toMs: number,
+): Promise<boolean> {
+  markInternalSeek(toMs);
+  return target.seekTo(msToSec(toMs)).then(
+    () => true,
+    (err: unknown) => {
+      reportSeekFailure(target, err);
+      return false;
+    },
+  );
+}
+
 function onPlaybackStatusUpdate(status: AudioStatus): void {
   if (status.error) {
     currentState = {
@@ -437,11 +460,8 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     }
 
     // Loop armed (or monitor active): rewind to the start.
-    markInternalSeek(region.a);
     const rewinding = player;
-    rewinding.seekTo(msToSec(region.a)).catch((err: unknown) => {
-      reportSeekFailure(rewinding, err);
-    });
+    const rewound = rewindToLoopStart(rewinding, region.a);
 
     if (!monitor && onLoopRestart) {
       // A per-loop count-in is registered: pause at A and hand off so the
@@ -453,10 +473,22 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       return;
     }
 
-    // When the track reached its natural end, the player auto-pauses.
-    // Restart it so the loop continues seamlessly.
+    // When the track reached its natural end, the player auto-pauses, so this
+    // is the one loop restart that has to press play again — and it must wait
+    // for the rewind to land first. `seekTo` is asynchronous, and a player
+    // still parked at the end of its item ignores play: iOS's AVPlayer drops
+    // the rate change outright. Playing first was therefore a no-op, and the
+    // loop died exactly where it wrapped around the end of the track — the
+    // playhead jumped back to the loop start and sat there paused. Every
+    // other restart keeps an already-playing player running, which is why
+    // only the wrap at the end stalled.
     if (status.didJustFinish) {
-      startPlayback(player);
+      void rewound.then((landed) => {
+        // Teardown or a track change can land in the gap; resuming then would
+        // start whichever track replaced this one.
+        if (!landed || player !== rewinding) return;
+        startPlayback(rewinding);
+      });
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position

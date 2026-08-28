@@ -103,6 +103,17 @@ function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Let a loop rewind settle. The engine restarts a naturally finished track
+ * only once its rewind seek has landed (a player parked at the end of its item
+ * ignores play), so the restart is a microtask behind the status update that
+ * triggered it.
+ */
+async function flushRewind() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   statusCallback = null;
@@ -2174,8 +2185,12 @@ describe('audioEngine', () => {
       );
 
       // The loop defaults to armed, so the finish rewinds to the start and
-      // keeps playing — looping needs no A/B markers.
+      // keeps playing — looping needs no A/B markers. The restart waits for
+      // the rewind: play against a player still sitting at the end of the
+      // track is ignored, which is what used to kill the loop at the wrap.
       expect(mockSeekTo).toHaveBeenCalledWith(0);
+      expect(mockPlay).not.toHaveBeenCalled();
+      await flushRewind();
       expect(mockPlay).toHaveBeenCalled();
       expect(listener).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'playing', positionMs: 0 }),
@@ -2200,6 +2215,7 @@ describe('audioEngine', () => {
       );
 
       expect(mockSeekTo).toHaveBeenCalledWith(5);
+      await flushRewind();
       expect(mockPlay).toHaveBeenCalled();
     });
 
@@ -2365,6 +2381,7 @@ describe('audioEngine', () => {
       );
 
       expect(mockSeekTo).toHaveBeenCalledWith(5);
+      await flushRewind();
       expect(mockPlay).toHaveBeenCalled();
     });
 
