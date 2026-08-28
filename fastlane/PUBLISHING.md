@@ -62,6 +62,7 @@ the generator, nothing more.
 | Privacy label (Apple)              | ✅ `privacy_details.json`       | (first time) fill once, then `refresh_privacy_template`            |
 | Data Safety (Google)               | ⚠️ answers in `data_safety.csv` | Export CSV for exact headers → import, or answer 3 questions in UI |
 | Build upload + submit              | ✅ EAS (`eas submit`)           | —                                                                  |
+| Release go-live gate               | ✅ Apple (`automatic_release`)  | Play: turn on **Managed publishing** (see below)                   |
 | Pricing & availability             | ❌                              | App Store Connect / Play Console                                   |
 | Bank, tax, agreements              | ❌                              | one-time account setup                                             |
 | Content rating (IARC) / age rating | ❌                              | Play Console questionnaire; Apple age rating in ASC                |
@@ -73,6 +74,29 @@ answer with its rationale in **[QUESTIONNAIRES.md](QUESTIONNAIRES.md)**. Fill
 them from there rather than answering ad hoc; that document also lists the
 outstanding submission blockers.
 
+## Managed publishing and release gating
+
+Both stores are set up so an approved release waits for a person before it goes
+live. The two are gated in different places, and only one of them is gated by
+this repo.
+
+**Apple is gated in the repo.** [Fastfile](Fastfile) sets
+`automatic_release: false`, which selects "Manually release this version". An
+approved build sits in Pending Developer Release until you release it.
+
+**Play is gated in the console, not the repo.** The android block in
+[../eas.json](../eas.json) submits to `track: "production"` and sets no
+`releaseStatus`, so EAS uses its default of `completed`. The only thing that
+stops an approved release from rolling out is the **Managed publishing** toggle
+in Play Console under Publishing overview. Turn it on before the first
+`eas submit --platform android`, and do not read `track: "production"` in
+`eas.json` as a mistake: it is deliberate, and it is safe only while that
+toggle is on.
+
+Managed publishing gates going live. It does not stop a submission entering
+review, so a production-track submission is still reviewed as a production
+release. It just waits for your publish click afterwards.
+
 ## Before you run anything — fill these in
 
 1. **URLs** are set to the real domain in `metadata/en-US/` —
@@ -81,8 +105,11 @@ outstanding submission blockers.
    before you submit.** Publish `docs/privacy-policy.md` at `/refrain/privacy`;
    `precheck` fails on a broken URL, and both stores reject an unreachable
    privacy policy.
-2. **Review phone number**: `metadata/en-US/review_information/phone_number.txt`
-   is a placeholder — set a real number Apple review can reach.
+2. **Review contact**: `metadata/en-US/review_information/` carries the real
+   App Review contact: Adrienne Bosch, `support@subvertingcomplexity.com`,
+   `+27713280153`. Apple uses these to reach you during review, so keep them
+   current. Leave `demo_user.txt` and `demo_password.txt` absent; their absence
+   is what clears the "Sign-in required" tick in App Store Connect.
 3. **Categories**: `metadata/primary_category.txt` = `MZGenre.Music`,
    secondary `MZGenre.Education`. Adjust if you prefer.
 4. **App Store name**: the canonical iOS display name is
