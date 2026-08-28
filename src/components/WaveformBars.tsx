@@ -3,17 +3,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
 import { WaveformPeaks } from '../types';
-import { withAlpha } from '../utils/color';
+import { mix } from '../utils/color';
 import { HANDLE_ZONE } from './waveformLayout';
-
-// Opacity tiers for the three states a bar can be in. Played bars are bright
-// (and graded by amplitude on top of this base); bars inside the A/B region
-// that haven't played yet sit at a clearly visible mid tone; everything else
-// is dull. Kept as discrete tiers so the loop window reads at a glance.
-const PLAYED_BASE_ALPHA = 0.5;
-const PLAYED_AMPLITUDE_ALPHA = 0.5;
-const LOOP_UNPLAYED_ALPHA = 0.3;
-const DULL_ALPHA = 0.12;
 
 export interface WaveformBarsProps {
   peaks: WaveformPeaks;
@@ -46,23 +37,14 @@ export const WaveformBars = React.memo(function WaveformBars({
   loopActive,
 }: WaveformBarsProps) {
   const { theme } = useTheme();
-  // The foreground accent, not the fill accent: these are translucent
-  // tints laid over `surface`, and a fill-weight accent washes out badly
-  // at low alpha on a light surface.
-  //
-  // This lifts the played tier against a light surface from 1.66..2.89 to
-  // 2.12..5.41 — a range, not a figure, because the tier's alpha is graded
-  // by amplitude, so a quiet played bar sits at the bottom of it and only
-  // a peak reaches the top. It does *not* rescue the two quiet tiers: the
-  // dull tier still sits at 1.18 and the loop-unplayed tier at 1.54, so
-  // the loop window is conveyed by a difference too fine to rely on.
-  //
-  // Fixing that means retuning the alphas, which are shared with dark
-  // mode. Dark is better on both readings — its tiers sit at 1.32 and
-  // 2.07 against its surface, and its steps between tiers are 1.56 and
-  // 1.60 against light's 1.30 and 1.38 — but "better" is not "enough",
-  // and the alphas cannot move for one theme alone. See #268.
-  const accent = theme.colors.accentForeground;
+  // Each tier is an opaque colour the palette states outright, rather than
+  // one accent at three alphas over the card. Alpha could not carry this:
+  // the alphas were shared by both themes, and against a near-white card a
+  // full-strength accent only reaches 5.41, which is not enough room for
+  // three steps a reader can tell apart. The palette holds the reasoning
+  // and the measured figures; what this does is pick a tier per bar.
+  const { waveformDull, waveformLoop, waveformPlayed, waveformPeak } =
+    theme.colors;
   const denom = peaks.length;
 
   return (
@@ -78,14 +60,15 @@ export const WaveformBars = React.memo(function WaveformBars({
 
         let backgroundColor: string;
         if (played) {
-          backgroundColor = withAlpha(
-            accent,
-            PLAYED_BASE_ALPHA + PLAYED_AMPLITUDE_ALPHA * peak,
-          );
+          // The played tier is a range, not a value: grading it by the bar's
+          // own amplitude is what keeps the waveform reading as a waveform
+          // rather than a block of colour. The quiet end is the one that has
+          // to stay clear of the loop tier below it.
+          backgroundColor = mix(waveformPlayed, waveformPeak, peak);
         } else if (inRegion) {
-          backgroundColor = withAlpha(accent, LOOP_UNPLAYED_ALPHA);
+          backgroundColor = waveformLoop;
         } else {
-          backgroundColor = withAlpha(accent, DULL_ALPHA);
+          backgroundColor = waveformDull;
         }
 
         return (

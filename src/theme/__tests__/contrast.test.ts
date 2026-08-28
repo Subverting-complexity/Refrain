@@ -18,7 +18,7 @@
  */
 import { darkTheme, lightTheme, Theme, ThemeColors } from '..';
 import { pillColors } from '../../components/chipStyles';
-import { contrastRatio } from '../../utils/color';
+import { contrastRatio, mix } from '../../utils/color';
 
 /** WCAG 2.1 AA for body text and icons that carry meaning. */
 const AA_TEXT = 4.5;
@@ -45,6 +45,23 @@ const ELEVATION_MIN = 1.15;
  * three have room.
  */
 const TRACK_MIN = 1.45;
+/**
+ * The waveform's four tiers, as the step each one has to clear over the tier
+ * below it. None of these is a WCAG figure, and no palette could make them
+ * one: the steps chain multiplicatively, so three tiers at 3:1 each would
+ * need 27:1 between the card and the quietest played bar, and the most any
+ * pair of colours can reach is 21:1.
+ *
+ * What the split does reflect is which step carries which information. The
+ * dull-to-loop step is the one that tells the reader where the loop window
+ * is before it plays, so it gets much the largest share; that step used to
+ * be 1.56 in dark and 1.31 in light, which is what #268 was filed for. The
+ * two above it are secondary, because the cursor also marks the playhead
+ * and the amplitude grading only has to read as grading.
+ */
+const WAVEFORM_DULL_MIN = 1.6;
+const WAVEFORM_LOOP_STEP_MIN = 2.5;
+const WAVEFORM_STEP_MIN = 1.5;
 
 type Pair = [name: string, fg: keyof ThemeColors, bg: keyof ThemeColors];
 
@@ -104,10 +121,23 @@ const NON_TEXT_PAIRS: Pair[] = [
   ['an outlined control on a card', 'outline', 'surface'],
 ];
 
+/**
+ * The waveform bar tiers in the order they are drawn, least important first.
+ * Each is asserted against the one before it, and the first against the card
+ * the bars sit on.
+ */
+const WAVEFORM_TIERS: (keyof ThemeColors)[] = [
+  'waveformDull',
+  'waveformLoop',
+  'waveformPlayed',
+  'waveformPeak',
+];
+
 /** Every token asserted above, plus the ones covered by a named test. */
 const COVERED = new Set<keyof ThemeColors>([
   ...TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
   ...NON_TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
+  ...WAVEFORM_TIERS,
   'accent',
   'track',
   'surface',
@@ -162,6 +192,44 @@ describe.each([
     expect(contrastRatio(textColor, colors.background)).toBeGreaterThanOrEqual(
       AA_TEXT,
     );
+  });
+
+  it('lifts the dull waveform tier clear of the card it sits on', () => {
+    expect(
+      contrastRatio(colors.waveformDull, colors.surface),
+    ).toBeGreaterThanOrEqual(WAVEFORM_DULL_MIN);
+  });
+
+  it('separates the loop tier from the dull one', () => {
+    expect(
+      contrastRatio(colors.waveformLoop, colors.waveformDull),
+    ).toBeGreaterThanOrEqual(WAVEFORM_LOOP_STEP_MIN);
+  });
+
+  it.each([
+    ['played from loop', 'waveformPlayed' as const, 'waveformLoop' as const],
+    ['peak from played', 'waveformPeak' as const, 'waveformPlayed' as const],
+  ])('separates %s', (_label, above, below) => {
+    expect(contrastRatio(colors[above], colors[below])).toBeGreaterThanOrEqual(
+      WAVEFORM_STEP_MIN,
+    );
+  });
+
+  // `WaveformMarkers` washes the loop region with `markerA` at 5%, and it
+  // draws after the bars, so the loop tier is seen through that wash. The
+  // two must not fight: the step that signals the loop has to survive it.
+  it('keeps the loop step intact under the marker region tint', () => {
+    const tinted = mix(colors.waveformLoop, colors.markerA, 0.05);
+    expect(contrastRatio(tinted, colors.waveformDull)).toBeGreaterThanOrEqual(
+      WAVEFORM_LOOP_STEP_MIN,
+    );
+  });
+
+  it('keeps the waveform tiers in order, dullest to loudest', () => {
+    const ratios = WAVEFORM_TIERS.map((tier) =>
+      contrastRatio(colors[tier], colors.surface),
+    );
+    expect(ratios).toEqual([...ratios].sort((a, b) => a - b));
   });
 
   it('covers every colour token', () => {

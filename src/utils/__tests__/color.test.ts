@@ -1,4 +1,4 @@
-import { contrastRatio, luminance, withAlpha } from '../color';
+import { contrastRatio, luminance, mix, withAlpha } from '../color';
 
 describe('withAlpha', () => {
   it('appends a full-opacity byte for alpha 1', () => {
@@ -86,5 +86,41 @@ describe('contrastRatio', () => {
     // whichever way round the pair is passed.
     expect(contrastRatio('#ffffff', '#000000')).toBeGreaterThanOrEqual(1);
     expect(contrastRatio('#7edbb8', '#111d1f')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('mix', () => {
+  it('is the start colour at 0 and the end colour at 1', () => {
+    expect(mix('#000000', '#ffffff', 0)).toBe('#000000');
+    expect(mix('#000000', '#ffffff', 1)).toBe('#ffffff');
+  });
+
+  it('blends each channel independently', () => {
+    expect(mix('#000000', '#ffffff', 0.5)).toBe('#808080');
+    expect(mix('#204060', '#60a0e0', 0.5)).toBe('#4070a0');
+  });
+
+  // Callers hand it an amplitude or a ratio, so it clamps rather than
+  // asking every one of them to guard the ends itself.
+  it('clamps a fraction outside 0..1', () => {
+    expect(mix('#000000', '#ffffff', -3)).toBe('#000000');
+    expect(mix('#000000', '#ffffff', 42)).toBe('#ffffff');
+  });
+
+  it('keeps two-digit channels zero-padded', () => {
+    expect(mix('#000000', '#0f0f0f', 1)).toBe('#0f0f0f');
+    expect(mix('#000000', '#101010', 0.5)).toBe('#080808');
+  });
+
+  it('accepts a hex without its leading hash', () => {
+    expect(mix('000000', 'ffffff', 1)).toBe('#ffffff');
+  });
+
+  // Same rejection as `luminance`: a plausible-looking wrong colour is
+  // worse than an obviously wrong one.
+  it('treats anything that is not a six-digit hex as black', () => {
+    expect(mix('#fff', '#ffffff', 0)).toBe('#000000');
+    expect(mix('#ffffff', 'rgb(0,0,0)', 1)).toBe('#000000');
+    expect(mix('#7edbb8ff', '#ffffff', 0)).toBe('#000000');
   });
 });

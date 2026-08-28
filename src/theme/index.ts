@@ -73,6 +73,31 @@ export interface ThemeColors {
   markerBText: string;
   /** Dimming scrim behind centred modal dialogs. */
   overlay: string;
+  /**
+   * The four colours the waveform bars are drawn in, darkest-reading to
+   * brightest-reading as a bar becomes more important:
+   *
+   * - `waveformDull` — outside the loop, or unplayed with no loop set. The
+   *   shape of the rest of the track, as context.
+   * - `waveformLoop` — inside the A/B region but not played yet. This is
+   *   what tells the reader where the loop window is before it plays, so
+   *   the step between it and `waveformDull` is the one that matters most.
+   * - `waveformPlayed` / `waveformPeak` — the played tier, which is a pair
+   *   rather than a single value: a played bar is `mix`ed between the two
+   *   by its own amplitude, so the waveform still reads as a waveform.
+   *   `waveformPlayed` is the quietest bar and is therefore the end that
+   *   has to clear the step above `waveformLoop`.
+   *
+   * Opaque, and stated per theme rather than derived as one accent at three
+   * alphas. The alphas were shared by both palettes, so neither could be
+   * tuned without moving the other, and a single accent through alpha
+   * cannot reach far enough from a near-white card to fit three legible
+   * steps underneath it. See #268.
+   */
+  waveformDull: string;
+  waveformLoop: string;
+  waveformPlayed: string;
+  waveformPeak: string;
 }
 
 export interface ThemeTypography {
@@ -128,6 +153,14 @@ const darkColors: ThemeColors = {
   markerB: '#ff5d77',
   markerBText: '#40060f',
   overlay: 'rgba(0, 0, 0, 0.5)',
+  // Against the card: 1.70, 4.40, 7.10, 10.96. The steps between them are
+  // 1.70, 2.59, 1.61 and 1.54, with the largest share given to the one that
+  // signals the loop window. Muted at the dull end and vivid in the middle,
+  // so the loop reads as the brightest thing on the card short of the peaks.
+  waveformDull: '#2e5548',
+  waveformLoop: '#2fa17b',
+  waveformPlayed: '#4ecca2',
+  waveformPeak: '#c9e9de',
 };
 
 const lightColors: ThemeColors = {
@@ -171,6 +204,14 @@ const lightColors: ThemeColors = {
   // Tinted to the palette and lighter than dark mode's scrim: a flat black
   // wash over a light page reads as a different app's dialog.
   overlay: 'rgba(10, 28, 22, 0.45)',
+  // The same four steps as dark mode, at the other end of the scale: here a
+  // more important bar is darker rather than brighter, so the ramp runs from
+  // a muted pale green out of the way of the card to a near-black green at
+  // the peaks. Against the card: 1.70, 4.41, 7.04, 11.02.
+  waveformDull: '#a4cec0',
+  waveformLoop: '#278666',
+  waveformPlayed: '#1d634b',
+  waveformPeak: '#1b4235',
 };
 
 export const darkTheme: Theme = {

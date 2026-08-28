@@ -16,6 +16,40 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${byte}`;
 }
 
+/**
+ * Blend two opaque `#rrggbb` colours in sRGB, `t` of the way from `from` to
+ * `to`. `t` is clamped to 0..1 so a caller can hand it an unbounded ratio
+ * without guarding the ends.
+ *
+ * The waveform uses it to grade a played bar by its amplitude: the tier is a
+ * pair of colours rather than one, so the quietest bar and the loudest one
+ * can each be placed at the contrast they need. Blending in sRGB rather than
+ * a perceptual space is deliberate — it is what the browser and the platform
+ * do for a translucent fill, so a graded bar sits on the same ramp as the
+ * translucent tints drawn beside it.
+ *
+ * Six-digit hex only, matching {@link luminance}: anything else yields
+ * `#000000` rather than a plausible-looking wrong colour.
+ */
+export function mix(from: string, to: string, t: number): string {
+  const a = channels(from);
+  const b = channels(to);
+  const k = Math.max(0, Math.min(1, t));
+  const blended = a.map((value, i) => Math.round(value + (b[i] - value) * k));
+  return `#${blended.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** The three sRGB channels of an opaque hex, or zeros if it is not one. */
+function channels(hex: string): [number, number, number] {
+  if (!/^#?[0-9a-fA-F]{6}$/.test(hex)) return [0, 0, 0];
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
 /** One sRGB channel, 0..255, linearised per WCAG 2.1. */
 function linearize(value: number): number {
   const c = value / 255;
