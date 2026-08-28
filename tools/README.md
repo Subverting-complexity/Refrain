@@ -106,8 +106,13 @@ npx eas-cli@latest build --platform all --auto-submit
 
 `ios.bundleIdentifier` and `android.package` are set to
 `com.subvertingcomplexity.refrain` in `app.json`. Before the first TestFlight /
-Play submit, fill in the `submit.production` credentials (`appleId`, `ascAppId`,
+Play submit, fill in the `submit.production` credentials (`ascAppId`,
 `appleTeamId`, and the Play `serviceAccountKeyPath`) in `eas.json`.
+
+The Apple ID is deliberately **not** in `eas.json`, because this repository is
+public and it is a personal address. Set `EXPO_APPLE_ID` in the gitignored
+`.env` instead (see `.env.example`). The deploy scripts load `.env` before EAS
+runs, so the prompt never falls back to its cached username.
 
 ## Coverage thresholds
 
