@@ -332,28 +332,21 @@ if ($existingLog.Count -gt 0) {
 }
 
 # -- Pin the Apple ID for credential sign-in ----------------------------------
-# EAS prompts for an Apple ID during certificate/profile generation and defaults
-# to the Expo account email, which may be the wrong Apple account. Pin it to the
-# appleId from eas.json (single source of truth) unless the caller already set
-# EXPO_APPLE_ID explicitly.
-if (-not $env:EXPO_APPLE_ID) {
-    $easJson = Join-Path $AppDir 'eas.json'
-    if (Test-Path $easJson) {
-        try {
-            $easConfig = Get-Content $easJson -Raw | ConvertFrom-Json
-            $submitAppleId = $easConfig.submit.production.ios.appleId
-            if ($submitAppleId -and $submitAppleId -notlike 'YOUR_*') {
-                $env:EXPO_APPLE_ID = $submitAppleId
-                Write-Ok "Apple ID pinned from eas.json: $submitAppleId"
-            } else {
-                Write-Warn "No valid submit.production.ios.appleId in eas.json. EAS will prompt for the Apple ID."
-            }
-        } catch {
-            Write-Warn "Could not parse eas.json for the Apple ID. EAS will prompt."
-        }
-    }
-} else {
+# EAS prompts for an Apple ID during certificate and profile generation. Left to
+# itself it prefills from a cached username (~/.app-store/auth/username.json),
+# which is whatever Apple ID was typed last -- possibly a work account rather
+# than the one that owns this app.
+#
+# The value is deliberately NOT in eas.json: this repository is public and the
+# Apple ID is a personal address. It lives in the gitignored .env, loaded near
+# the top of this script, and eas-cli reads EXPO_APPLE_ID directly before it
+# reaches the prompt.
+if ($env:EXPO_APPLE_ID) {
     Write-Ok "Apple ID from EXPO_APPLE_ID: $env:EXPO_APPLE_ID"
+} else {
+    Write-Warn "EXPO_APPLE_ID is not set. EAS will prompt and prefill from its cached username,"
+    Write-Warn "  which may be a different Apple account. Add EXPO_APPLE_ID to .env (see .env.example)"
+    Write-Warn "  rather than accepting whatever the prompt offers."
 }
 
 # -- Bump the release version --------------------------------------------------
@@ -430,7 +423,8 @@ if ($buildExitCode -eq 0) {
     $updatedLog = Add-BuildEntry -Status "failed" -Profile $Profile -Notes "Exit code: $buildExitCode. Duration: $buildDuration"
     Write-Err "EAS build failed (exit code $buildExitCode). Duration: $buildDuration"
     Write-Err "Common fixes:"
-    Write-Err "  - Check eas.json has valid appleId, ascAppId, and appleTeamId"
+    Write-Err "  - Check eas.json has valid ascAppId and appleTeamId"
+    Write-Err "  - Check EXPO_APPLE_ID is set (in .env); it is not in eas.json"
     Write-Err "  - Run 'eas login' to re-authenticate with Expo"
     Write-Err "  - Check build logs at https://expo.dev"
     Write-Err "  - If Apple credentials expired, re-run without -NonInteractive"
