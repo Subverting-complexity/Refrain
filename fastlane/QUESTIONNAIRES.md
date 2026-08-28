@@ -211,8 +211,8 @@ pushed by `fastlane ios listing`:
 | Field             | Value                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------ |
 | First / last name | Adrienne / Bosch                                                                     |
-| Email             | `adrienne.bosch7@icloud.com`                                                         |
-| Phone             | **PLACEHOLDER — see §4.1**                                                           |
+| Email             | `support@subvertingcomplexity.com`                                                   |
+| Phone             | `+27713280153`                                                                       |
 | Sign-in required  | **No** — leave demo account fields empty                                             |
 | Notes             | See `notes.txt` — explains that no login is needed and how to exercise every feature |
 | Attachment        | Not needed                                                                           |
@@ -397,7 +397,7 @@ access.
 | --------------- | ------------------------------------------------------------ |
 | App category    | Music & Audio                                                |
 | Tags            | Choose from Play's fixed list — music tools / audio players  |
-| Contact email   | `adrienne.bosch7@icloud.com`                                 |
+| Contact email   | `support@subvertingcomplexity.com`                           |
 | Contact website | `https://subvertingcomplexity.com/refrain/`                  |
 | Contact phone   | Optional — supply only if the account holder wants it public |
 
@@ -421,11 +421,41 @@ All three need the account holder. None can be answered from the codebase.
 
 ## 4. Blockers — resolve before submitting
 
-### 4.1 Review phone number is a placeholder
+### 4.1 Neither store listing has been populated yet
 
-[metadata/en-US/review_information/phone_number.txt](metadata/en-US/review_information/phone_number.txt)
-contains `+00 000 0000000`. Apple review must be able to reach a real number.
-Replace it and re-run `fastlane ios listing`.
+Console state as audited on **28 August 2026**. This is a point-in-time
+snapshot taken in the consoles, not something the repo can verify, so re-check
+it before acting on it.
+
+**Google Play.** All App content declarations are complete: category, contact
+email, privacy policy, app access, ads, content rating, target audience, data
+safety, government apps, financial features, and health. Developer identity,
+website, and Android developer verification are cleared. Outstanding:
+
+- The default store listing has never been created. Every field is empty,
+  including title, short description, full description, icon, feature graphic,
+  and screenshots. `fastlane android listing` fills all of these from
+  [metadata/android/](metadata/android/).
+- No app bundle has ever been uploaded, so there are no releases on any track.
+  See the first-upload note in [../docs/RELEASING.md](../docs/RELEASING.md).
+- Countries and regions are not selected. Console-only, account holder.
+
+**Apple.** Version 1.0 is in Prepare for Submission. App name, categories, age
+rating, privacy labels, privacy policy URL, pricing across 175 countries,
+content rights, and the license agreement are all done. Outstanding:
+
+- Version metadata is blank: subtitle, promotional text, description,
+  keywords, support URL, marketing URL, copyright. `fastlane ios listing`
+  fills all of these from [metadata/en-US/](metadata/en-US/).
+- Screenshots: 4 images on the iPhone 6.5" set only, nothing on iPad. The repo
+  holds 8 iPhone 6.9" and 8 iPad 12.9" images that `deliver` uploads, plus an
+  iPad 13" set that still needs the manual upload described in
+  [PUBLISHING.md](PUBLISHING.md).
+- No build attached, and no builds in the account at all, so TestFlight is
+  empty.
+- App Review Information has "Sign-in required" ticked with blank credentials.
+  Refrain has no accounts, so this is wrong. Pushing the review information
+  block with no `demo_user.txt` / `demo_password.txt` present clears it (2.5).
 
 ### 4.2 The website pages must be live
 

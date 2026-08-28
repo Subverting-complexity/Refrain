@@ -117,6 +117,11 @@ questionnaire.
 After a successful submit, Apple still has to process the binary before
 it appears in TestFlight — typically 5–15 minutes.
 
+Neither store rolls a release out on its own. Apple waits because the
+fastlane lane sets `automatic_release: false`; Play waits only while
+**Managed publishing** is enabled in the console. Both are covered in
+[../fastlane/PUBLISHING.md](../fastlane/PUBLISHING.md).
+
 ## Automatic version bump
 
 Every production run of `BuildAndDeployiOS.cmd` / `BuildAndDeployAndroidStore.cmd`
@@ -237,6 +242,27 @@ Fix: load `EXPO_TOKEN` for your shell (see Authenticating) and re-run
 `eas whoami` to confirm you are the robot. Logging out and back in with a
 different personal account is _not_ necessary and defeats the point of
 the token setup.
+
+### First Android upload for a brand-new app is rejected
+
+Reported behaviour rather than something this project has hit yet. For an app
+that has never had a bundle on any track, the Play Developer API can reject the
+very first upload with a permissions or "app not found" style error even when
+the service account is configured correctly.
+
+Fix: upload that first AAB by hand in Play Console. The API works normally
+afterwards. Do not work around it by widening the service account's
+permissions, and do not retry in a loop.
+
+### `fastlane android listing` fails on changelogs before the first release
+
+[../fastlane/Fastfile](../fastlane/Fastfile) sets `skip_upload_changelogs:
+false`. `supply` attaches changelogs to the releases on the target track, so on
+an app with no release on any track there is nothing to attach them to and the
+lane can error.
+
+Fix: set `skip_upload_changelogs: true` for that one run, push the listing,
+then set it back to `false` once a build has landed on the track.
 
 ### iOS submission fails: "bundle version must be higher than …"
 
