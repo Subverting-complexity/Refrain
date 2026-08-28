@@ -3,14 +3,27 @@
 Brand color: #7edbb8
 Backgrounds: light=#f2faf7, dark=#111d1f
 
+Two colourways. Everything not suffixed `-light` is drawn for dark
+backgrounds; the `full-color-light` family and the `on-light-512` panels are
+drawn for light ones. See "Light colourway" below for why both are needed.
+
 ## Files
 
+- master.svg
+- master.png
 - master.pdf
 - lockup-horizontal/lockup-horizontal-full-color-64.png
 - lockup-horizontal/lockup-horizontal-full-color-128.png
 - lockup-horizontal/lockup-horizontal-full-color-256.png
 - lockup-horizontal/lockup-horizontal-full-color-512.png
 - lockup-horizontal/lockup-horizontal-full-color-1024.png
+- lockup-horizontal/lockup-horizontal-full-color-light-64.png
+- lockup-horizontal/lockup-horizontal-full-color-light-128.png
+- lockup-horizontal/lockup-horizontal-full-color-light-256.png
+- lockup-horizontal/lockup-horizontal-full-color-light-512.png
+- lockup-horizontal/lockup-horizontal-full-color-light-1024.png
+- lockup-horizontal/lockup-horizontal.svg
+- lockup-horizontal/lockup-horizontal-light.svg
 - lockup-horizontal/lockup-horizontal-grayscale-64.png
 - lockup-horizontal/lockup-horizontal-grayscale-128.png
 - lockup-horizontal/lockup-horizontal-grayscale-256.png
@@ -39,6 +52,13 @@ Backgrounds: light=#f2faf7, dark=#111d1f
 - icon-only/icon-only-full-color-256.png
 - icon-only/icon-only-full-color-512.png
 - icon-only/icon-only-full-color-1024.png
+- icon-only/icon-only-full-color-light-64.png
+- icon-only/icon-only-full-color-light-128.png
+- icon-only/icon-only-full-color-light-256.png
+- icon-only/icon-only-full-color-light-512.png
+- icon-only/icon-only-full-color-light-1024.png
+- icon-only/icon-only.svg
+- icon-only/icon-only-light.svg
 - icon-only/icon-only-grayscale-64.png
 - icon-only/icon-only-grayscale-128.png
 - icon-only/icon-only-grayscale-256.png
@@ -67,6 +87,13 @@ Backgrounds: light=#f2faf7, dark=#111d1f
 - wordmark-only/wordmark-only-full-color-256.png
 - wordmark-only/wordmark-only-full-color-512.png
 - wordmark-only/wordmark-only-full-color-1024.png
+- wordmark-only/wordmark-only-full-color-light-64.png
+- wordmark-only/wordmark-only-full-color-light-128.png
+- wordmark-only/wordmark-only-full-color-light-256.png
+- wordmark-only/wordmark-only-full-color-light-512.png
+- wordmark-only/wordmark-only-full-color-light-1024.png
+- wordmark-only/wordmark-only.svg
+- wordmark-only/wordmark-only-light.svg
 - wordmark-only/wordmark-only-grayscale-64.png
 - wordmark-only/wordmark-only-grayscale-128.png
 - wordmark-only/wordmark-only-grayscale-256.png
@@ -95,6 +122,11 @@ Backgrounds: light=#f2faf7, dark=#111d1f
 - lockup-stacked/lockup-stacked-full-color-256.png
 - lockup-stacked/lockup-stacked-full-color-512.png
 - lockup-stacked/lockup-stacked-full-color-1024.png
+- lockup-stacked/lockup-stacked-full-color-light-64.png
+- lockup-stacked/lockup-stacked-full-color-light-128.png
+- lockup-stacked/lockup-stacked-full-color-light-256.png
+- lockup-stacked/lockup-stacked-full-color-light-512.png
+- lockup-stacked/lockup-stacked-full-color-light-1024.png
 - lockup-stacked/lockup-stacked-grayscale-64.png
 - lockup-stacked/lockup-stacked-grayscale-128.png
 - lockup-stacked/lockup-stacked-grayscale-256.png
@@ -118,6 +150,10 @@ Backgrounds: light=#f2faf7, dark=#111d1f
 - lockup-stacked/lockup-stacked-on-light-512.png
 - lockup-stacked/lockup-stacked-on-dark-512.png
 - lockup-stacked/lockup-stacked-on-brand-512.png
+- favicon.ico
+- favicon-16.png
+- favicon-32.png
+- favicon-48.png
 - apple-touch-icon.png
 - app-icon-ios.png
 - windows-tile-44.png
@@ -127,6 +163,7 @@ Backgrounds: light=#f2faf7, dark=#111d1f
 - app-icon-android-foreground.png
 - app-icon-android-background.png
 - og-image.png
+- play-store-banner-1024x500.png
 - social-banner-twitter.png
 - social-banner-facebook.png
 
@@ -160,8 +197,39 @@ Backgrounds: light=#f2faf7, dark=#111d1f
   auto-detected — the source's icon is a gradient, so "the brand color" is a judgment
   call; this is the app's actual accent color.
 - Background colors: light = `#f2faf7` (matches the existing `logo-light.svg` panel
-  color), dark = `#111d1f` (matches `theme.background` / the app's splash and Android
-  adaptive-icon background color in `app.json`).
+  color), dark = `#111d1f` (matches `theme.background` / the app's dark-mode splash and
+  Android adaptive-icon background color in `app.json`). The app's light-mode splash uses
+  `#dfeee7`, the light `theme.background`, not the `#f2faf7` panel color used here.
+
+## Light colourway
+
+The original set had one colour treatment per mark, built on the mint brand
+gradient. Measured against a light background that ink lands at 1.4:1 to
+1.8:1, so every mark was effectively invisible on light. The `on-light-512`
+panels were affected worst: they placed the mint ink straight onto the
+`#f2faf7` panel at 1.52:1 to 1.76:1. `mono-black` was the only file in the set
+that actually worked on a light ground, and it carries no brand colour.
+
+The `-light` family fixes that. It reuses the ink already authored in
+`assets/logo/svg/logo-light.svg` rather than inventing a second palette:
+
+- Icon gradient `#3daa80` → `#2e9470` → `#1f7a5c`, replacing the mint stops
+  `#a0edcf` → `#7edbb8` → `#4a9e82`.
+- Wordmark solid `#1a2e28`, replacing the mint fill `#7edbb8`.
+
+Measured contrast after the change, against the app's light background
+`#dfeee7` and the kit panel `#f2faf7`: icon-only 3.25:1 / 3.67:1,
+lockup-stacked 5.09:1 / 5.75:1, lockup-horizontal 5.36:1 / 6.06:1,
+wordmark-only 11.96:1 / 13.51:1. All clear the 3:1 that WCAG 1.4.11 asks of a
+meaningful non-text graphic.
+
+Geometry is identical to the dark family. Each `-light` PNG was placed so its
+ink bounding box matches its `full-color` counterpart exactly at all five
+sizes, which was verified per file rather than assumed. `lockup-stacked` has
+no SVG source in this kit (it was composed from the icon and wordmark
+rasters), so its light variant was rebuilt the same way, at the icon and
+wordmark boxes measured off `lockup-stacked-full-color-1024.png`.
+
 - This directory supplements, and does not replace or overwrite, the hand-authored
   sources in `assets/logo/svg/` and `assets/logo/png/`, or the files `app.json` actually
   points at in `assets/images/`. Those keep shipping the app; this kit is the fuller
