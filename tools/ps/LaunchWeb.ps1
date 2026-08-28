@@ -11,8 +11,8 @@
     through screen layouts, theming, and navigation.
 
     For anything audio-related (loop import, playback, A/B markers against a
-    real clip), build to a device with BuildAndDeployiOS.ps1 -Profile
-    development or BuildAndDeployAndroid.ps1.
+    real clip), build to a device with Deploy.ps1 -Profile development
+    -Platform ios or BuildAndDeployAndroid.ps1.
 
     The window pauses for a keypress on every exit path -- including
     errors and Ctrl+C -- so you can read the output before it closes.

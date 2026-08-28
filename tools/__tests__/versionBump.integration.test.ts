@@ -1,96 +1,47 @@
 /**
  * End-to-end proof for `tools/version-bump.mjs`'s git side effects: the
- * branch-cut-commit-merge-push sequence, its refusals, and — the property
- * that actually matters here — that running the deploy scripts for iOS and
- * then Android in the same sitting bumps the version exactly once.
+ * commit-push-pull-request-merge sequence, its refusals, its rollback, and —
+ * the property that actually matters here — that re-running a release after a
+ * partial failure rebuilds at the same version rather than bumping again.
  *
  * `tools/__tests__/versionBump.test.ts` covers the pure arithmetic and text
- * editing in isolation. None of that proves the tool behaves correctly
- * against real git, and the double-bump property specifically can only be
- * observed by actually running the CLI twice against a real repository and
- * checking what landed. So this spawns the real tool as a child process
- * against a throwaway repo with a local bare "origin", the same way a
- * developer's machine and the real `origin` relate to each other.
+ * editing in isolation. None of that proves the tool behaves correctly against
+ * real git, and the no-second-bump property specifically can only be observed
+ * by running the CLI twice against a real repository and checking what landed.
+ * So this spawns the real tool as a child process against a throwaway repo
+ * with a local bare "origin", the same way a developer's machine and the real
+ * `origin` relate to each other.
+ *
+ * The GitHub half is a fake `gh` on PATH (see `fakeGh.ts`) that performs a
+ * real merge commit on the remote and then deletes the head branch, which is
+ * what this repository's "automatically delete head branches" setting does.
+ * The bump's own re-push of the release branch is the thing that keeps the
+ * release record from disappearing in the middle of a release, so it is worth
+ * a test that reproduces the deletion rather than assuming it away.
  */
 
-import { execFileSync } from 'node:child_process';
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-const TOOL_PATH = join(__dirname, '..', 'version-bump.mjs');
+import { fakeGhWorks, installFakeGh } from './fakeGh';
+import {
+  APP_JSON,
+  git,
+  releaseBranches,
+  remoteReleaseBranches,
+  runTool,
+  setupRepo,
+  writeFile,
+  type Repo,
+} from './releaseRepo';
 
-const APP_JSON = (version: string) =>
-  `{\n  "expo": {\n    "name": "Refrain",\n    "version": "${version}"\n  }\n}\n`;
-const PACKAGE_JSON = (version: string) =>
-  `{\n  "name": "refrain",\n  "version": "${version}",\n  "private": true\n}\n`;
-
-interface Repo {
-  root: string;
-  workDir: string;
-  originDir: string;
-}
-
-/** Runs git, throwing with its output if it refuses. */
-function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
-}
-
-/** Runs the tool itself, tolerating a non-zero exit (refusals are the point of half these tests). */
-function runBump(
-  workDir: string,
-  args: string[],
-): { status: number; output: string } {
-  try {
-    const output = execFileSync('node', [TOOL_PATH, 'bump', ...args], {
-      cwd: workDir,
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
-    return { status: 0, output };
-  } catch (error) {
-    const err = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      status: err.status ?? 1,
-      output: `${err.stdout ?? ''}${err.stderr ?? ''}`,
-    };
-  }
-}
-
-/**
- * A throwaway repo with a local bare "origin" and a "work" clone on `main`,
- * seeded with `app.json` / `package.json` at `1.0.0` and pushed. Mirrors a
- * developer's machine talking to the real GitHub remote closely enough for
- * `version-bump.mjs`'s fetch-and-compare check to behave the same way.
- */
-function setupRepo(): Repo {
-  const root = mkdtempSync(join(tmpdir(), 'refrain-version-bump-'));
-  const originDir = join(root, 'origin');
-  const workDir = join(root, 'work');
-  mkdirSync(originDir);
-  mkdirSync(workDir);
-
-  git(originDir, ['init', '--bare', '-q']);
-
-  git(workDir, ['init', '-q']);
-  git(workDir, ['config', 'user.email', 'test@refrain.local']);
-  git(workDir, ['config', 'user.name', 'Refrain Test']);
-  git(workDir, ['remote', 'add', 'origin', originDir]);
-
-  writeFileSync(join(workDir, 'app.json'), APP_JSON('1.0.0'), 'utf8');
-  writeFileSync(join(workDir, 'package.json'), PACKAGE_JSON('1.0.0'), 'utf8');
-  git(workDir, ['add', '-A']);
-  git(workDir, ['commit', '-q', '-m', 'init']);
-  git(workDir, ['branch', '-M', 'main']);
-  git(workDir, ['push', '-q', '-u', 'origin', 'main']);
-
-  return { root, workDir, originDir };
+function runBump(repo: Repo, args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
+  return runTool(
+    'version-bump.mjs',
+    repo.workDir,
+    ['bump', ...args],
+    installFakeGh(repo.root, extraEnv),
+  );
 }
 
 function readVersions(workDir: string): { app: string; pkg: string } {
@@ -100,8 +51,7 @@ function readVersions(workDir: string): { app: string; pkg: string } {
 }
 
 function bumpCommitCount(workDir: string): number {
-  const log = git(workDir, ['log', '--format=%s']);
-  return log
+  return git(workDir, ['log', '--format=%s'])
     .split(/\r?\n/)
     .filter((line) => line.startsWith('chore(release): bump version to'))
     .length;
@@ -114,90 +64,210 @@ describe('version-bump.mjs (integration)', () => {
     rmSync(repo.root, { recursive: true, force: true });
   });
 
-  it('bumps app.json and package.json together and pushes main', () => {
+  it('installs a fake gh the tooling can actually reach', () => {
+    // If this fails, every other expectation in this file is testing the
+    // absence of gh rather than the pull-request path.
+    repo = setupRepo();
+    expect(fakeGhWorks(installFakeGh(repo.root))).toBe(true);
+  });
+
+  it('bumps both files and lands them on main through a pull request', () => {
     repo = setupRepo();
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor']);
 
     expect(result.status).toBe(0);
     expect(readVersions(repo.workDir)).toEqual({ app: '1.1.0', pkg: '1.1.0' });
     expect(bumpCommitCount(repo.workDir)).toBe(1);
-    // Pushed: local main and origin/main must point at the same commit.
+
+    // Landed: local main and origin/main agree, and the merge commit is what
+    // main now points at rather than the bump commit itself.
     const local = git(repo.workDir, ['rev-parse', 'main']).trim();
     const upstream = git(repo.workDir, ['rev-parse', 'origin/main']).trim();
     expect(local).toBe(upstream);
-    // The throwaway branch does not linger.
-    expect(git(repo.workDir, ['branch', '--list', 'version-bump/1.1.0'])).toBe(
-      '',
+    expect(git(repo.workDir, ['log', '-1', '--format=%s']).trim()).toContain(
+      'Merge pull request',
     );
   });
 
-  it('does not bump twice when iOS and Android deploy back to back', () => {
-    // The scenario this whole test file exists for: BuildAndDeployiOS.cmd
-    // bumps, then BuildAndDeployAndroidStore.cmd runs its own bump call a
-    // moment later against the same checkout. Refrain must ship the same
-    // version to both stores, not 1.1.0 to one and 1.2.0 to the other.
+  it('commits the bump on the release branch, not on a throwaway one', () => {
+    // The release branch is cut from the bump commit, which is what makes it
+    // name exactly what is about to be built. A separate bump branch would be
+    // a second name for the same commit with no distinct job.
     repo = setupRepo();
 
-    const first = runBump(repo.workDir, ['--level', 'minor']);
+    runBump(repo, ['--level', 'minor']);
+
+    const branches = releaseBranches(repo.workDir);
+    expect(branches).toHaveLength(1);
+    expect(branches[0]).toMatch(/^release\/\d{4}-\d{2}-\d{2}-\d{4}$/);
+    expect(
+      git(repo.workDir, [
+        'log',
+        '-1',
+        '--format=%s',
+        branches[0] as string,
+      ]).trim(),
+    ).toBe('chore(release): bump version to 1.1.0');
+  });
+
+  it('keeps the bump commit an ancestor of main, not a content twin', () => {
+    // Not a squash: a hotfix cut from a successful release branch has to merge
+    // back into a history that recognises it.
+    repo = setupRepo();
+    runBump(repo, ['--level', 'minor']);
+
+    const branch = releaseBranches(repo.workDir)[0] as string;
+    expect(() =>
+      git(repo.workDir, ['merge-base', '--is-ancestor', branch, 'main']),
+    ).not.toThrow();
+  });
+
+  it('puts the release branch back when the merge deletes it', () => {
+    // GitHub deletes the head branch on merge in this repository, and the head
+    // branch here is the release record. Losing it would mean a release with
+    // no remote trace of what it was built from.
+    repo = setupRepo();
+    runBump(repo, ['--level', 'minor']);
+
+    const branch = releaseBranches(repo.workDir)[0] as string;
+    expect(remoteReleaseBranches(repo.originDir)).toEqual([branch]);
+  });
+
+  it('does not bump again on a retry after a partial failure', () => {
+    // The scenario this file exists for. iOS shipped, Android failed, and the
+    // operator re-runs the entry point to rebuild Android. Refrain must ship
+    // one version to both stores, not 1.1.0 to one and 1.2.0 to the other.
+    // The merge commit is what makes this hard: HEAD's own subject is
+    // "Merge pull request #...", so the guard has to look behind it.
+    repo = setupRepo();
+
+    const first = runBump(repo, ['--level', 'minor']);
     expect(first.status).toBe(0);
     expect(readVersions(repo.workDir).app).toBe('1.1.0');
 
-    const second = runBump(repo.workDir, ['--level', 'minor']);
+    const second = runBump(repo, ['--level', 'minor']);
 
     expect(second.status).toBe(0);
-    expect(second.output).toMatch(/Already at 1\.1\.0.*Nothing to bump/);
+    expect(second.output).toMatch(/Already at 1\.1\.0/);
     expect(readVersions(repo.workDir)).toEqual({ app: '1.1.0', pkg: '1.1.0' });
     expect(bumpCommitCount(repo.workDir)).toBe(1);
+    expect(releaseBranches(repo.workDir)).toHaveLength(1);
   });
 
-  it('is not fooled by a different bump level on the second call', () => {
-    // -Patch on one platform and the default minor on the other should still
-    // resolve to "already bumped, skip" rather than stacking a second bump on
-    // top at the differing level.
+  it('is not fooled by a different bump level on the retry', () => {
+    // -Patch on the retry and the default minor on the first run should still
+    // resolve to "already bumped, skip" rather than stacking a second bump at
+    // the differing level.
     repo = setupRepo();
 
-    runBump(repo.workDir, ['--level', 'minor']);
-    const second = runBump(repo.workDir, ['--level', 'patch']);
+    runBump(repo, ['--level', 'minor']);
+    const second = runBump(repo, ['--level', 'patch']);
 
     expect(second.status).toBe(0);
     expect(readVersions(repo.workDir).app).toBe('1.1.0');
     expect(bumpCommitCount(repo.workDir)).toBe(1);
   });
 
-  it('bumps again once a real commit lands on top of a skipped bump', () => {
+  it('bumps again once real work lands on top of a skipped bump', () => {
     // The gate must not be permanently sticky: once something new merges to
-    // main, the next deploy has something new to release and should bump.
+    // main, the next release has something new to release and should bump.
     repo = setupRepo();
 
-    runBump(repo.workDir, ['--level', 'minor']);
+    runBump(repo, ['--level', 'minor']);
     expect(readVersions(repo.workDir).app).toBe('1.1.0');
 
-    writeFileSync(
-      join(repo.workDir, 'readme.md'),
-      'unrelated change\n',
-      'utf8',
-    );
+    writeFile(repo.workDir, 'readme.md', 'unrelated change\n');
     git(repo.workDir, ['add', '-A']);
     git(repo.workDir, ['commit', '-q', '-m', 'docs: add a readme']);
     git(repo.workDir, ['push', '-q', 'origin', 'main']);
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor']);
 
     expect(result.status).toBe(0);
     expect(readVersions(repo.workDir).app).toBe('1.2.0');
     expect(bumpCommitCount(repo.workDir)).toBe(2);
   });
 
+  describe('when the pull request will not land', () => {
+    it('stops the release rather than building an unreleased version', () => {
+      repo = setupRepo();
+
+      const result = runBump(repo, ['--level', 'minor'], {
+        FAKE_GH_MERGE_FAILS: '1',
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('did not merge');
+    });
+
+    it('rolls the bump back, so the next run is not wedged', () => {
+      // A local-only bump commit left behind is the exact failure this whole
+      // redesign removes: main would have diverged from the remote and every
+      // later run would refuse to start.
+      repo = setupRepo();
+
+      runBump(repo, ['--level', 'minor'], { FAKE_GH_MERGE_FAILS: '1' });
+
+      expect(readVersions(repo.workDir)).toEqual({
+        app: '1.0.0',
+        pkg: '1.0.0',
+      });
+      expect(
+        git(repo.workDir, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
+      ).toBe('main');
+      expect(git(repo.workDir, ['rev-parse', 'main']).trim()).toBe(
+        git(repo.workDir, ['rev-parse', 'origin/main']).trim(),
+      );
+      expect(releaseBranches(repo.workDir)).toEqual([]);
+      expect(remoteReleaseBranches(repo.originDir)).toEqual([]);
+    });
+
+    it('rolls back a pull request that could not even be opened', () => {
+      repo = setupRepo();
+
+      const result = runBump(repo, ['--level', 'minor'], {
+        FAKE_GH_CREATE_FAILS: '1',
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('Could not open the pull request');
+      expect(releaseBranches(repo.workDir)).toEqual([]);
+      expect(remoteReleaseBranches(repo.originDir)).toEqual([]);
+    });
+
+    it('leaves the next run free to bump the same version again', () => {
+      // The rollback is only worth anything if the retry actually works.
+      repo = setupRepo();
+      runBump(repo, ['--level', 'minor'], { FAKE_GH_MERGE_FAILS: '1' });
+
+      const retry = runBump(repo, ['--level', 'minor']);
+
+      expect(retry.status).toBe(0);
+      expect(readVersions(repo.workDir).app).toBe('1.1.0');
+    });
+  });
+
+  it('refuses without a GitHub CLI to open the pull request with', () => {
+    // Checked before the branch is cut: a missing gh discovered after the bump
+    // commit exists means rolling back a commit that never had to be written.
+    repo = setupRepo();
+
+    const result = runBump(repo, ['--level', 'minor'], {
+      FAKE_GH_UNAVAILABLE: '1',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('GitHub CLI (gh) is not available');
+    expect(readVersions(repo.workDir).app).toBe('1.0.0');
+    expect(releaseBranches(repo.workDir)).toEqual([]);
+  });
+
   it('refuses a dirty working tree', () => {
     repo = setupRepo();
-    writeFileSync(
-      join(repo.workDir, 'app.json'),
-      APP_JSON('1.0.0') + '\n',
-      'utf8',
-    );
+    writeFile(repo.workDir, 'app.json', `${APP_JSON('1.0.0')}\n`);
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor']);
 
     expect(result.status).toBe(1);
     expect(result.output).toContain('Tracked files have been modified');
@@ -208,7 +278,7 @@ describe('version-bump.mjs (integration)', () => {
     repo = setupRepo();
     git(repo.workDir, ['checkout', '-q', '-b', 'feature/x']);
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor']);
 
     expect(result.status).toBe(1);
     expect(result.output).toContain('Version bump only runs from main');
@@ -225,23 +295,28 @@ describe('version-bump.mjs (integration)', () => {
       'local-only commit',
     ]);
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor']);
 
     expect(result.status).toBe(1);
     expect(result.output).toContain('is not in sync with');
     expect(readVersions(repo.workDir).app).toBe('1.0.0');
   });
 
-  it('refuses when a same-named bump branch already exists', () => {
-    // Simulates a previous run that failed partway through, after cutting the
-    // branch but before cleaning it up.
+  it('refuses when the release branch it wants already exists', () => {
+    // Simulates a previous release that failed partway through, after cutting
+    // the branch but before cleaning it up.
     repo = setupRepo();
-    git(repo.workDir, ['branch', 'version-bump/1.1.0']);
+    const stamp = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const name =
+      `release/${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}` +
+      `-${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
+    git(repo.workDir, ['branch', name]);
 
-    const result = runBump(repo.workDir, ['--level', 'minor']);
+    const result = runBump(repo, ['--level', 'minor', '--branch', name]);
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain('version-bump/1.1.0 already exists');
+    expect(result.output).toContain('already exists');
     expect(readVersions(repo.workDir).app).toBe('1.0.0');
   });
 });

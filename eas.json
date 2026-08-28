@@ -44,6 +44,16 @@
         "serviceAccountKeyPath": "./pc-api-key.json",
         "track": "production"
       }
+    },
+    "internal": {
+      "ios": {
+        "ascAppId": "6780801245",
+        "appleTeamId": "JTUZQBUGVY"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./pc-api-key.json",
+        "track": "internal"
+      }
     }
   }
 }

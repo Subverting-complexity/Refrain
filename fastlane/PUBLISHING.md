@@ -137,6 +137,13 @@ export APPLE_ID="<the Apple Developer account email>"
 export SUPPLY_JSON_KEY="./pc-api-key.json"
 ```
 
+**From `.env` instead of a shell.** The deploy script loads the gitignored
+`.env` and hands these to fastlane, which is how a release on Windows gets
+them. One difference: a `.env` file holds one `KEY=VALUE` per line and cannot
+carry the newlines a PEM block needs, so set **`ASC_KEY_PATH`** to the `.p8`
+file's path rather than pasting its contents into `ASC_KEY_CONTENT`. The
+Fastfile takes either; `.p8` is gitignored. See `.env.example`.
+
 ## Run
 
 ```bash
@@ -153,6 +160,27 @@ bundle exec fastlane android listing
 
 `ios listing` runs `precheck` first to catch common rejection triggers
 (placeholder text, other-platform mentions, broken URLs).
+
+### The release runs these for you
+
+A store-lane release (`tools\Deploy.cmd`) pushes each platform's listing after
+that platform's binary submit, and by default only when that platform's listing
+files have changed since its last successful store release. `-Listing on`
+pushes regardless, `-Listing off` skips it. The commands above are the manual
+equivalent, for a listing-only change or for finishing a push that failed.
+
+Two things the release deliberately does not do:
+
+- **The fast lane never pushes the public listing.** TestFlight carries its own
+  "What to Test" text and the Play internal track does not use the production
+  listing, so pushing public copy from a tester build would publish changes
+  nobody asked to publish.
+- **`submit:true` is never part of a release run.** Submitting for review needs
+  a build Apple has finished processing, which takes 5 to 15 minutes and is
+  outside our control. Run it yourself once TestFlight shows the build as
+  processed.
+
+See [`../docs/RELEASING.md`](../docs/RELEASING.md) for the whole flow.
 
 ## Regenerating screenshots
 

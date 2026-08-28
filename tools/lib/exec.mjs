@@ -14,6 +14,35 @@ import { spawnSync } from 'node:child_process';
 const isWindows = process.platform === 'win32';
 
 /**
+ * Stops Node printing DEP0190 over the top of a release.
+ *
+ * Node warns once per process that arguments passed with `shell: true` are
+ * "not escaped, only concatenated". That is a fair warning about the general
+ * case and not about this one: {@link quoteForShell} quotes both the command
+ * and every argument before they reach `cmd`, which is the whole reason that
+ * function exists. Shelling out is not optional either — since the
+ * CVE-2024-27980 fix, Node will not spawn the `.cmd` shims that `bundle` and
+ * `gh` are on Windows without it.
+ *
+ * So the warning is noise an operator cannot act on, printed in the middle of
+ * a release. It is filtered by name and text rather than by turning warnings
+ * off, so anything else Node has to say still gets through. The default
+ * listener has to be removed first: adding a listener does not replace it.
+ *
+ * Called by the tool entry points rather than on import, so importing a
+ * module for a unit test does not change the test runner's warning behaviour.
+ */
+export function quietShellDeprecation() {
+  process.removeAllListeners('warning');
+  process.on('warning', (warning) => {
+    const isShellArgsWarning =
+      warning.name === 'DeprecationWarning' && /shell option true/.test(warning.message);
+    if (isShellArgsWarning) return;
+    process.stderr.write(`${warning.name}: ${warning.message}\n`);
+  });
+}
+
+/**
  * Wraps an argument in double quotes when `cmd.exe` would otherwise split
  * or interpret it. `%` and `!` are included because `cmd` expands `%VAR%`
  * (and `!VAR!` under delayed expansion) *before* the child process sees

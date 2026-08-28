@@ -9,10 +9,11 @@
  * gone by the time anyone noticed.
  */
 
+import { LANES, OUTCOMES, parsePlatformSelection, PLATFORMS } from './release-branch.mjs';
+import { LISTING_SELECTORS } from './release-listing.mjs';
+
 /** Thrown for a command line this module cannot make sense of. */
 export class UsageError extends Error {}
-
-import { OUTCOMES, PLATFORMS } from './release-branch.mjs';
 
 /**
  * What one subcommand accepts.
@@ -30,22 +31,29 @@ import { OUTCOMES, PLATFORMS } from './release-branch.mjs';
  * Names are camelCase here and kebab-case on the command line; `--eas-build-id`
  * and `easBuildId` are the same option, converted rather than listed twice.
  *
+ * `start` takes `--platforms` (the set this release covers) while `finish`
+ * takes `--platform` (the one reporting). They are deliberately different
+ * words: the run state has to know the whole set up front, or a release that
+ * stops after the first platform leaves state nobody will ever clear.
+ *
  * @type {Record<string, CommandSpec>}
  */
 export const COMMANDS = {
   start: {
-    summary: 'Cut and push the release branch for a run about to start.',
-    values: ['platform', 'profile', 'remote'],
+    summary: 'Cut and push the one release branch for a release about to start.',
+    values: ['platforms', 'lane', 'profile', 'remote'],
     flags: ['allowDirty'],
-    required: ['platform'],
+    required: ['platforms'],
   },
   finish: {
-    summary: 'Tag the branch with how the run ended, then prune old branches.',
+    summary: "Tag one platform's outcome on the release branch.",
     values: [
       'platform',
       'outcome',
       'exitCode',
       'duration',
+      'listing',
+      'submitProfile',
       'easBuildId',
       'easBuildUrl',
       'notes',
@@ -55,11 +63,29 @@ export const COMMANDS = {
     flags: ['submitted', 'noPrune'],
     required: ['platform', 'outcome'],
   },
+  stop: {
+    summary: 'Close a release that ended early, leaving unattempted platforms untagged.',
+    values: ['notes', 'remote', 'keepDays'],
+    flags: ['noPrune'],
+    required: [],
+  },
   prune: {
     summary: 'Remove failed and unfinished release branches past their keep window.',
     values: ['remote', 'keepDays'],
     flags: ['dryRun'],
     required: [],
+  },
+  'listing-check': {
+    summary: "Decide whether one platform's store listing needs pushing (exit 20 = skip).",
+    values: ['platform', 'lane', 'listing', 'remote'],
+    flags: [],
+    required: ['platform'],
+  },
+  'listing-preflight': {
+    summary: 'Check the listing toolchain and credentials before the first build.',
+    values: ['platforms', 'lane', 'listing'],
+    flags: [],
+    required: ['platforms'],
   },
   help: { summary: 'Show this text.', values: [], flags: [], required: [] },
 };
@@ -105,8 +131,12 @@ function readInteger(option, raw) {
  *
  * @typedef {object} ReleaseOptions
  * @property {string} command
- * @property {string} [platform]
+ * @property {string} [platform] the one platform reporting an outcome
+ * @property {('ios' | 'android')[]} [platforms] the set a release covers
+ * @property {string} [lane]
+ * @property {string} [listing]
  * @property {string} [profile]
+ * @property {string} [submitProfile]
  * @property {string} [outcome]
  * @property {string} [remote]
  * @property {string} [duration]
@@ -158,7 +188,10 @@ export function parseArgs(argv) {
 
   const options = blank(rawCommand);
   options.platform = values.get('platform');
+  options.lane = values.get('lane');
+  options.listing = values.get('listing');
   options.profile = values.get('profile');
+  options.submitProfile = values.get('submitProfile');
   options.outcome = values.get('outcome');
   options.remote = values.get('remote');
   options.duration = values.get('duration');
@@ -173,6 +206,15 @@ export function parseArgs(argv) {
   options.submitted = flags.has('submitted');
   options.noPrune = flags.has('noPrune');
   options.dryRun = flags.has('dryRun');
+
+  const platforms = values.get('platforms');
+  if (platforms !== undefined) {
+    try {
+      options.platforms = parsePlatformSelection(platforms);
+    } catch (error) {
+      throw new UsageError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   assertValues(options);
   return options;
@@ -257,6 +299,26 @@ function assertValues(options) {
     );
   }
 
+  const lane = options.lane;
+  if (lane !== undefined && !LANES.some((known) => known === lane)) {
+    throw new UsageError(`Unknown lane '${lane}'. Expected ${LANES.join(' or ')}.`);
+  }
+
+  // `--listing` means two different things by command, and both are text this
+  // parser can check: a selector on `listing-check` / `listing-preflight`, and
+  // free-form "what happened to the listing" on `finish`. Only the first is
+  // constrained, because the second ends up in a tag message.
+  const listing = options.listing;
+  if (
+    listing !== undefined &&
+    options.command !== 'finish' &&
+    !LISTING_SELECTORS.some((known) => known === listing)
+  ) {
+    throw new UsageError(
+      `Unknown listing selector '${listing}'. Expected ${LISTING_SELECTORS.join(', ')}.`,
+    );
+  }
+
   if (options.keepDays !== undefined && options.keepDays < 0) {
     throw new UsageError('--keep-days cannot be negative.');
   }
@@ -278,14 +340,21 @@ export function usage() {
   const lines = [
     'Usage: node tools/release-branch.mjs <command> [options]',
     '',
-    ...Object.entries(COMMANDS).map(([name, spec]) => `  ${name.padEnd(7)} ${spec.summary}`),
+    ...Object.entries(COMMANDS).map(([name, spec]) => `  ${name.padEnd(18)} ${spec.summary}`),
     '',
-    '  start   --platform <ios|android> [--profile <name>] [--remote <name>] [--allow-dirty]',
-    '  finish  --platform <ios|android> --outcome <success|failed> [--exit-code <n>]',
-    '          [--duration <hh:mm:ss>] [--submitted] [--eas-build-id <id>]',
-    '          [--eas-build-url <url>] [--notes <text>] [--remote <name>]',
-    '          [--keep-days <n>] [--no-prune]',
-    '  prune   [--keep-days <n>] [--remote <name>] [--dry-run]',
+    '  start              --platforms <both|ios|android> [--lane <store|fast>]',
+    '                     [--profile <name>] [--remote <name>] [--allow-dirty]',
+    '  finish             --platform <ios|android> --outcome <success|failed>',
+    '                     [--exit-code <n>] [--duration <hh:mm:ss>] [--submitted]',
+    '                     [--listing <text>] [--submit-profile <name>]',
+    '                     [--eas-build-id <id>] [--eas-build-url <url>] [--notes <text>]',
+    '                     [--remote <name>] [--keep-days <n>] [--no-prune]',
+    '  stop               [--notes <text>] [--remote <name>] [--keep-days <n>] [--no-prune]',
+    '  prune              [--keep-days <n>] [--remote <name>] [--dry-run]',
+    '  listing-check      --platform <ios|android> [--lane <store|fast>]',
+    '                     [--listing <auto|on|off>] [--remote <name>]',
+    '  listing-preflight  --platforms <both|ios|android> [--lane <store|fast>]',
+    '                     [--listing <auto|on|off>]',
   ];
   return lines.join('\n');
 }

@@ -1,0 +1,194 @@
+/**
+ * When a release pushes the store *listing*, and what it needs in place first.
+ *
+ * EAS builds and submits the binary. The listing — metadata, keywords,
+ * screenshots, and the privacy and data-safety declarations — is pushed by
+ * fastlane, which is a second toolchain with credentials of its own. This
+ * module holds the two rules that decide whether a release run should call it,
+ * as pure functions of their arguments, so both can be unit-tested without a
+ * repository, a network, or a Ruby installation.
+ *
+ * `tools/release-branch.mjs` supplies the git diff and the environment;
+ * `tools/ps/Deploy.ps1` makes the calls.
+ *
+ * ## Why the paths are listed here
+ *
+ * Change detection diffs the platform's listing paths between the commit being
+ * released and the commit of the last successful store-lane release for that
+ * platform. The two platforms' paths are disjoint, so each is decided
+ * independently: an iOS-only copy change should not push the Play listing.
+ */
+
+import { PLATFORMS } from './release-branch.mjs';
+
+/**
+ * The paths whose contents make up each platform's store listing.
+ *
+ * Repository-relative, and matched by prefix rather than exactly, so a new
+ * locale directory or an extra screenshot is picked up without editing this.
+ *
+ * `fastlane/metadata/en-US` is Apple's; `fastlane/metadata/android` is
+ * Google's, images included. They sit under a shared parent, so the iOS entry
+ * names the locale directory rather than `fastlane/metadata`, which would
+ * otherwise swallow the Android listing as well.
+ *
+ * @type {Record<'ios' | 'android', string[]>}
+ */
+export const LISTING_PATHS = {
+  ios: [
+    'fastlane/metadata/en-US',
+    'fastlane/metadata/copyright.txt',
+    'fastlane/metadata/primary_category.txt',
+    'fastlane/metadata/secondary_category.txt',
+    'fastlane/screenshots',
+    'fastlane/screenshots-ipad13',
+    'fastlane/privacy_details.json',
+  ],
+  android: ['fastlane/metadata/android'],
+};
+
+/**
+ * The environment variables fastlane needs for each platform's listing lane.
+ *
+ * iOS authenticates with an App Store Connect API key, which is a different
+ * credential from the EAS token and from the Apple ID: three separate
+ * identities in one release. Android uses a Play service-account JSON.
+ *
+ * Each entry is a list of variables that would each do, not a list of
+ * variables that are all needed. The private key has two spellings because a
+ * `.env` file holds one line per value and cannot carry the newlines a PEM
+ * block needs: `ASC_KEY_CONTENT` works from a shell that can export a
+ * multi-line string, and `ASC_KEY_PATH` points at the `.p8` file instead,
+ * which is what a Windows release actually uses.
+ *
+ * @type {Record<'ios' | 'android', string[][]>}
+ */
+export const LISTING_CREDENTIALS = {
+  ios: [['ASC_KEY_ID'], ['ASC_ISSUER_ID'], ['ASC_KEY_CONTENT', 'ASC_KEY_PATH']],
+  android: [['SUPPLY_JSON_KEY']],
+};
+
+/** What the operator can ask for on a run. */
+export const LISTING_SELECTORS = /** @type {const} */ (['auto', 'on', 'off']);
+
+/** Thrown for a listing selector this module does not have a rule for. */
+export class ListingError extends Error {}
+
+/**
+ * Asserts a listing selector is one this module understands.
+ *
+ * @param {string} selector
+ * @returns {'auto' | 'on' | 'off'}
+ */
+export function assertListingSelector(selector) {
+  const found = LISTING_SELECTORS.find((known) => known === selector);
+  if (!found) {
+    throw new ListingError(
+      `Unknown listing selector '${selector}'. Expected ${LISTING_SELECTORS.join(', ')}.`,
+    );
+  }
+  return found;
+}
+
+/**
+ * Whether this run should push one platform's store listing, and why.
+ *
+ * The reason is returned rather than logged, because it is worth having in two
+ * places: the console, so the operator can see that `auto` decided to skip,
+ * and the outcome tag, so the same question can be answered a month later.
+ *
+ * @param {object} input
+ * @param {'ios' | 'android'} input.platform
+ * @param {'auto' | 'on' | 'off'} input.selector
+ * @param {'store' | 'fast'} input.lane
+ * @param {string | null} input.previousCommit the commit of the last successful
+ *   store-lane release for this platform, or `null` if there has never been one
+ * @param {readonly string[]} input.changedPaths listing paths that differ
+ *   between `previousCommit` and the commit being released
+ * @returns {{ push: boolean, reason: string }}
+ */
+export function decideListingPush({ platform, selector, lane, previousCommit, changedPaths }) {
+  assertListingSelector(selector);
+
+  // The fast lane never touches the public listing, whatever the selector
+  // says. TestFlight carries its own "What to Test" text and the Play internal
+  // track does not use the production listing, so pushing public listing copy
+  // from a tester build would publish changes nobody asked to publish.
+  if (lane !== 'store') {
+    return {
+      push: false,
+      reason: `not pushed: the ${lane} lane does not touch the public listing`,
+    };
+  }
+
+  if (selector === 'off') {
+    return { push: false, reason: 'not pushed: --listing off' };
+  }
+
+  if (selector === 'on') {
+    return { push: true, reason: 'pushed: --listing on' };
+  }
+
+  if (!previousCommit) {
+    return {
+      push: true,
+      reason: 'pushed: no previous successful store release to compare the listing against',
+    };
+  }
+
+  if (changedPaths.length === 0) {
+    return {
+      push: false,
+      reason: `not pushed: no ${platform} listing change since ${previousCommit.slice(0, 8)}`,
+    };
+  }
+
+  return {
+    push: true,
+    reason: `pushed: ${changedPaths.length} ${platform} listing path(s) changed since ${previousCommit.slice(0, 8)}`,
+  };
+}
+
+/**
+ * What is missing before fastlane could push a listing.
+ *
+ * Checked once, before the first build, rather than at the point of use. A
+ * missing App Store Connect key should fail the run in seconds rather than
+ * after a build has already been paid for and shipped, at which point the
+ * release is half done and the operator has to decide what to do with it.
+ *
+ * @param {object} input
+ * @param {readonly ('ios' | 'android')[]} input.platforms platforms whose
+ *   listing this run intends to push
+ * @param {Record<string, string | undefined>} input.env
+ * @param {boolean} input.hasBundler whether `bundle` is on PATH
+ * @param {boolean} input.hasDefaultPlayKey whether `pc-api-key.json` is present,
+ *   which is what the Android lane falls back to when SUPPLY_JSON_KEY is unset
+ * @returns {{ ok: boolean, problems: string[] }}
+ */
+export function checkListingPrerequisites({ platforms, env, hasBundler, hasDefaultPlayKey }) {
+  /** @type {string[]} */
+  const problems = [];
+  const wanted = PLATFORMS.filter((platform) => platforms.includes(platform));
+
+  if (wanted.length === 0) return { ok: true, problems };
+
+  if (!hasBundler) {
+    problems.push(
+      "Ruby's 'bundle' is not on PATH. The listing push needs it: run 'cd fastlane && bundle install'.",
+    );
+  }
+
+  for (const platform of wanted) {
+    for (const spellings of LISTING_CREDENTIALS[platform]) {
+      if (spellings.some((name) => (env[name] ?? '').trim() !== '')) continue;
+      // The Android lane falls back to ./pc-api-key.json when SUPPLY_JSON_KEY
+      // is unset, so an existing file is as good as the variable.
+      if (spellings.includes('SUPPLY_JSON_KEY') && hasDefaultPlayKey) continue;
+      const named = spellings.join(' or ');
+      problems.push(`${named} is not set (needed for the ${platform} listing push).`);
+    }
+  }
+
+  return { ok: problems.length === 0, problems };
+}
