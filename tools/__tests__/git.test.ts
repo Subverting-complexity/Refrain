@@ -47,11 +47,23 @@ describe('git', () => {
 
   it('spawns git directly rather than through a shell', () => {
     nextCapture({ code: 0, output: '' });
-    git('/repo', ['tag', '-a', 'release/ios/x', '-F', 'msg.txt']);
+    git('/repo', [
+      'tag',
+      '-a',
+      'release/2026-08-13-1432-ios-success',
+      '-F',
+      'msg.txt',
+    ]);
 
     const [command, args, options] = lastCall();
     expect(command).toBe('git');
-    expect(args).toEqual(['tag', '-a', 'release/ios/x', '-F', 'msg.txt']);
+    expect(args).toEqual([
+      'tag',
+      '-a',
+      'release/2026-08-13-1432-ios-success',
+      '-F',
+      'msg.txt',
+    ]);
     expect(options).toMatchObject({ cwd: '/repo', quiet: true, shell: false });
   });
 

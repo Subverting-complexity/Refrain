@@ -6,8 +6,13 @@
 # skips the binary upload.
 #
 # Prerequisites (see fastlane/PUBLISHING.md for the full checklist):
-#   iOS      ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_CONTENT  (App Store Connect API key)
+#   iOS      ASC_KEY_ID, ASC_ISSUER_ID, and the private key as either
+#            ASC_KEY_CONTENT (raw .p8 contents) or ASC_KEY_PATH (path to it)
 #   Android  SUPPLY_JSON_KEY -> path to the Play service-account JSON
+#
+# ASC_KEY_PATH exists because a .env file holds one KEY=VALUE per line and
+# cannot carry the newlines a PEM block needs. Exporting ASC_KEY_CONTENT from a
+# shell still works; the Windows deploy script loads .env, so it uses the path.
 #
 # Usage:
 #   bundle exec fastlane ios listing                 # push metadata + screenshots + privacy label
@@ -17,15 +22,32 @@
 
 APP_ID = "com.subvertingcomplexity.refrain"
 
+# The App Store Connect API key, however this machine happens to hold it.
+#
+# Plain Ruby rather than a lane, so both lanes below can call it and neither
+# has to repeat the two spellings of the private key. ASC_KEY_PATH wins when it
+# is set, because the machine that has a file path is the one whose credentials
+# came out of a .env; ASC_KEY_CONTENT is the shell-export route and is still
+# what fastlane/PUBLISHING.md documents for bash.
+def asc_key_options
+  options = {
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+  }
+  path = ENV["ASC_KEY_PATH"]
+  if path && !path.strip.empty?
+    options[:key_filepath] = path
+  else
+    options[:key_content] = ENV.fetch("ASC_KEY_CONTENT") # raw .p8, incl. BEGIN/END lines
+  end
+  options
+end
+
 # ---------------------------------------------------------------------------
 platform :ios do
   desc "Upload App Store listing: metadata, screenshots, and privacy nutrition label"
   lane :listing do |options|
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("ASC_KEY_ID"),
-      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
-      key_content: ENV.fetch("ASC_KEY_CONTENT"), # raw .p8 contents, incl. BEGIN/END lines
-    )
+    api_key = app_store_connect_api_key(asc_key_options)
 
     # Privacy "nutrition label". Refrain collects nothing -> DATA_NOT_COLLECTED.
     upload_app_privacy_details_to_app_store(
@@ -50,11 +72,7 @@ platform :ios do
 
   desc "One-time: fill the privacy questionnaire in App Store Connect, then run this to capture the exact enum JSON as a reusable template"
   lane :refresh_privacy_template do
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("ASC_KEY_ID"),
-      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
-      key_content: ENV.fetch("ASC_KEY_CONTENT"),
-    )
+    api_key = app_store_connect_api_key(asc_key_options)
     download_app_privacy_details_from_app_store(
       api_key: api_key,
       app_identifier: APP_ID,
@@ -66,6 +84,15 @@ end
 # ---------------------------------------------------------------------------
 platform :android do
   desc "Upload Google Play listing: metadata, screenshots, and feature graphic"
+  #
+  # The track is hardcoded to production, and stays that way. Unlike the EAS
+  # submit config in eas.json -- which is lane-dependent, because the binary
+  # really does go to a different track for internal testers -- this lane pushes
+  # the *public* store listing, and the deploy script only ever calls it on the
+  # store lane (see tools/ps/Deploy.ps1). The fast lane never reaches here:
+  # pushing public listing copy from a tester build would publish changes nobody
+  # asked to publish. So production is the only track this lane has any business
+  # writing to.
   lane :listing do
     upload_to_play_store(
       package_name: APP_ID,

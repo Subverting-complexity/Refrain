@@ -2,10 +2,14 @@
  * The rule that decides whether a release branch may actually be deleted.
  *
  * `selectPrunable` decides which branches are candidates. What happens to a
- * candidate afterwards is the half that can lose a commit: the tag that
- * stands in for a deleted branch has to be on the remote *before* the branch
- * leaves it, or a failed run whose tag never pushed loses its only remote
- * record at the exact moment the branch goes.
+ * candidate afterwards is the half that can lose a commit: the tags that stand
+ * in for a deleted branch have to be on the remote *before* the branch leaves
+ * it, or a failed release whose tag never pushed loses its only remote record
+ * at the exact moment the branch goes.
+ *
+ * "Tags" plural is the part this file gained. One release branch carries a tag
+ * per platform, plus a retry's second tag on the same platform, so a rule that
+ * confirmed one of them and deleted the branch would strand the rest.
  *
  * So the cases below are mostly about refusing to delete. Every git action
  * arrives as a function on the context, which is what lets a test hand this a
@@ -21,8 +25,9 @@ import {
   type RetireOutcome,
 } from '../lib/release-branch-prune.mjs';
 
-const BRANCH = 'release/ios/2026-08-13-1432';
-const FAILED_TAG = `${BRANCH}-failed`;
+const BRANCH = 'release/2026-08-13-1432';
+const IOS_TAG = `${BRANCH}-ios-failed`;
+const ANDROID_TAG = `${BRANCH}-android-success`;
 const UNFINISHED_TAG = `${BRANCH}-unfinished`;
 
 /** Every operation as a spy, with the answers a healthy repository gives. */
@@ -55,6 +60,7 @@ function context(
     dryRun: false,
     current: 'main',
     unfinished: new Set<string>(),
+    tagsByBranch: new Map([[BRANCH, [IOS_TAG]]]),
     operations: ops,
     ...overrides,
   };
@@ -65,23 +71,58 @@ describe('retireBranch', () => {
     const ops = operations();
 
     expect(retireBranch(context(ops), BRANCH)).toBe('retired');
-    expect(ops.pushRef).toHaveBeenCalledWith(`refs/tags/${FAILED_TAG}`, {
+    expect(ops.pushRef).toHaveBeenCalledWith(`refs/tags/${IOS_TAG}`, {
       dryRun: false,
     });
     expect(ops.deleteBranch).toHaveBeenCalledWith(BRANCH);
   });
 
-  it('keeps the branch when the tag will not push', () => {
-    // Until the tag is on the remote the branch may be the only remote
-    // record of the run, so deleting it now would be the exact loss the push
-    // exists to prevent.
-    const ops = operations({ pushRef: jest.fn(() => false) });
+  it("confirms every one of a release's tags before deleting the branch", () => {
+    // A release carries one tag per platform. Confirming only the first would
+    // leave the branch's remaining remote record depending on a push that was
+    // never checked.
+    const ops = operations();
+    const withBoth = context(ops, {
+      tagsByBranch: new Map([[BRANCH, [IOS_TAG, ANDROID_TAG]]]),
+    });
 
-    expect(retireBranch(context(ops), BRANCH)).toBe('tag-unpushed');
+    expect(retireBranch(withBoth, BRANCH)).toBe('retired');
+    expect(ops.pushRef).toHaveBeenCalledWith(`refs/tags/${IOS_TAG}`, {
+      dryRun: false,
+    });
+    expect(ops.pushRef).toHaveBeenCalledWith(`refs/tags/${ANDROID_TAG}`, {
+      dryRun: false,
+    });
+  });
+
+  it('keeps the branch when any one of its tags will not push', () => {
+    // Until every tag is on the remote the branch may be the only remote
+    // record of part of the release, so deleting it now would be the exact
+    // loss the push exists to prevent.
+    const ops = operations({
+      pushRef: jest.fn((ref: string) => ref !== `refs/tags/${ANDROID_TAG}`),
+    });
+    const withBoth = context(ops, {
+      tagsByBranch: new Map([[BRANCH, [IOS_TAG, ANDROID_TAG]]]),
+    });
+
+    expect(retireBranch(withBoth, BRANCH)).toBe('tag-unpushed');
     expect(ops.deleteBranch).not.toHaveBeenCalled();
     expect(ops.warn).toHaveBeenCalledWith(
       expect.stringContaining('is being kept until'),
     );
+  });
+
+  it('keeps a branch it was given no tag for', () => {
+    // `selectPrunable` only calls a release failed when some platform tagged
+    // an outcome, so an empty list means the caller and the rule disagree.
+    // Deleting would leave the commit with nothing pinning it.
+    const ops = operations();
+
+    expect(
+      retireBranch(context(ops, { tagsByBranch: new Map() }), BRANCH),
+    ).toBe('unresolved');
+    expect(ops.deleteBranch).not.toHaveBeenCalled();
   });
 
   it('never deletes the checked-out branch', () => {
@@ -123,10 +164,10 @@ describe('retireBranch', () => {
   });
 
   it('tags an unfinished branch before deleting it, never after', () => {
-    // The whole safety argument: a failed run's commit is already pinned by
-    // its own tag, but an unfinished run has no tag at all, so if the release
-    // was cut from a branch since deleted this ref is the only thing holding
-    // the commit.
+    // The whole safety argument: a failed release's commit is already pinned
+    // by its platform tags, but an unfinished one has no tag at all, so if the
+    // release was cut from a branch since deleted this ref is the only thing
+    // holding the commit.
     const order: string[] = [];
     const ops = operations({
       tagExists: jest.fn(() => false),
@@ -149,6 +190,18 @@ describe('retireBranch', () => {
     );
   });
 
+  it('names no platform on the tag it writes for an unfinished release', () => {
+    // Nothing reported, so naming a platform would claim that platform failed.
+    const ops = operations({ tagExists: jest.fn(() => false) });
+    retireBranch(context(ops, { unfinished: new Set([BRANCH]) }), BRANCH);
+
+    expect(ops.writeAnnotatedTag).toHaveBeenCalledWith(
+      UNFINISHED_TAG,
+      expect.any(String),
+      expect.not.stringContaining('Platform:'),
+    );
+  });
+
   it('does not rewrite an unfinished tag an earlier prune already left', () => {
     const ops = operations();
 
@@ -160,8 +213,7 @@ describe('retireBranch', () => {
   });
 
   it('skips the push for a failure whose tag is not there to push', () => {
-    // Nothing to push and nothing lost by deleting: `selectPrunable` only
-    // calls a branch failed when a tag says so, so this is the odd case of a
+    // Nothing to push and nothing lost by deleting: this is the odd case of a
     // tag removed by hand between the listing and the deletion.
     const ops = operations({ tagExists: jest.fn(() => false) });
 

@@ -8,42 +8,62 @@
  *
  * ## The shape of the record
  *
- * Each store deploy cuts a branch at the commit it is about to build, named
- * for the platform and the moment it started:
+ * A release cuts one branch at the commit it is about to build, named for the
+ * moment it started:
  *
- *     release/ios/2026-08-13-1432
+ *     release/2026-08-13-1432
+ *
+ * One branch, not one per platform. Both platforms build from a single commit
+ * carrying a single version, so a per-platform branch segment would only ever
+ * produce two names for the same commit.
  *
  * The branch carries no outcome, because the outcome is not known when the
  * branch is created and a name that has to change later is a name that has to
- * be deleted and re-pushed on the remote. Instead the run finishes by writing
- * an annotated tag at the same commit, and the tag carries the outcome both in
- * its name and, in more detail than a name can hold, in its message:
+ * be deleted and re-pushed on the remote. Instead each platform finishes by
+ * writing an annotated tag at the same commit, and the tag carries both the
+ * platform and the outcome:
  *
- *     release/ios/2026-08-13-1432-success
- *     release/ios/2026-08-13-1432-failed
- *     release/ios/2026-08-13-1432-unfinished
+ *     release/2026-08-13-1432-ios-success
+ *     release/2026-08-13-1432-android-failed
+ *
+ * Per-platform tags rather than one tag per release, because the outcomes are
+ * genuinely independent: one commit can ship on one store and fail on the
+ * other, and a retry can later add a success beside an earlier failure.
  *
  * A tag is written once, when the answer is already known, so nothing is ever
  * renamed. That leaves one state a name cannot express and which is worth
- * having: a release branch with no tag beside it is a run that never reached
- * its own ending. The machine slept, the window was closed, the power went.
- * `unfinished` is what {@link selectPrunable} calls that, and it is applied by
+ * having: a release branch with no tag at all is a run that never reached its
+ * own ending. The machine slept, the window was closed, the power went.
+ *
+ *     release/2026-08-13-1432-unfinished
+ *
+ * That one carries no platform, because no platform reported. It is applied by
  * the pruner rather than by the run, because by definition the run was not
  * there to apply it.
  *
  * ## Why the tag outlives the branch
  *
- * Two platforms attempting a release most working days would otherwise leave
- * a branch list nobody reads. So failed and unfinished branches are pruned
- * after a month while their tags are kept for good. Nothing is lost by that:
- * a tag pins the same commit the branch pointed at, and holds the profile,
- * the duration, the exit code and the EAS build link besides. Successful
- * branches are never pruned, because those are the ones you may still need to
- * cut a hotfix from.
+ * A release attempted most working days would otherwise leave a branch list
+ * nobody reads. So failed and unfinished branches are pruned after a month
+ * while their tags are kept for good. Nothing is lost by that: a tag pins the
+ * same commit the branch pointed at, and holds the lane, the profile, the
+ * duration, the exit code, the listing result and the EAS build link besides.
+ * Successful branches are never pruned, because those are the ones you may
+ * still need to cut a hotfix from.
  */
 
 /** The platforms that ship to a store. Anything else is a development build. */
 export const PLATFORMS = /** @type {const} */ (['ios', 'android']);
+
+/**
+ * Where a release is headed.
+ *
+ * Named for the outcome the operator wants rather than for either store's own
+ * vocabulary, because the two platforms do not implement these the same way:
+ * `fast` is the Play `internal` track on Android and a plain TestFlight upload
+ * on iOS, which has no track parameter at all. See `docs/RELEASING.md`.
+ */
+export const LANES = /** @type {const} */ (['store', 'fast']);
 
 /** The first path segment of every release branch and tag. */
 export const REF_PREFIX = 'release';
@@ -52,7 +72,7 @@ export const REF_PREFIX = 'release';
  * The outcomes a tag can record.
  *
  * `unfinished` is not something a run reports about itself — see the module
- * comment. It exists so that every attempt ends up with exactly one tag,
+ * comment. It exists so that every attempt ends up with at least one tag,
  * which is what makes deleting the branch lossless.
  */
 export const OUTCOMES = /** @type {const} */ (['success', 'failed', 'unfinished']);
@@ -62,20 +82,21 @@ export const DEFAULT_KEEP_DAYS = 30;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+const STAMP = '\\d{4}-\\d{2}-\\d{2}-\\d{4}';
 const STAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})$/;
-const BRANCH_PATTERN = new RegExp(
-  `^${REF_PREFIX}/(${PLATFORMS.join('|')})/(\\d{4}-\\d{2}-\\d{2}-\\d{4})$`,
-);
+const BRANCH_PATTERN = new RegExp(`^${REF_PREFIX}/(${STAMP})$`);
 const TAG_PATTERN = new RegExp(
-  `^${REF_PREFIX}/(${PLATFORMS.join('|')})/(\\d{4}-\\d{2}-\\d{2}-\\d{4})-(${OUTCOMES.join('|')})$`,
+  `^${REF_PREFIX}/(${STAMP})-(${PLATFORMS.join('|')})-(success|failed)$`,
 );
+const UNFINISHED_TAG_PATTERN = new RegExp(`^${REF_PREFIX}/(${STAMP})-unfinished$`);
 
 /**
  * A release branch or tag, taken apart.
  *
  * @typedef {object} ReleaseRef
- * @property {'ios' | 'android'} platform
  * @property {string} stamp the `YYYY-MM-DD-HHmm` the run started
+ * @property {'ios' | 'android'} [platform] outcome tags only; an `unfinished`
+ *   tag names no platform, because no platform reported
  * @property {'success' | 'failed' | 'unfinished'} [outcome] tags only
  */
 
@@ -151,17 +172,60 @@ export function assertPlatform(platform) {
 }
 
 /**
- * The branch name for a run starting now.
+ * Asserts a lane is one a release can be sent down.
  *
- * @param {string} platform
- * @param {Date} date
+ * @param {string} lane
+ * @returns {'store' | 'fast'}
  */
-export function branchNameFor(platform, date) {
-  return `${REF_PREFIX}/${assertPlatform(platform)}/${formatStamp(date)}`;
+export function assertLane(lane) {
+  const found = LANES.find((known) => known === lane);
+  if (!found) {
+    throw new ReleaseNameError(`Unknown lane '${lane}'. Expected ${LANES.join(' or ')}.`);
+  }
+  return found;
 }
 
 /**
- * The tag that records how a run ended.
+ * Reads a platform selection, in the order platforms are built.
+ *
+ * `both` is spelled out rather than left as a bare word the caller has to
+ * expand, and iOS comes first: its credential path (certificates, profiles,
+ * and an Apple sign-in separate from the EAS login) is the more fragile of
+ * the two, so failing there first is the cheaper failure. A sensible default
+ * rather than a rule — change the order of {@link PLATFORMS} to change it.
+ *
+ * @param {string} selection `both`, `ios`, `android`, or a comma-separated list
+ * @returns {('ios' | 'android')[]}
+ */
+export function parsePlatformSelection(selection) {
+  const trimmed = selection.trim().toLowerCase();
+  if (trimmed === 'both' || trimmed === 'all') return [...PLATFORMS];
+
+  const named = trimmed
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (named.length === 0) {
+    throw new ReleaseNameError(`No platform named. Expected both, ${PLATFORMS.join(' or ')}.`);
+  }
+
+  const seen = new Set(named.map((part) => assertPlatform(part)));
+  // Ordered by PLATFORMS rather than by the order they were typed, so
+  // `--platforms android,ios` still builds iOS first.
+  return PLATFORMS.filter((platform) => seen.has(platform));
+}
+
+/**
+ * The branch name for a release starting now.
+ *
+ * @param {Date} date
+ */
+export function branchNameFor(date) {
+  return `${REF_PREFIX}/${formatStamp(date)}`;
+}
+
+/**
+ * The tag that records how one platform's half of a release ended.
  *
  * Built from the branch name rather than from the clock, so the tag always
  * lands on the stamp the branch already carries even if the run took long
@@ -169,24 +233,42 @@ export function branchNameFor(platform, date) {
  * build, it invariably does.
  *
  * @param {string} branch
- * @param {string} outcome
+ * @param {string} platform
+ * @param {string} outcome `success` or `failed`
  */
-export function tagNameFor(branch, outcome) {
+export function tagNameFor(branch, platform, outcome) {
+  assertReleaseBranch(branch);
+  if (outcome !== 'success' && outcome !== 'failed') {
+    throw new ReleaseNameError(`Unknown outcome '${outcome}'. Expected success or failed.`);
+  }
+  return `${branch}-${assertPlatform(platform)}-${outcome}`;
+}
+
+/**
+ * The tag that stands in for a release which never reported anything.
+ *
+ * No platform segment: nothing reported, so naming a platform would be a claim
+ * the record cannot support. See {@link selectPrunable}.
+ *
+ * @param {string} branch
+ */
+export function unfinishedTagNameFor(branch) {
+  assertReleaseBranch(branch);
+  return `${branch}-unfinished`;
+}
+
+/** @param {string} branch */
+function assertReleaseBranch(branch) {
   if (!parseBranchName(branch)) {
     throw new ReleaseNameError(`'${branch}' is not a release branch name.`);
   }
-  const found = OUTCOMES.find((known) => known === outcome);
-  if (!found) {
-    throw new ReleaseNameError(`Unknown outcome '${outcome}'. Expected ${OUTCOMES.join(', ')}.`);
-  }
-  return `${branch}-${found}`;
 }
 
 /**
  * Takes a branch name apart, or returns `null` for anything that is not one.
  *
- * The anchored pattern is what keeps tags out: `release/ios/2026-08-13-1432`
- * matches and `release/ios/2026-08-13-1432-success` does not, so a tag can
+ * The anchored pattern is what keeps tags out: `release/2026-08-13-1432`
+ * matches and `release/2026-08-13-1432-ios-success` does not, so a tag can
  * never be mistaken for a branch to delete.
  *
  * @param {string} name
@@ -195,10 +277,9 @@ export function tagNameFor(branch, outcome) {
 export function parseBranchName(name) {
   const match = BRANCH_PATTERN.exec(name);
   if (!match) return null;
-  const platform = /** @type {'ios' | 'android'} */ (match[1]);
-  const stamp = match[2] ?? '';
+  const stamp = match[1] ?? '';
   if (!parseStamp(stamp)) return null;
-  return { platform, stamp };
+  return { stamp };
 }
 
 /**
@@ -208,13 +289,22 @@ export function parseBranchName(name) {
  * @returns {ReleaseRef | null}
  */
 export function parseTagName(name) {
-  const match = TAG_PATTERN.exec(name);
-  if (!match) return null;
-  const platform = /** @type {'ios' | 'android'} */ (match[1]);
-  const outcome = /** @type {'success' | 'failed' | 'unfinished'} */ (match[3]);
-  const stamp = match[2] ?? '';
+  const outcomeMatch = TAG_PATTERN.exec(name);
+  if (outcomeMatch) {
+    const stamp = outcomeMatch[1] ?? '';
+    if (!parseStamp(stamp)) return null;
+    return {
+      stamp,
+      platform: /** @type {'ios' | 'android'} */ (outcomeMatch[2]),
+      outcome: /** @type {'success' | 'failed'} */ (outcomeMatch[3]),
+    };
+  }
+
+  const unfinishedMatch = UNFINISHED_TAG_PATTERN.exec(name);
+  if (!unfinishedMatch) return null;
+  const stamp = unfinishedMatch[1] ?? '';
   if (!parseStamp(stamp)) return null;
-  return { platform, stamp, outcome };
+  return { stamp, outcome: 'unfinished' };
 }
 
 /**
@@ -228,17 +318,16 @@ export function parseTagName(name) {
  * twice, and better than a disambiguating suffix, which every pattern in this
  * module would then have to allow for.
  *
- * @param {string} platform
  * @param {Date} date
  * @param {Iterable<string>} taken existing branch names
  * @param {number} [limit] minutes to try before giving up
  */
-export function availableBranchName(platform, date, taken, limit = 60) {
+export function availableBranchName(date, taken, limit = 60) {
   const existing = new Set(taken);
   const candidate = new Date(date.getTime());
 
   for (let tries = 0; tries <= limit; tries += 1) {
-    const name = branchNameFor(platform, candidate);
+    const name = branchNameFor(candidate);
     if (!existing.has(name)) return name;
     candidate.setMinutes(candidate.getMinutes() + 1);
   }
@@ -249,18 +338,21 @@ export function availableBranchName(platform, date, taken, limit = 60) {
 }
 
 /**
- * What a run did, as the tag message records it.
+ * What one platform's half of a release did, as the tag message records it.
  *
  * @typedef {object} ReleaseDetails
  * @property {string} branch
- * @property {'ios' | 'android'} platform
+ * @property {'ios' | 'android'} [platform] absent on an `unfinished` tag
  * @property {'success' | 'failed' | 'unfinished'} outcome
  * @property {string} commit the full SHA the build was cut from
+ * @property {'store' | 'fast'} [lane]
  * @property {string} [profile] the EAS build profile
+ * @property {string} [submitProfile] the EAS submit profile the lane selected
  * @property {string} [startedAt]
  * @property {string} [duration]
  * @property {number} [exitCode]
  * @property {boolean} [submitted] whether it was handed to the store
+ * @property {string} [listing] what happened to the store listing
  * @property {string} [easBuildId]
  * @property {string} [easBuildUrl]
  * @property {string} [notes]
@@ -275,6 +367,11 @@ export function availableBranchName(platform, date, taken, limit = 60) {
  * so a run that could not discover its EAS build id says nothing about it
  * instead of claiming it was blank.
  *
+ * `Listing` is a field of its own rather than folded into the outcome. A
+ * listing push that failed after the binary had already gone to the store does
+ * not make the release a failure — the build shipped — so the outcome stays
+ * `success` and this line is where the other half of the story lives.
+ *
  * @param {ReleaseDetails} details
  */
 export function buildTagMessage(details) {
@@ -284,16 +381,23 @@ export function buildTagMessage(details) {
     unfinished: 'Release never finished',
   }[details.outcome];
 
+  const subject = details.platform
+    ? `${headline}: ${details.platform} ${details.branch}`
+    : `${headline}: ${details.branch}`;
+
   /** @type {[string, string | number | boolean | undefined][]} */
   const fields = [
     ['Platform', details.platform],
+    ['Lane', details.lane],
     ['Profile', details.profile],
+    ['Submit profile', details.submitProfile],
     ['Branch', details.branch],
     ['Commit', details.commit],
     ['Started', details.startedAt],
     ['Duration', details.duration],
     ['Exit code', details.exitCode],
     ['Submitted', details.submitted === undefined ? undefined : details.submitted ? 'yes' : 'no'],
+    ['Listing', details.listing],
     ['EAS build', details.easBuildId],
     ['EAS log', details.easBuildUrl],
     ['Notes', details.notes],
@@ -303,28 +407,71 @@ export function buildTagMessage(details) {
     .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
     .map(([label, value]) => `${label}: ${value}`);
 
-  return [`${headline}: ${details.platform} ${details.branch}`, '', ...body].join('\n');
+  return [subject, '', ...body].join('\n');
+}
+
+/**
+ * The `key: value` lines of a tag message, as a lookup.
+ *
+ * The counterpart to {@link buildTagMessage}, and the reason that format is
+ * plain lines: the listing change check has to find the commit of the last
+ * successful *store-lane* release, and the lane is only recorded in the
+ * message. Keys are lower-cased so `Submit profile` is read as
+ * `submit profile` and a caller does not have to match the capitalisation.
+ *
+ * Lines that are not `key: value` are ignored rather than guessed at, which
+ * covers both the subject line and the blank line under it. The first
+ * occurrence of a key wins, so a free-text `Notes` value that happens to
+ * contain a `Lane:` line cannot overwrite the real one above it.
+ *
+ * @param {string} message
+ * @returns {Record<string, string>}
+ */
+export function parseTagMessage(message) {
+  /** @type {Record<string, string>} */
+  const fields = {};
+  for (const line of message.split(/\r?\n/)) {
+    const match = /^([A-Za-z][A-Za-z ]*):\s*(.*)$/.exec(line.trim());
+    if (!match) continue;
+    const key = (match[1] ?? '').toLowerCase();
+    if (key in fields) continue;
+    fields[key] = (match[2] ?? '').trim();
+  }
+  return fields;
 }
 
 /**
  * The branches this prune should remove, split by why.
  *
  * @typedef {object} PrunedPlan
- * @property {string[]} failed branches whose tag says the release failed
- * @property {string[]} unfinished branches with no tag at all
+ * @property {string[]} failed branches where some platform did not reach a success
+ * @property {string[]} unfinished branches with no outcome tag at all
  * @property {string[]} kept every release branch this prune leaves alone
  */
 
 /**
  * Decides which release branches have outlived their usefulness.
  *
- * Three rules, in order. A branch with a `success` tag is kept whatever its
- * age, because that is a commit somebody shipped and may need to branch a fix
- * from. A branch younger than `keepDays` is kept, successful or not, because a
- * recent failure is still being looked into. Everything else goes, sorted into
- * the two reasons so the caller can tell the operator which it did and, for
- * the unfinished ones, write the tag that has to exist before the branch can
- * be deleted without losing the commit.
+ * Three rules, in order.
+ *
+ * A branch is kept whatever its age when **every platform that recorded an
+ * outcome for that release recorded a success**. Asking whether each platform
+ * reached a success, rather than whether it ever failed, is what makes a retry
+ * work without special handling: a run tagged `ios-failed` and later
+ * `ios-success` is a commit that shipped.
+ *
+ * A branch younger than `keepDays` is kept, successful or not, because a
+ * recent failure is still being looked into.
+ *
+ * Everything else goes, sorted into the two reasons so the caller can tell the
+ * operator which it did and, for the unfinished ones, write the tag that has
+ * to exist before the branch can be deleted without losing the commit.
+ *
+ * One accepted ambiguity: a release stopped after iOS succeeded leaves only an
+ * `ios-success` tag, which is indistinguishable from a deliberate iOS-only
+ * release, so it is kept. Pruning decides which commits stay convenient to
+ * reach rather than which survive, so keeping it is harmless and not worth
+ * extra bookkeeping to prevent.
  *
  * A name this module does not recognise is never returned. Deleting branches
  * is the one thing here that cannot be undone by running it again, so anything
@@ -348,26 +495,32 @@ export function selectPrunable({ branches, tags, now, keepDays = DEFAULT_KEEP_DA
 }
 
 /**
- * Every outcome tagged against each run, keyed by platform and stamp.
+ * Every outcome tagged against each release, keyed by stamp and then by
+ * platform.
  *
- * A run can carry more than one: a retry that reused the branch leaves both a
- * failure and a success, and the pruner has to see both to decide on the
- * strength of the success.
+ * A platform can carry more than one outcome: a retry that reused the branch
+ * leaves both a failure and a success, and the rule has to see both to decide
+ * on the strength of the success.
+ *
+ * The platform-less `unfinished` tag is deliberately not indexed here. It says
+ * only that an earlier prune already stood in for a run that reported nothing,
+ * which leaves the release exactly as unreported as it was.
  *
  * @param {Iterable<string>} tags
- * @returns {Map<string, Set<string>>}
+ * @returns {Map<string, Map<string, Set<string>>>}
  */
 function indexOutcomesByRun(tags) {
-  /** @type {Map<string, Set<string>>} */
+  /** @type {Map<string, Map<string, Set<string>>>} */
   const byRun = new Map();
 
   for (const tag of tags) {
     const parsed = parseTagName(tag);
-    if (!parsed || !parsed.outcome) continue;
-    const key = `${parsed.platform}/${parsed.stamp}`;
-    const seen = byRun.get(key) ?? new Set();
+    if (!parsed || !parsed.outcome || !parsed.platform) continue;
+    const byPlatform = byRun.get(parsed.stamp) ?? new Map();
+    const seen = byPlatform.get(parsed.platform) ?? new Set();
     seen.add(parsed.outcome);
-    byRun.set(key, seen);
+    byPlatform.set(parsed.platform, seen);
+    byRun.set(parsed.stamp, byPlatform);
   }
 
   return byRun;
@@ -378,7 +531,7 @@ function indexOutcomesByRun(tags) {
  * does not recognise and will therefore not touch.
  *
  * @param {string} branch
- * @param {Map<string, Set<string>>} outcomesByRun
+ * @param {Map<string, Map<string, Set<string>>>} outcomesByRun
  * @param {Date} now
  * @param {number} keepDays
  * @returns {'kept' | 'failed' | 'unfinished' | null}
@@ -390,11 +543,14 @@ function classifyBranch(branch, outcomesByRun, now, keepDays) {
   const started = parseStamp(parsed.stamp);
   if (!started) return null;
 
-  const outcomes = outcomesByRun.get(`${parsed.platform}/${parsed.stamp}`) ?? new Set();
-  if (outcomes.has('success')) return 'kept';
+  const byPlatform = outcomesByRun.get(parsed.stamp) ?? new Map();
+  const reported = [...byPlatform.values()];
+  if (reported.length > 0 && reported.every((outcomes) => outcomes.has('success'))) {
+    return 'kept';
+  }
 
   const ageDays = (now.getTime() - started.getTime()) / MS_PER_DAY;
   if (ageDays < keepDays) return 'kept';
 
-  return outcomes.size === 0 ? 'unfinished' : 'failed';
+  return reported.length === 0 ? 'unfinished' : 'failed';
 }

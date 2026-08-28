@@ -18,45 +18,72 @@ tools/
 Each `.cmd` launcher sets the working directory to the repo root and runs its
 matching `.ps1` with `-ExecutionPolicy Bypass`, so you don't need to change any
 machine-wide PowerShell policy. **Double-click a `.cmd` in Explorer to run it**,
-or call it from a terminal to pass arguments (`tools\BuildAndDeployiOS.cmd -Profile preview`).
+or call it from a terminal to pass arguments (`tools\Deploy.cmd -Platform ios`).
 
 ## Scripts
 
 Every entry below has a clickable `tools\<name>.cmd` launcher and the underlying
 `tools\ps\<name>.ps1`.
 
-| Script                       | Purpose                                                                                                                                                                                                             |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `QualityGate`                | Single entry point that runs every static check in sequence (health → assets → typecheck → lint → format → SDK dependency check → tests + coverage). Pass `-Install` for `npm ci` first, `-SkipTests` to skip Jest. |
-| `BuildAndDeployAndroid`      | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`.                                                                                                                |
-| `BuildAndDeployAndroidStore` | Cloud AAB build + Play Store submission via EAS.                                                                                                                                                                    |
-| `BuildAndDeployiOS`          | Cloud iOS build via EAS. Use `-Profile development` for a dev-client IPA, `-Profile preview` for an internal IPA, or the default `-Profile production` for TestFlight. No Mac needed.                               |
-| `LaunchWeb`                  | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                  |
+| Script                  | Purpose                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QualityGate`           | Single entry point that runs every static check in sequence (health → assets → typecheck → lint → format → SDK dependency check → tests + coverage). Pass `-Install` for `npm ci` first, `-SkipTests` to skip Jest. |
+| `Deploy`                | The single store-release entry point. Cloud build and submit via EAS for `-Platform both` (default), `ios` or `android`, on the `store` or `fast` lane, plus the store listing push. No Mac needed. See below.      |
+| `BuildAndDeployAndroid` | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`.                                                                                                                |
+| `LaunchWeb`             | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                  |
+
+## `Deploy` — the one release entry point
+
+`Deploy.ps1` ships either platform or both. Shared setup runs exactly once per
+release however many platforms are selected: `.env` loading, prerequisite
+checks, the version bump, and the release branch. Only build, submit and the
+listing push repeat per platform.
+
+| Parameter           | Values                                     | Default      |
+| ------------------- | ------------------------------------------ | ------------ |
+| `-Platform`         | `both`, `ios`, `android`                   | `both`       |
+| `-Lane`             | `store` (public release), `fast` (testers) | `store`      |
+| `-Listing`          | `auto`, `on`, `off`                        | `auto`       |
+| `-Profile`          | `production`, `development`, `preview`     | `production` |
+| `-Patch` / `-Major` | store lane only, the bump level            | minor        |
+
+With both platforms selected they build **sequentially, iOS first**, each as
+its own single-platform EAS invocation, and a failure stops the release. The
+reasoning for all three of those is in
+[`docs/RELEASING.md`](../docs/RELEASING.md).
+
+A non-production `-Profile` is not a release: it carries no version bump, no
+release branch, no submit and no listing push.
 
 ## Release tooling (`tools/ps/ReleaseBranch.ps1`, `tools/ps/VersionBump.ps1`)
 
-`BuildAndDeployiOS` and `BuildAndDeployAndroidStore` dot-source these two
-internal helpers (no `.cmd` launcher of their own — they only make sense as
-part of a store deploy) for two things every production run does before it
-builds:
+`Deploy.ps1` dot-sources these two internal helpers (no `.cmd` launcher of
+their own — they only make sense as part of a store deploy) for the work a
+store release does around the build itself:
 
 - **Version bump** — `VersionBump.ps1` calls `tools/version-bump.mjs`, which
   bumps `expo.version` in `app.json` and `version` in `package.json` together
-  (minor by default; `-Patch` / `-Major` on the deploy script override it), on
-  a throwaway branch that gets fast-forward merged into `main` and pushed. If
-  `HEAD` is already a commit this tool wrote, it's a no-op — that's what keeps
-  a same-sitting iOS-then-Android release from bumping twice.
-- **Release branch + outcome tag** — `ReleaseBranch.ps1` calls
-  `tools/release-branch.mjs`, which cuts and pushes a `release/<platform>/<timestamp>`
-  branch before the build and writes a `-success` / `-failed` outcome tag
-  after it, so every release attempt — including one that never finishes —
-  leaves a record in git.
+  (minor by default; `-Patch` / `-Major` override it), commits that on the
+  release branch, and lands it on `main` **through a pull request merged
+  immediately**. It needs the GitHub CLI. If the bump is already on `main` it
+  is a no-op, which is what lets a retry rebuild the failed platform at the
+  same version.
+- **Release record** — `ReleaseBranch.ps1` calls `tools/release-branch.mjs`,
+  which cuts and pushes one `release/<timestamp>` branch before the first
+  build, writes a `-<platform>-success` / `-<platform>-failed` tag as each
+  platform finishes, and closes the release afterwards. Every attempt —
+  including one that never finishes — leaves a record in git.
+- **Store listing** — the same tool decides whether a platform's listing
+  changed since its last successful store release, and checks fastlane's
+  toolchain and credentials **before the first build**, so a missing App Store
+  Connect key costs seconds rather than a paid-for build that shipped without
+  its listing.
 
-Both are Node tools (`tools/version-bump.mjs`, `tools/release-branch.mjs`,
-and the pure logic under `tools/lib/`) rather than PowerShell, so their rules
-can be unit-tested — see `tools/__tests__/`. See
+All of it is Node (`tools/version-bump.mjs`, `tools/release-branch.mjs`, and
+the pure logic under `tools/lib/`) rather than PowerShell, so the rules can be
+unit-tested — see `tools/__tests__/`. See
 [`docs/RELEASING.md`](../docs/RELEASING.md) for the full scheme, including
-how to skip either step and what each one refuses to do.
+what each step refuses to do.
 
 ## Phase steps (`tools/ps/steps/`)
 
@@ -82,13 +109,16 @@ they expect to be invoked by `QualityGate.ps1`:
 .\tools\QualityGate.cmd -SkipTests
 
 # First device install on iOS (dev client with Metro connection)
-.\tools\BuildAndDeployiOS.cmd -Profile development
+.\tools\Deploy.cmd -Profile development -Platform ios
 
 # Daily loop on a physical Android device
 .\tools\BuildAndDeployAndroid.cmd
 
-# Ship an iOS TestFlight build (production profile + auto-submit)
-.\tools\BuildAndDeployiOS.cmd
+# Ship a public release to both stores
+.\tools\Deploy.cmd
+
+# Get a build in front of internal testers without a public release
+.\tools\Deploy.cmd -Lane fast
 ```
 
 ## First-time EAS setup
@@ -111,8 +141,13 @@ Play submit, fill in the `submit.production` credentials (`ascAppId`,
 
 The Apple ID is deliberately **not** in `eas.json`, because this repository is
 public and it is a personal address. Set `EXPO_APPLE_ID` in the gitignored
-`.env` instead (see `.env.example`). The deploy scripts load `.env` before EAS
-runs, so the prompt never falls back to its cached username.
+`.env` instead (see `.env.example`). `Deploy.ps1` loads `.env` before EAS runs,
+so the prompt never falls back to its cached username.
+
+`eas.json` also carries an `internal` submit profile alongside `production`.
+That is the fast lane's destination: the Play `internal` track on Android. The
+two profiles' iOS blocks are identical because iOS submit has no track
+parameter at all — see [`docs/RELEASING.md`](../docs/RELEASING.md).
 
 ## Coverage thresholds
 
@@ -142,7 +177,7 @@ Native-backed subsystems behave differently in a browser than on device:
 | `expo-file-system`    | Loop file import paths that depend on native FS are not exercised.                         |
 
 For anything audio-related — loop import, playback, A/B markers against a real
-clip — use `BuildAndDeployiOS.cmd -Profile development` or
+clip — use `Deploy.cmd -Profile development -Platform ios` or
 `BuildAndDeployAndroid.cmd` on a real device.
 
 ```powershell
@@ -158,7 +193,8 @@ clip — use `BuildAndDeployiOS.cmd -Profile development` or
 
 ## Build log
 
-`BuildAndDeployiOS.ps1` and `BuildAndDeployAndroidStore.ps1` append to
+`Deploy.ps1` appends one entry per platform build to
 `tools/ps/ios-build-log.json` and `tools/ps/android-build-log.json`. Both files
 are gitignored. They power the "X builds this month" summary that warns as you
-approach the Expo free-tier cap (30 builds/month).
+approach the Expo free-tier cap (30 builds/month), counted across both
+platforms because the cap is.

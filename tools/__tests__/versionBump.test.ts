@@ -12,8 +12,11 @@
 import {
   bumpCommitMessage,
   bumpCommitVersion,
+  bumpPullRequestBody,
+  bumpPullRequestTitle,
   bumpVersion,
   formatSemver,
+  landedBumpVersion,
   LEVELS,
   parseSemver,
   replaceVersionField,
@@ -115,12 +118,12 @@ describe('bumpCommitMessage / bumpCommitVersion', () => {
     expect(bumpCommitVersion(bumpCommitMessage('1.3.0'))).toBe('1.3.0');
   });
 
-  it('is what stops a second deploy in the same sitting from bumping again', () => {
-    // BuildAndDeployiOS.cmd and BuildAndDeployAndroidStore.cmd each call the
-    // bump independently. This is the check tools/version-bump.mjs makes
-    // against HEAD's own commit subject before doing anything else -- if it
-    // stopped recognising its own commit, the second platform would bump a
-    // second time and iOS and Android would ship different versions.
+  it('is what stops a retry from bumping a second time', () => {
+    // A release that shipped iOS and failed on Android is retried by re-running
+    // the same entry point, and has to rebuild Android at the same version.
+    // This is the check tools/version-bump.mjs makes before doing anything
+    // else -- if it stopped recognising its own commit, the retry would bump
+    // again and the two stores would end up on different versions.
     expect(bumpCommitVersion('chore(release): bump version to 2.0.0')).toBe(
       '2.0.0',
     );
@@ -144,5 +147,63 @@ describe('bumpCommitMessage / bumpCommitVersion', () => {
         'docs: explain chore(release): bump version to 1.0.0 in the README',
       ),
     ).toBeNull();
+  });
+});
+
+describe('landedBumpVersion', () => {
+  const BUMP = 'chore(release): bump version to 1.4.0';
+  const MERGE =
+    'Merge pull request #291 from Subverting-complexity/release/2026-08-13-1432';
+
+  it('recognises the bump as HEAD itself', () => {
+    expect(landedBumpVersion({ head: BUMP, merged: null })).toBe('1.4.0');
+  });
+
+  it('recognises the bump behind the merge commit that landed it', () => {
+    // The bump now reaches main through a pull request, so HEAD reads "Merge
+    // pull request #...". Reading only HEAD's own subject would stop
+    // recognising a bump the moment it landed, and the guard that makes a
+    // retry a no-op would bump a second time on the retry.
+    expect(landedBumpVersion({ head: MERGE, merged: BUMP })).toBe('1.4.0');
+  });
+
+  it('says nothing has landed when neither subject is a bump', () => {
+    expect(
+      landedBumpVersion({
+        head: 'fix: keep looping past the end',
+        merged: null,
+      }),
+    ).toBeNull();
+    expect(
+      landedBumpVersion({ head: MERGE, merged: 'feat: add the waveform' }),
+    ).toBeNull();
+  });
+
+  it('stops recognising it once real work lands on top', () => {
+    // The gate must not be permanently sticky: a merged feature means there is
+    // something new to release, so the next deploy bumps again.
+    expect(
+      landedBumpVersion({ head: 'feat(brand): light splash', merged: null }),
+    ).toBeNull();
+  });
+});
+
+describe('the bump pull request', () => {
+  it('titles the pull request with the commit message it produces', () => {
+    // So the pull request list reads like the commit history it creates.
+    expect(bumpPullRequestTitle('1.4.0')).toBe(bumpCommitMessage('1.4.0'));
+  });
+
+  it('says what the branch is and what happens to it next', () => {
+    // Opened and merged within the same second, so the only person who will
+    // ever read this is someone looking back at why a merge commit exists.
+    const body = bumpPullRequestBody({
+      current: '1.3.0',
+      next: '1.4.0',
+      branch: 'release/2026-08-13-1432',
+    });
+    expect(body).toContain('1.3.0 to 1.4.0');
+    expect(body).toContain('release/2026-08-13-1432');
+    expect(body).toContain('release branch');
   });
 });

@@ -75,6 +75,29 @@ export function findRepoRoot(nothingToDo) {
 }
 
 /**
+ * Full ref names under a prefix.
+ *
+ * `%(refname)` rather than `%(refname:short)` because the short form drops
+ * whichever leading segments git considers unambiguous, which is not a fixed
+ * number and is exactly the sort of thing to get wrong once and then delete
+ * the wrong branch over.
+ *
+ * Both release commands need this: one to choose a name no branch has taken,
+ * the other to decide which branches have outlived their usefulness.
+ *
+ * @param {string} repoRoot
+ * @param {string} prefix
+ * @returns {string[]}
+ */
+export function refNames(repoRoot, prefix) {
+  const result = git(repoRoot, ['for-each-ref', '--format=%(refname)', prefix]);
+  return result.output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
  * Tracked files with uncommitted changes, one per line, or `''` when the tree
  * is clean.
  *

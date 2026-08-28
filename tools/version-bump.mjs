@@ -2,11 +2,10 @@
 /**
  * Bumps the release version and lands it on `main` before a store deploy.
  *
- * `tools/ps/VersionBump.ps1` calls this once, at the top of
- * `BuildAndDeployiOS.ps1` and `BuildAndDeployAndroidStore.ps1`, before the
- * release branch is cut (see `tools/release-branch.mjs`) — so the version
- * this commits is the one the release branch, and the store build, actually
- * carries.
+ * `tools/ps/VersionBump.ps1` calls this once per release, from
+ * `tools/ps/Deploy.ps1`, before anything is built — so the version this
+ * commits is the one the release branch, and both store builds, actually
+ * carry.
  *
  * `app.json`'s `expo.version` is the version that reaches the store listing;
  * `package.json`'s `version` is conventional npm bookkeeping. Both are
@@ -20,27 +19,44 @@
  * setting, so writing one here would be dead weight at best and misleading
  * at worst.
  *
- * ## The branch-and-merge
+ * ## The bump lands through a pull request
  *
- * The bump is written on a throwaway branch (`version-bump/<next>`) cut from
- * `HEAD`, committed there, fast-forward merged into the base branch, and the
- * throwaway branch is then deleted. A fast-forward merge is possible only
- * because nothing else can have landed on the base branch between the branch
- * being cut and the merge happening a moment later in the same run — if that
- * ever stops being true (a concurrent release, a push in between) the
- * fast-forward simply refuses, and this tool fails loudly rather than
- * inventing a merge commit.
+ * The bump is committed on the **release branch** (`release/<timestamp>`, the
+ * name `tools/release-branch.mjs` would choose), pushed, opened as a pull
+ * request against the base branch, and merged immediately.
+ *
+ * Three deliberate choices in that sentence:
+ *
+ * - **Through a pull request rather than a direct push.** A direct push works
+ *   only while the repository does not require a pull request before merging.
+ *   Turn that protection on and the push is rejected, the bump is left as a
+ *   local-only commit, and every later run refuses to start because local and
+ *   remote have diverged. This flow already complies if that day comes.
+ * - **The release branch is the pull request's source.** Cutting the release
+ *   branch from the bump commit is what makes it name exactly what is about to
+ *   be built. A separate throwaway bump branch cut from the same commit would
+ *   be a second name for the same ref with no distinct job.
+ * - **Merged immediately, not armed with `--auto`.** `gh pr merge --auto`
+ *   returns as soon as the merge is *armed*, which leaves an asynchronous gap
+ *   in which the release could ship a version the base branch never received.
+ *   With no required reviews and no required checks, an immediate merge either
+ *   succeeds or fails on the spot.
+ *
+ * A squash merge is not used: it would put a *content twin* of the release
+ * branch's commit on the base branch rather than an ancestor of it, so a
+ * hotfix cut from the release branch would no longer merge back into a history
+ * that recognises it. A merge commit keeps the bump commit reachable.
  *
  * ## Running twice in a row
  *
- * `BuildAndDeployiOS.cmd` and `BuildAndDeployAndroidStore.cmd` each call this
- * independently, so shipping both platforms for the same version in one
- * sitting calls it twice. The second call is a no-op rather than a second
- * bump: before doing anything else, it checks whether `HEAD`'s own commit is
- * already a bump this tool wrote (see `bumpCommitVersion` in
- * `tools/lib/version-bump.mjs`), and if so, stops there. Nothing can have
- * landed on the base branch between the two calls except that commit itself,
- * so there is nothing new to release yet.
+ * A retry after a partial failure (iOS shipped, Android did not) re-runs the
+ * same entry point, and must rebuild the failed platform at the *same*
+ * version. So before doing anything else this checks whether the bump is
+ * already on the base branch — either as `HEAD` itself, or as the branch that
+ * `HEAD`'s merge commit brought in — and if so, stops there. See
+ * `landedBumpVersion` in `tools/lib/version-bump.mjs`. The moment a real
+ * commit lands on top, the base branch has something new to release and the
+ * next deploy bumps again as normal.
  *
  * ## What it will not do
  *
@@ -52,15 +68,27 @@
  * it. Commit, stash, or discard them first.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { capture, quietShellDeprecation } from './lib/exec.mjs';
 import { configureColour, detail, fail, ok, say, warn } from './lib/format.mjs';
-import { findRepoRoot, git, GitError, gitLine, modifiedTrackedFiles } from './lib/git.mjs';
+import {
+  findRepoRoot,
+  git,
+  GitError,
+  gitLine,
+  modifiedTrackedFiles,
+  refNames,
+} from './lib/git.mjs';
+import { availableBranchName, REF_PREFIX, ReleaseNameError } from './lib/release-branch.mjs';
 import {
   bumpCommitMessage,
-  bumpCommitVersion,
+  bumpPullRequestBody,
+  bumpPullRequestTitle,
   bumpVersion,
+  landedBumpVersion,
   LEVELS,
   replaceVersionField,
   VersionError,
@@ -69,6 +97,9 @@ import {
 const DEFAULT_REMOTE = 'origin';
 const DEFAULT_BASE = 'main';
 const DEFAULT_LEVEL = 'minor';
+
+/** Long enough for a slow network, short enough that a hung `gh` is not a wall. */
+const GH_TIMEOUT_MS = 120_000;
 
 const APP_JSON = 'app.json';
 const PACKAGE_JSON = 'package.json';
@@ -122,6 +153,8 @@ function writeVersion(repoRoot, next) {
  * @property {'patch' | 'minor' | 'major'} level
  * @property {string} base
  * @property {string} remote
+ * @property {string} [branch] the release branch to commit the bump on; chosen
+ *   from the clock when not given
  */
 
 /**
@@ -148,6 +181,8 @@ function parseArgs(argv) {
       options.base = value;
     } else if (arg === '--remote') {
       options.remote = value;
+    } else if (arg === '--branch') {
+      options.branch = value;
     } else {
       throw new UsageError(`Unknown option '${arg}'.`);
     }
@@ -155,6 +190,80 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+/**
+ * The subject of `HEAD` and, when `HEAD` is a merge, of the branch it merged.
+ *
+ * @param {string} repoRoot
+ * @returns {{ head: string, merged: string | null }}
+ */
+function headSubjects(repoRoot) {
+  const head = gitLine(repoRoot, ['log', '-1', '--format=%s']);
+  const parents = gitLine(repoRoot, ['rev-list', '--parents', '-n', '1', 'HEAD'])
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+    .slice(1);
+  const second = parents[1];
+  const merged = second ? gitLine(repoRoot, ['log', '-1', '--format=%s', second]) : null;
+  return { head, merged };
+}
+
+/**
+ * A release branch name nothing has taken yet.
+ *
+ * The same rule `tools/release-branch.mjs` uses, so the branch this commits
+ * the bump on is the branch that tool then adopts as the release branch —
+ * which it recognises by seeing its commit as `HEAD`'s merged parent.
+ *
+ * @param {string} repoRoot
+ * @param {string} remote
+ */
+function chooseReleaseBranch(repoRoot, remote) {
+  const local = refNames(repoRoot, `refs/heads/${REF_PREFIX}/`).map((ref) =>
+    ref.slice('refs/heads/'.length),
+  );
+  const tracked = refNames(repoRoot, `refs/remotes/${remote}/${REF_PREFIX}/`).map((ref) =>
+    ref.slice(`refs/remotes/${remote}/`.length),
+  );
+  return availableBranchName(new Date(), [...local, ...tracked]);
+}
+
+/**
+ * Runs `gh`, echoing what it said only when it refused.
+ *
+ * @param {string} repoRoot
+ * @param {string[]} args
+ */
+function gh(repoRoot, args) {
+  return capture('gh', args, { cwd: repoRoot, quiet: true, timeoutMs: GH_TIMEOUT_MS });
+}
+
+/**
+ * Undoes a bump that never landed, so the next run starts from where this one
+ * found things.
+ *
+ * A local-only bump commit left behind is exactly the wedged state this whole
+ * redesign exists to remove: the base branch would have diverged from the
+ * remote and every later run would refuse to start. `checkout --force` because
+ * the working tree carries the rewritten version files at this point.
+ *
+ * @param {string} repoRoot
+ * @param {string} base
+ * @param {string} remote
+ * @param {string} branch
+ * @param {boolean} pushed whether the branch reached the remote
+ */
+function rollBack(repoRoot, base, remote, branch, pushed) {
+  warn('Rolling the bump back so the next run starts from a clean base.');
+  git(repoRoot, ['checkout', '--force', base], { allowFailure: true });
+  git(repoRoot, ['branch', '-D', branch], { allowFailure: true });
+  if (pushed) {
+    const deleted = git(repoRoot, ['push', remote, '--delete', branch], { allowFailure: true });
+    if (deleted.code !== 0) {
+      warn(`Could not delete ${branch} from ${remote}. Remove it and its pull request by hand.`);
+    }
+  }
 }
 
 /**
@@ -173,18 +282,14 @@ function bump(options) {
     return 1;
   }
 
-  // Makes a second run in the same sitting a no-op instead of a second bump.
-  // If HEAD is already the commit this tool wrote for a bump, nothing has
-  // landed on the base branch since -- there is nothing new to release, so
-  // there is nothing to bump. This is what lets BuildAndDeployiOS.cmd and
-  // BuildAndDeployAndroidStore.cmd both call in without either one needing to
-  // know the other already ran: the second call sees its own commit sitting
-  // at HEAD and stops here. The moment a real commit lands on top of it, HEAD
-  // stops being a bump commit and the next deploy bumps again as normal.
-  const headSubject = gitLine(repoRoot, ['log', '-1', '--format=%s']);
-  const alreadyAt = bumpCommitVersion(headSubject);
+  // Makes a retry a no-op instead of a second bump. If the bump this tool
+  // wrote is already on the base branch -- as HEAD itself, or as the branch
+  // HEAD's merge commit brought in -- nothing new has landed since, so there
+  // is nothing new to release. This is what lets a run that shipped iOS and
+  // failed on Android be retried at the same version.
+  const alreadyAt = landedBumpVersion(headSubjects(repoRoot));
   if (alreadyAt) {
-    ok(`Already at ${alreadyAt} (${headSubject}). Nothing to bump.`);
+    ok(`Already at ${alreadyAt}. Nothing to bump.`);
     return 0;
   }
 
@@ -211,12 +316,22 @@ function bump(options) {
     warn(`Could not reach ${options.remote} to confirm ${options.base} is up to date. Continuing.`);
   }
 
+  // Checked before the branch is cut rather than at the point of use: `gh`
+  // missing after the bump commit exists means rolling back a commit that
+  // never had to be written.
+  const ghVersion = gh(repoRoot, ['--version']);
+  if (ghVersion.code !== 0) {
+    fail('The GitHub CLI (gh) is not available, so the bump cannot be landed by pull request.');
+    detail('Install it from https://cli.github.com and run: gh auth login');
+    return 1;
+  }
+
   const current = readCurrentVersion(repoRoot);
   const next = bumpVersion(current, options.level);
-  const branch = `version-bump/${next}`;
+  const branch = options.branch ?? chooseReleaseBranch(repoRoot, options.remote);
 
   if (gitLine(repoRoot, ['branch', '--list', branch]).length > 0) {
-    fail(`${branch} already exists. A previous bump may have failed partway through.`);
+    fail(`${branch} already exists. A previous release may have failed partway through.`);
     detail(`Delete it by hand once you've checked what it holds: git branch -D ${branch}`);
     return 1;
   }
@@ -227,19 +342,125 @@ function bump(options) {
   writeVersion(repoRoot, next);
   git(repoRoot, ['add', APP_JSON, PACKAGE_JSON]);
   git(repoRoot, ['commit', '-m', bumpCommitMessage(next)]);
-  ok(`Committed on ${branch}`);
+  ok(`Committed on ${branch}, which is this release's branch`);
 
-  git(repoRoot, ['checkout', options.base]);
-  git(repoRoot, ['merge', '--ff-only', branch]);
-  git(repoRoot, ['branch', '-d', branch]);
+  const pushed = git(
+    repoRoot,
+    ['push', options.remote, `refs/heads/${branch}:refs/heads/${branch}`],
+    {
+      allowFailure: true,
+    },
+  );
+  if (pushed.code !== 0) {
+    fail(`Could not push ${branch} to ${options.remote}, so there is nothing to open a PR from.`);
+    detail(pushed.output.trim().split(/\r?\n/).slice(-3).join('\n'));
+    rollBack(repoRoot, options.base, options.remote, branch, false);
+    return 1;
+  }
+  ok(`Pushed ${branch} to ${options.remote}`);
+
+  const created = createPullRequest(repoRoot, { branch, base: options.base, current, next });
+  if (created.code !== 0) {
+    fail(`Could not open the pull request for ${branch}.`);
+    detail(created.output.trim().split(/\r?\n/).slice(-5).join('\n'));
+    rollBack(repoRoot, options.base, options.remote, branch, true);
+    return 1;
+  }
+  ok(`Opened a pull request from ${branch} into ${options.base}`);
+
+  // A merge commit rather than a squash: see the header comment. Not --auto,
+  // because that returns once the merge is armed rather than once it has
+  // happened, and this release is about to build the version it assumes landed.
+  const merged = gh(repoRoot, ['pr', 'merge', branch, '--merge', '--delete-branch=false']);
+  if (merged.code !== 0) {
+    fail(`The pull request for ${branch} did not merge, so this release is not going ahead.`);
+    detail(merged.output.trim().split(/\r?\n/).slice(-5).join('\n'));
+    rollBack(repoRoot, options.base, options.remote, branch, true);
+    return 1;
+  }
   ok(`Merged into ${options.base}`);
 
-  const pushed = git(repoRoot, ['push', options.remote, options.base], { allowFailure: true });
-  if (pushed.code === 0) {
-    ok(`Pushed ${options.base} to ${options.remote}`);
+  return settleAfterMerge(repoRoot, options, branch, next);
+}
+
+/**
+ * Opens the pull request, with its body passed through a file.
+ *
+ * Through a file for the same reason tag messages are: the body is several
+ * lines, this runs on Windows, and a multi-line argument is not something
+ * `cmd` quoting reliably survives.
+ *
+ * @param {string} repoRoot
+ * @param {{ branch: string, base: string, current: string, next: string }} input
+ */
+function createPullRequest(repoRoot, { branch, base, current, next }) {
+  const dir = mkdtempSync(join(tmpdir(), 'refrain-bump-'));
+  const bodyPath = join(dir, 'pr-body.md');
+  try {
+    writeFileSync(bodyPath, `${bumpPullRequestBody({ current, next, branch })}\n`, 'utf8');
+    return gh(repoRoot, [
+      'pr',
+      'create',
+      '--base',
+      base,
+      '--head',
+      branch,
+      '--title',
+      bumpPullRequestTitle(next),
+      '--body-file',
+      bodyPath,
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Brings the local base branch up to the merge, and makes sure the release
+ * branch survived it.
+ *
+ * Everything here is a warning rather than a failure. The bump has landed on
+ * the remote by this point, so the release can go ahead; what is left is local
+ * tidying that a person can finish by hand.
+ *
+ * The re-push is not belt and braces. This repository has GitHub's
+ * "automatically delete head branches" turned on, so merging the pull request
+ * **deletes the release branch from the remote** — the branch whose whole job
+ * is to record what this release was built from. Pushing it back is what keeps
+ * that record.
+ *
+ * @param {string} repoRoot
+ * @param {BumpOptions} options
+ * @param {string} branch
+ * @param {string} next
+ * @returns {number}
+ */
+function settleAfterMerge(repoRoot, options, branch, next) {
+  git(repoRoot, ['checkout', options.base]);
+  const fetched = git(repoRoot, ['fetch', options.remote, options.base], { allowFailure: true });
+  if (fetched.code === 0) {
+    const advanced = git(repoRoot, ['merge', '--ff-only', 'FETCH_HEAD'], { allowFailure: true });
+    if (advanced.code === 0) {
+      ok(`${options.base} is now at ${next}`);
+    } else {
+      warn(`Could not fast-forward ${options.base} onto the merge. Pull it by hand.`);
+    }
   } else {
-    warn(`Could not push ${options.base} to ${options.remote}. The commit is local only.`);
-    detail(`git push ${options.remote} ${options.base}`);
+    warn(`Could not fetch ${options.base} after the merge. Pull it by hand.`);
+  }
+
+  const onRemote = git(repoRoot, ['ls-remote', '--heads', options.remote, branch], {
+    allowFailure: true,
+  });
+  if (onRemote.code === 0 && onRemote.output.trim().length === 0) {
+    detail(`${branch} was deleted by the merge. Pushing it back as the release record.`);
+    const rePushed = git(
+      repoRoot,
+      ['push', options.remote, `refs/heads/${branch}:refs/heads/${branch}`],
+      { allowFailure: true },
+    );
+    if (rePushed.code === 0) ok(`Restored ${branch} on ${options.remote}`);
+    else warn(`Could not restore ${branch} on ${options.remote}. The local branch is still there.`);
   }
 
   return 0;
@@ -248,13 +469,15 @@ function bump(options) {
 /** @param {string[]} argv */
 function main(argv) {
   configureColour({});
+  quietShellDeprecation();
 
   const [command, ...rest] = argv;
   if (command !== 'bump') {
     fail(`Unknown command '${command ?? ''}'. Expected: bump.`);
     say();
     say(
-      'Usage: node tools/version-bump.mjs bump [--level patch|minor|major] [--base main] [--remote origin]',
+      'Usage: node tools/version-bump.mjs bump [--level patch|minor|major] [--base main]\n' +
+        '                                       [--remote origin] [--branch release/<stamp>]',
     );
     return 2;
   }
@@ -271,7 +494,11 @@ function main(argv) {
   try {
     return bump(options);
   } catch (error) {
-    if (error instanceof GitError || error instanceof VersionError) {
+    if (
+      error instanceof GitError ||
+      error instanceof VersionError ||
+      error instanceof ReleaseNameError
+    ) {
       fail(error.message);
       return 1;
     }
