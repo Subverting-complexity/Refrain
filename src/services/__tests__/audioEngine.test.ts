@@ -106,12 +106,12 @@ function makeLoadedStatus(overrides: Record<string, unknown> = {}) {
 /**
  * Let a loop rewind settle. The engine restarts a naturally finished track
  * only once its rewind seek has landed (a player parked at the end of its item
- * ignores play), so the restart is a microtask behind the status update that
- * triggered it.
+ * ignores play), so the restart trails the status update that triggered it by
+ * a promise chain. Draining to the next macrotask clears that chain however
+ * long it is, rather than counting its current links.
  */
-async function flushRewind() {
-  await Promise.resolve();
-  await Promise.resolve();
+function flushRewind() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 beforeEach(() => {

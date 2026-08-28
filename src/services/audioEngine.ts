@@ -143,6 +143,17 @@ async function seekInternal(targetMs: number): Promise<void> {
   await player.seekTo(msToSec(targetMs));
 }
 
+// How many times playback has been deliberately stopped. The loop restart at
+// the end of the track cannot run until its rewind has landed (see
+// `rewindToLoopStart`), which leaves a window in which something else can stop
+// playback on purpose: the user pressing pause exactly as the loop wraps, or
+// the marker-drag preview restoring a transport that was paused before the
+// drag. A restart armed before such a stop must not play over the top of it,
+// so it captures this count and drops itself if the count has moved on. Only
+// deliberate stops count — the player pausing itself at the end of the track
+// is what the restart exists to undo.
+let transportStopCount = 0;
+
 /**
  * Start or stop playback and keep the OS media overlay in step.
  *
@@ -162,6 +173,7 @@ function startPlayback(target: AudioPlayer): void {
 }
 
 function stopPlayback(target: AudioPlayer): void {
+  transportStopCount += 1;
   target.pause();
   if (Platform.OS === 'web') webMediaSession.setPlaybackState('paused');
 }
@@ -466,6 +478,13 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     if (!monitor && onLoopRestart) {
       // A per-loop count-in is registered: pause at A and hand off so the
       // caller can run the lead-in before resuming.
+      //
+      // This hands off without waiting for the rewind, unlike the restart
+      // below. It is safe because the handler does not resume immediately: it
+      // runs a lead-in of at least a beat before calling play(), which is
+      // orders of magnitude longer than a seek, so the playhead has long since
+      // left the end of the track. If a zero-length count-in ever becomes
+      // possible, this needs the same wait the restart below uses.
       stopPlayback(player);
       currentState = { ...newState, positionMs: region.a, status: 'paused' };
       notify(currentState);
@@ -483,12 +502,26 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     // other restart keeps an already-playing player running, which is why
     // only the wrap at the end stalled.
     if (status.didJustFinish) {
-      void rewound.then((landed) => {
-        // Teardown or a track change can land in the gap; resuming then would
-        // start whichever track replaced this one.
-        if (!landed || player !== rewinding) return;
-        startPlayback(rewinding);
-      });
+      const stopsBefore = transportStopCount;
+      void rewound
+        .then((landed) => {
+          if (!landed) return;
+          // Teardown or a track change can land in the gap; resuming then
+          // would start whichever track replaced this one.
+          if (player !== rewinding) return;
+          // A deliberate stop during the rewind wins. Pressing pause exactly
+          // as the loop wraps, or releasing a dragged marker so the preview
+          // restores a transport that was paused, must leave playback stopped
+          // rather than be played over by a restart armed before it.
+          if (transportStopCount !== stopsBefore) return;
+          startPlayback(rewinding);
+        })
+        .catch(() => {
+          // `startPlayback` reaches the player directly, so it can still throw
+          // against one released between the guard above and the call. A
+          // resume that misses is not worth reporting over the loop, and this
+          // must not escape as an unhandled rejection.
+        });
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
@@ -758,6 +791,11 @@ export async function stop(): Promise<void> {
   // surface as an unhandled rejection.
   // The player may have been released mid-stop, in which case there is
   // nothing left to pause or rewind and nothing to report.
+  // Counted like any other deliberate stop, so a loop restart still waiting on
+  // its rewind cannot resume the track the user just stopped. Bumped outside
+  // the best-effort block because the intent to stop stands whether or not the
+  // pause below reaches a still-live player.
+  transportStopCount += 1;
   await bestEffortAsync(async () => {
     outgoing.pause();
     markInternalSeek(markerA ?? 0);

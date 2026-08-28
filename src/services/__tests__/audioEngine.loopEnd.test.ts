@@ -21,7 +21,14 @@ let statusCallback: ((status: unknown) => void) | null = null;
 
 const DURATION_SEC = 60;
 
-const fake = { position: 0, playing: false };
+const fake = {
+  position: 0,
+  playing: false,
+  // While set, seeks park instead of completing, so a test can decide what
+  // else happens inside the window a seek is in flight.
+  holdSeeks: false,
+  parked: [] as (() => void)[],
+};
 
 const mockPlay = jest.fn(() => {
   // A player sitting at the end of its item ignores play. Rewind first.
@@ -33,16 +40,34 @@ const mockPause = jest.fn(() => {
   fake.playing = false;
 });
 
-const mockSeekTo = jest.fn(async (sec: number) => {
+const mockSeekTo = jest.fn((sec: number) => {
   // Seeks complete asynchronously: the playhead moves when the player reports
   // the seek done, not when the call is made.
-  await Promise.resolve();
-  fake.position = sec;
+  if (fake.holdSeeks) {
+    return new Promise<void>((resolve) => {
+      fake.parked.push(() => {
+        fake.position = sec;
+        resolve();
+      });
+    });
+  }
+  return Promise.resolve().then(() => {
+    fake.position = sec;
+  });
 });
 
-/** Drain the microtasks a pending seek and its follow-up resume need. */
-async function settleSeeks() {
-  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+/** Complete every seek `holdSeeks` parked. */
+function releaseParkedSeeks() {
+  for (const finish of fake.parked.splice(0)) finish();
+}
+
+/**
+ * Let a pending seek and any resume chained behind it finish. Draining to the
+ * next macrotask clears the chain however long it is, rather than counting its
+ * current links.
+ */
+function settleSeeks() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 jest.mock('expo-audio', () => ({
@@ -97,11 +122,19 @@ function tick(overrides: Record<string, unknown> = {}) {
   });
 }
 
-/** Play out to the natural end, where the player parks and auto-pauses. */
-async function playToEnd() {
+/**
+ * Report the natural end of the track, where the player parks and auto-pauses.
+ * Does not settle, so a caller holding seeks can act inside the rewind window.
+ */
+function reachEnd() {
   fake.position = DURATION_SEC;
   fake.playing = false;
   tick({ playing: false, didJustFinish: true });
+}
+
+/** Play out to the natural end and let the loop restart settle. */
+async function playToEnd() {
+  reachEnd();
   await settleSeeks();
 }
 
@@ -112,6 +145,8 @@ describe('audioEngine: looping around the end of the track', () => {
     statusCallback = null;
     fake.position = 0;
     fake.playing = false;
+    fake.holdSeeks = false;
+    fake.parked = [];
   });
 
   it('keeps playing when the whole-track loop wraps at the end', async () => {
@@ -175,6 +210,74 @@ describe('audioEngine: looping around the end of the track', () => {
 
     expect(fake.position).toBe(0);
     expect(fake.playing).toBe(true);
+  });
+
+  // The restart has to wait for its rewind, which opens a window in which
+  // something else can deliberately stop playback. A restart armed before such
+  // a stop must drop itself rather than play over the top of it.
+
+  it('lets a pause during the rewind win over the loop restart', async () => {
+    const engine = require('../audioEngine');
+    await engine.loadTrack('file:///test.mp3');
+    tick();
+    await engine.play();
+    await settleSeeks();
+
+    fake.holdSeeks = true;
+    reachEnd();
+    // The user presses pause while the rewind is still in flight.
+    await engine.pause();
+
+    releaseParkedSeeks();
+    await settleSeeks();
+
+    expect(fake.playing).toBe(false);
+  });
+
+  it('lets a stop during the rewind win over the loop restart', async () => {
+    const engine = require('../audioEngine');
+    await engine.loadTrack('file:///test.mp3');
+    tick();
+    await engine.play();
+    await settleSeeks();
+
+    fake.holdSeeks = true;
+    reachEnd();
+    const stopping = engine.stop();
+
+    releaseParkedSeeks();
+    await stopping;
+    await settleSeeks();
+
+    expect(fake.playing).toBe(false);
+  });
+
+  it('lets the monitor restore a paused transport at the end of the track', async () => {
+    const engine = require('../audioEngine');
+    await engine.loadTrack('file:///test.mp3');
+    tick();
+
+    // The track is paused when the drag starts, so releasing the marker must
+    // leave it paused.
+    const monitoring = engine.startMonitor(58_000);
+    await settleSeeks();
+    await monitoring;
+    expect(fake.playing).toBe(true);
+
+    // The preview window runs to the end of the track, so the wrap arms a
+    // restart; the marker is released before its rewind lands.
+    fake.holdSeeks = true;
+    reachEnd();
+    fake.holdSeeks = false;
+    const stopping = engine.stopMonitor();
+    await settleSeeks();
+    await stopping;
+    expect(fake.playing).toBe(false);
+
+    releaseParkedSeeks();
+    await settleSeeks();
+
+    expect(fake.playing).toBe(false);
   });
 
   it('resumes at the loop start after a per-loop count-in at the end', async () => {
