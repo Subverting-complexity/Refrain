@@ -112,7 +112,7 @@ export function MarkerControls({
         style={(pressState) => [
           styles.tile,
           {
-            borderColor: arming || value != null ? color : theme.colors.border,
+            borderColor: arming || value != null ? color : theme.colors.outline,
             borderWidth: arming ? 2 : 1,
             backgroundColor: theme.colors.surface,
             opacity: disabled ? 0.4 : pressState.pressed ? 0.7 : 1,

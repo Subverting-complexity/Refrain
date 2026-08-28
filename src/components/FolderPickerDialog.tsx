@@ -48,7 +48,7 @@ export function FolderPickerDialog({
               currentFolderId === null
                 ? theme.colors.accent
                 : theme.colors.background,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.outline,
           },
         ]}
       >
@@ -93,7 +93,7 @@ export function FolderPickerDialog({
                 f.id === currentFolderId
                   ? theme.colors.accent
                   : theme.colors.background,
-              borderColor: theme.colors.border,
+              borderColor: theme.colors.outline,
             },
           ]}
         >
@@ -135,7 +135,7 @@ export function FolderPickerDialog({
             styles.option,
             {
               backgroundColor: theme.colors.background,
-              borderColor: theme.colors.border,
+              borderColor: theme.colors.outline,
             },
           ]}
         >

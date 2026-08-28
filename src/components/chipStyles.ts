@@ -38,7 +38,7 @@ export function pillColors(theme: Theme, selected: boolean) {
     : theme.colors.textPrimary;
   return {
     backgroundColor: selected ? theme.colors.accent : 'transparent',
-    borderColor: selected ? theme.colors.accent : theme.colors.border,
+    borderColor: selected ? theme.colors.accent : theme.colors.outline,
     textColor: selected ? selectedText : theme.colors.textPrimary,
   };
 }

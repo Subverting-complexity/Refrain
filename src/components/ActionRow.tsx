@@ -40,7 +40,7 @@ export function ActionRow({
         styles.row,
         {
           opacity: disabled ? 0.4 : state.pressed ? 0.7 : 1,
-          borderColor: theme.colors.border,
+          borderColor: theme.colors.outline,
         },
       ]}
       disabled={disabled}

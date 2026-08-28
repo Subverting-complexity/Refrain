@@ -30,7 +30,7 @@ export function SearchBar({
         styles.container,
         {
           backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
+          borderColor: theme.colors.outline,
         },
       ]}
     >

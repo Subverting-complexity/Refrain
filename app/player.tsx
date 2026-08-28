@@ -426,9 +426,7 @@ export default function PlayerScreen() {
             style={styles.seekBar}
           />
 
-          <View
-            style={[styles.footer, { borderTopColor: theme.colors.border }]}
-          >
+          <View style={[styles.footer, { borderTopColor: theme.colors.track }]}>
             <ControlsDrawer
               countdownConfig={countdownConfig}
               onCountdownConfigChange={setCountdownConfig}

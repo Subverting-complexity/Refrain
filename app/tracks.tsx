@@ -421,14 +421,14 @@ export default function TracksScreen() {
             <View
               style={[
                 styles.dividerLine,
-                { backgroundColor: theme.colors.border },
+                { backgroundColor: theme.colors.track },
               ]}
             />
             <Text style={theme.typography.caption}>Not played yet</Text>
             <View
               style={[
                 styles.dividerLine,
-                { backgroundColor: theme.colors.border },
+                { backgroundColor: theme.colors.track },
               ]}
             />
           </View>

@@ -41,7 +41,7 @@ export function TransportControls({
     styles.button,
     {
       backgroundColor: theme.colors.surface,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.outline,
       opacity: isDisabled ? 0.4 : pressed ? 0.7 : 1,
     },
   ];

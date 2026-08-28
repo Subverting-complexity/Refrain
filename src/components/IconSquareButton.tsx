@@ -87,7 +87,7 @@ export function IconSquareButton({
             ? 'transparent'
             : active
               ? theme.colors.accent
-              : theme.colors.border,
+              : theme.colors.outline,
           opacity: disabled ? 0.4 : pressState.pressed ? 0.7 : 1,
         } as ViewStyle,
       ]}

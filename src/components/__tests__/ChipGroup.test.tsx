@@ -71,12 +71,12 @@ describe('ChipGroup', () => {
     expect(flat.borderColor).toBe(darkTheme.colors.accent);
   });
 
-  it('outlines unselected chips with the border color', () => {
+  it('outlines unselected chips with the outline color', () => {
     const tree = renderGroup({ value: 5 });
     const unselected = findChip(tree, 'Length 1s');
     const flat = StyleSheet.flatten(unselected.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe('transparent');
-    expect(flat.borderColor).toBe(darkTheme.colors.border);
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('calls onChange with the pressed option value', () => {

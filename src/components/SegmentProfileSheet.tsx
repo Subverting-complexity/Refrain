@@ -88,9 +88,7 @@ export function SegmentProfileSheet({
         enabled={snippetPreviewEnabled}
         onChange={onSnippetPreviewChange}
       />
-      <View
-        style={[styles.divider, { backgroundColor: theme.colors.border }]}
-      />
+      <View style={[styles.divider, { backgroundColor: theme.colors.track }]} />
 
       {profiles.length === 0 ? (
         <View style={styles.empty}>

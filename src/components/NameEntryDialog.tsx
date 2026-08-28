@@ -84,7 +84,10 @@ export function NameEntryDialog({
         style={[
           styles.input,
           theme.typography.body,
-          { color: theme.colors.textPrimary, borderColor: theme.colors.border },
+          {
+            color: theme.colors.textPrimary,
+            borderColor: theme.colors.outline,
+          },
         ]}
         autoFocus
         selectTextOnFocus={initialName.length > 0}

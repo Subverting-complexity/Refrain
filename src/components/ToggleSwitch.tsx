@@ -25,8 +25,24 @@ interface ToggleSwitchProps {
 const TRACK_WIDTH = 52;
 const TRACK_HEIGHT = 32;
 const THUMB_SIZE = 26;
-const THUMB_INSET = 3;
-const THUMB_TRAVEL = TRACK_WIDTH - THUMB_SIZE - THUMB_INSET * 2;
+/**
+ * The ring that identifies the control. Neither fill reaches 3:1 against
+ * what the switch sits on — the off track is deliberately close to its
+ * surroundings so the knob stays legible on it, and light mode's accent is
+ * a fill colour at 2.30 against the page — so without this ring there is no
+ * state in which the switch's own boundary meets WCAG 2.1 SC 1.4.11.
+ */
+const TRACK_BORDER = 1;
+/**
+ * The gap between the ring and the knob. One pixel tighter than the gap the
+ * switch had before the ring, so the knob keeps the same 3px clearance from
+ * the outer edge and the pill is unchanged to look at.
+ */
+const THUMB_INSET = 2;
+// React Native sizes a box including its border, so the thumb travels the
+// content box rather than the full width.
+const THUMB_TRAVEL =
+  TRACK_WIDTH - TRACK_BORDER * 2 - THUMB_SIZE - THUMB_INSET * 2;
 
 /**
  * The app's single on/off switch. A full-pill track with a floating knob that
@@ -65,7 +81,7 @@ export function ToggleSwitch({
 
   const trackColor = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [theme.colors.border, theme.colors.accent],
+    outputRange: [theme.colors.track, theme.colors.accent],
   });
   const thumbColor = progress.interpolate({
     inputRange: [0, 1],
@@ -84,7 +100,12 @@ export function ToggleSwitch({
       onPress={() => onValueChange(!value)}
       style={style}
     >
-      <Animated.View style={[styles.track, { backgroundColor: trackColor }]}>
+      <Animated.View
+        style={[
+          styles.track,
+          { backgroundColor: trackColor, borderColor: theme.colors.outline },
+        ]}
+      >
         <Animated.View
           style={[
             styles.thumb,
@@ -104,6 +125,7 @@ const styles = StyleSheet.create({
     width: TRACK_WIDTH,
     height: TRACK_HEIGHT,
     borderRadius: TRACK_HEIGHT / 2,
+    borderWidth: TRACK_BORDER,
     justifyContent: 'center',
   },
   thumb: {

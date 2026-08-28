@@ -106,7 +106,7 @@ export function SeekBar({
     >
       <SliderBar
         progress={displayProgress}
-        trackColor={theme.colors.border}
+        trackColor={theme.colors.track}
         fillColor={theme.colors.accentForeground}
         pan={pan}
         onLayout={handleLayout}

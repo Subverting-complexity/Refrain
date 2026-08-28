@@ -146,7 +146,7 @@ export function MarkerTimeSheet({
             style={(p) => [
               styles.stepButton,
               {
-                borderColor: theme.colors.border,
+                borderColor: theme.colors.outline,
                 opacity: p.pressed ? 0.6 : 1,
               },
             ]}
@@ -176,7 +176,7 @@ export function MarkerTimeSheet({
             style={(p) => [
               styles.stepButton,
               {
-                borderColor: theme.colors.border,
+                borderColor: theme.colors.outline,
                 opacity: p.pressed ? 0.6 : 1,
               },
             ]}
@@ -196,7 +196,7 @@ export function MarkerTimeSheet({
             style={(p) => [
               styles.coarseButton,
               {
-                borderColor: theme.colors.border,
+                borderColor: theme.colors.outline,
                 opacity: p.pressed ? 0.6 : 1,
               },
             ]}
@@ -226,7 +226,7 @@ export function MarkerTimeSheet({
             style={(p) => [
               styles.coarseButton,
               {
-                borderColor: theme.colors.border,
+                borderColor: theme.colors.outline,
                 opacity: p.pressed ? 0.6 : 1,
               },
             ]}
@@ -244,7 +244,7 @@ export function MarkerTimeSheet({
         </View>
 
         <View
-          style={[styles.divider, { backgroundColor: theme.colors.border }]}
+          style={[styles.divider, { backgroundColor: theme.colors.track }]}
         />
 
         <AccessiblePressable

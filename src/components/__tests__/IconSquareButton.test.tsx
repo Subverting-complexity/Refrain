@@ -70,7 +70,7 @@ describe('IconSquareButton', () => {
     const node = findHost(tree);
     const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe(darkTheme.colors.surface);
-    expect(flat.borderColor).toBe(darkTheme.colors.border);
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('sets opacity 0.4 when disabled', () => {

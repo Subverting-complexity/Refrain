@@ -32,17 +32,19 @@ const AA_NON_TEXT = 3;
  */
 const ELEVATION_MIN = 1.15;
 /**
- * How far an outline has to sit from what surrounds it. Well below the
- * 3:1 that 1.4.11 wants for a control identified by its border alone —
- * neither palette reaches that and #267 tracks it. This floor only holds
- * the line at what they do manage.
+ * How far a divider or a slider track has to sit from what surrounds it.
+ * Not a WCAG figure: `track` paints hairlines, the seek and volume tracks,
+ * the toggle's off state and the loading placeholders, none of which have
+ * to be found by their edge. What holds `track` in place is the other
+ * direction, the 3:1 the fill and the knob need *on* it, so this floor
+ * only stops it fading into the page entirely.
  *
  * Against the page: dark 1.79, light 1.50. Against a card: dark 1.48,
  * light 1.77. Dark-on-card is the binding case and clears this floor by
  * 0.03, so the headroom is thin in one direction even though the other
  * three have room.
  */
-const OUTLINE_MIN = 1.45;
+const TRACK_MIN = 1.45;
 
 type Pair = [name: string, fg: keyof ThemeColors, bg: keyof ThemeColors];
 
@@ -88,11 +90,18 @@ const TEXT_PAIRS: Pair[] = [
  * stricter row is not the worst case for them.
  */
 const NON_TEXT_PAIRS: Pair[] = [
-  // The seek and volume fills. Their track is painted in `border`, and
+  // The seek and volume fills. Their track is painted in `track`, and
   // the edge between the two is the whole of the position readout.
-  ['a slider fill against its track', 'accentForeground', 'border'],
-  // The toggle's knob against its off track, which is also `border`.
-  ['the toggle knob when off', 'textSecondary', 'border'],
+  ['a slider fill against its track', 'accentForeground', 'track'],
+  // The toggle's knob against its off track, which is also `track`.
+  ['the toggle knob when off', 'textSecondary', 'track'],
+  // The identifying edge of every outlined control: text inputs,
+  // unselected chips, outlined buttons, the pressable list rows and the
+  // toggle's ring. Both rows are the point of the `outline`/`track` split
+  // — one token could not clear 3:1 here and stay close enough to the page
+  // for the two rows above to clear it as well.
+  ['an outlined control on the page', 'outline', 'background'],
+  ['an outlined control on a card', 'outline', 'surface'],
 ];
 
 /** Every token asserted above, plus the ones covered by a named test. */
@@ -100,7 +109,7 @@ const COVERED = new Set<keyof ThemeColors>([
   ...TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
   ...NON_TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
   'accent',
-  'border',
+  'track',
   'surface',
   'background',
 ]);
@@ -132,9 +141,9 @@ describe.each([
   it.each([
     ['the page', 'background' as const],
     ['a card', 'surface' as const],
-  ])('keeps an outline visible against %s', (_label, bg) => {
-    expect(contrastRatio(colors.border, colors[bg])).toBeGreaterThanOrEqual(
-      OUTLINE_MIN,
+  ])('keeps a track or divider visible against %s', (_label, bg) => {
+    expect(contrastRatio(colors.track, colors[bg])).toBeGreaterThanOrEqual(
+      TRACK_MIN,
     );
   });
 
