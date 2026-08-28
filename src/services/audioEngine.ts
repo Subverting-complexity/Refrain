@@ -143,6 +143,17 @@ async function seekInternal(targetMs: number): Promise<void> {
   await player.seekTo(msToSec(targetMs));
 }
 
+// How many times playback has been deliberately stopped. The loop restart at
+// the end of the track cannot run until its rewind has landed (see
+// `rewindToLoopStart`), which leaves a window in which something else can stop
+// playback on purpose: the user pressing pause exactly as the loop wraps, or
+// the marker-drag preview restoring a transport that was paused before the
+// drag. A restart armed before such a stop must not play over the top of it,
+// so it captures this count and drops itself if the count has moved on. Only
+// deliberate stops count — the player pausing itself at the end of the track
+// is what the restart exists to undo.
+let transportStopCount = 0;
+
 /**
  * Start or stop playback and keep the OS media overlay in step.
  *
@@ -162,6 +173,7 @@ function startPlayback(target: AudioPlayer): void {
 }
 
 function stopPlayback(target: AudioPlayer): void {
+  transportStopCount += 1;
   target.pause();
   if (Platform.OS === 'web') webMediaSession.setPlaybackState('paused');
 }
@@ -355,6 +367,29 @@ function detectLockScreenSkip(
   return { direction: delta > 0 ? 1 : -1, fromMs: previous };
 }
 
+/**
+ * Rewind `target` to the loop start, reporting a failed seek as an error.
+ *
+ * Resolves to whether the rewind actually landed, and only once it has. A
+ * caller that has to resume playback afterwards must wait for that: a player
+ * sitting at the end of its item ignores play, so pressing play alongside the
+ * seek rather than after it leaves the transport paused. Never rejects, so the
+ * result can be ignored by the callers that only need the seek issued.
+ */
+function rewindToLoopStart(
+  target: AudioPlayer,
+  toMs: number,
+): Promise<boolean> {
+  markInternalSeek(toMs);
+  return target.seekTo(msToSec(toMs)).then(
+    () => true,
+    (err: unknown) => {
+      reportSeekFailure(target, err);
+      return false;
+    },
+  );
+}
+
 function onPlaybackStatusUpdate(status: AudioStatus): void {
   if (status.error) {
     currentState = {
@@ -437,15 +472,19 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     }
 
     // Loop armed (or monitor active): rewind to the start.
-    markInternalSeek(region.a);
     const rewinding = player;
-    rewinding.seekTo(msToSec(region.a)).catch((err: unknown) => {
-      reportSeekFailure(rewinding, err);
-    });
+    const rewound = rewindToLoopStart(rewinding, region.a);
 
     if (!monitor && onLoopRestart) {
       // A per-loop count-in is registered: pause at A and hand off so the
       // caller can run the lead-in before resuming.
+      //
+      // This hands off without waiting for the rewind, unlike the restart
+      // below. It is safe because the handler does not resume immediately: it
+      // runs a lead-in of at least a beat before calling play(), which is
+      // orders of magnitude longer than a seek, so the playhead has long since
+      // left the end of the track. If a zero-length count-in ever becomes
+      // possible, this needs the same wait the restart below uses.
       stopPlayback(player);
       currentState = { ...newState, positionMs: region.a, status: 'paused' };
       notify(currentState);
@@ -453,10 +492,36 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       return;
     }
 
-    // When the track reached its natural end, the player auto-pauses.
-    // Restart it so the loop continues seamlessly.
+    // When the track reached its natural end, the player auto-pauses, so this
+    // is the one loop restart that has to press play again — and it must wait
+    // for the rewind to land first. `seekTo` is asynchronous, and a player
+    // still parked at the end of its item ignores play: iOS's AVPlayer drops
+    // the rate change outright. Playing first was therefore a no-op, and the
+    // loop died exactly where it wrapped around the end of the track — the
+    // playhead jumped back to the loop start and sat there paused. Every
+    // other restart keeps an already-playing player running, which is why
+    // only the wrap at the end stalled.
     if (status.didJustFinish) {
-      startPlayback(player);
+      const stopsBefore = transportStopCount;
+      void rewound
+        .then((landed) => {
+          if (!landed) return;
+          // Teardown or a track change can land in the gap; resuming then
+          // would start whichever track replaced this one.
+          if (player !== rewinding) return;
+          // A deliberate stop during the rewind wins. Pressing pause exactly
+          // as the loop wraps, or releasing a dragged marker so the preview
+          // restores a transport that was paused, must leave playback stopped
+          // rather than be played over by a restart armed before it.
+          if (transportStopCount !== stopsBefore) return;
+          startPlayback(rewinding);
+        })
+        .catch(() => {
+          // `startPlayback` reaches the player directly, so it can still throw
+          // against one released between the guard above and the call. A
+          // resume that misses is not worth reporting over the loop, and this
+          // must not escape as an unhandled rejection.
+        });
     }
     // Publish the loop restart immediately so the cursor jumps cleanly
     // back to marker A instead of stalling at the overshoot position
@@ -719,13 +784,18 @@ export async function pause(): Promise<void> {
 export async function stop(): Promise<void> {
   const outgoing = player;
   if (!outgoing) return;
+  // Counted like any other deliberate stop, so a loop restart still waiting on
+  // its rewind cannot resume the track the user just stopped. Recorded before
+  // the best-effort block below, because the intent to stop stands whether or
+  // not the pause reaches a still-live player.
+  transportStopCount += 1;
   // expo-audio has no stop(); emulate by pausing and rewinding. stop() runs
   // unserialized relative to load/unload, so the player can be removed
   // mid-call (e.g. tapping Stop then immediately navigating away) — pausing or
   // seeking a released player would reject. Best-effort so that race can never
-  // surface as an unhandled rejection.
-  // The player may have been released mid-stop, in which case there is
-  // nothing left to pause or rewind and nothing to report.
+  // surface as an unhandled rejection: the player may have been released
+  // mid-stop, in which case there is nothing left to pause or rewind and
+  // nothing to report.
   await bestEffortAsync(async () => {
     outgoing.pause();
     markInternalSeek(markerA ?? 0);
