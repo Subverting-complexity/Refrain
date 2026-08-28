@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 280"><defs>
+    <linearGradient id="brand" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#a0edcf"/>
+      <stop offset="45%" stop-color="#7edbb8"/>
+      <stop offset="100%" stop-color="#4a9e82"/>
+    </linearGradient>
+  </defs><text id="wordmark" x="250" y="158" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="72" font-weight="700" letter-spacing="-1" fill="#7edbb8">Refrain</text></svg>
