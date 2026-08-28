@@ -4,7 +4,8 @@
 app_identifier("com.subvertingcomplexity.refrain")
 
 for_platform :ios do
-  apple_id(ENV["APPLE_ID"] || "adrienne.bosch7@icloud.com")
+  # Not hardcoded: this repo is public. Set APPLE_ID in your shell or .env.
+  apple_id(ENV.fetch("APPLE_ID"))
   team_id("JTUZQBUGVY") # Apple Developer team (from eas.json submit config)
   # itc_team_id("...")  # Set only if your App Store Connect team id differs.
 end

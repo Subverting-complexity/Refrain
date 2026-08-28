@@ -43,4 +43,4 @@ new "Last updated" date.
 
 ## Contact
 
-Questions about this policy: **adrienne.bosch7@icloud.com**
+Questions about this policy: **support@subvertingcomplexity.com**

@@ -43,7 +43,7 @@ first release, with the answer for Refrain and the reason behind it.
 | Bundle ID / package      | `com.subvertingcomplexity.refrain`             |
 | Apple Team ID            | `JTUZQBUGVY` — SUBVERTING COMPLEXITY (PTY) LTD |
 | App Store Connect app ID | `6780801245`                                   |
-| Apple ID (account)       | `adrienne.bosch7@icloud.com`                   |
+| Apple ID (account)       | Not recorded here — public repo; see `.env`    |
 | SKU                      | `Refrain`                                      |
 | Marketing version        | `1.0.0` (`expo.version` in `app.json`)         |
 | Build number             | managed remotely by EAS, auto-incremented      |
@@ -106,10 +106,10 @@ document picker, so no media-permission declaration is owed (§3.10).
 | Privacy policy      | `https://subvertingcomplexity.com/refrain/privacy` |
 | Terms of use        | `https://subvertingcomplexity.com/refrain/terms`   |
 | Support             | `https://subvertingcomplexity.com/refrain/support` |
-| Support email       | `adrienne.bosch7@icloud.com`                       |
+| Support email       | `support@subvertingcomplexity.com`                 |
 
-The privacy policy text to publish at that URL is
-[../docs/privacy-policy.md](../docs/privacy-policy.md).
+[../docs/privacy-policy.md](../docs/privacy-policy.md) is an early draft, not
+the text currently served at that URL. See 4.2.
 
 ---
 
@@ -290,7 +290,7 @@ Google generates ratings for every region from one questionnaire.
 
 | Field         | Answer                                                                                                                          |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Email address | `adrienne.bosch7@icloud.com`                                                                                                    |
+| Email address | `support@subvertingcomplexity.com`                                                                                              |
 | Category      | **Utility, Productivity, Communication, or Other** — not a Game category, and not Reference/News/Educational. Refrain is a tool |
 
 Then answer **No** to every content question, including: violence, sexuality,
@@ -457,23 +457,29 @@ content rights, and the license agreement are all done. Outstanding:
   Refrain has no accounts, so this is wrong. Pushing the review information
   block with no `demo_user.txt` / `demo_password.txt` present clears it (2.5).
 
-### 4.2 The website pages must be live
+### 4.2 Website pages — verified live 28 Aug 2026
 
-Every URL points at `subvertingcomplexity.com`. Before submission:
+All four URLs return HTTP 200:
 
-- `/refrain/privacy` must serve the policy from
-  [../docs/privacy-policy.md](../docs/privacy-policy.md). **Both stores reject
-  on an unreachable privacy policy URL**, and `fastlane ios listing` runs
-  `precheck`, which fails on broken URLs before it uploads anything.
-- `/refrain/support` must serve a support page with a working contact route.
-  Apple requires the Support URL and checks that it resolves; `precheck` fails
-  on it too.
-- `/refrain/` must serve a real product page — it is the marketing URL on Apple
-  and the contact website on Play.
-- `/refrain/terms` is referenced as the app's terms of use. Neither store has a
-  metadata field for it, so it is not a submission blocker — but the repo has no
-  terms document to publish there yet. It needs writing, or the URL needs
-  dropping.
+| URL                | Role                                                  |
+| ------------------ | ----------------------------------------------------- |
+| `/refrain/`        | Apple marketing URL, Play contact website             |
+| `/refrain/privacy` | Privacy policy. Both stores reject an unreachable one |
+| `/refrain/support` | Support page. Apple requires it and checks it         |
+| `/refrain/terms`   | Terms of service                                      |
+
+`fastlane ios listing` runs `precheck`, which fails on a broken URL before
+uploading anything, so re-check these if the site is redeployed shortly before a
+submission.
+
+**Drift worth knowing about.** The website is the published source of truth, not
+this repo. The live privacy page is a substantially longer document than
+[../docs/privacy-policy.md](../docs/privacy-policy.md), roughly 9,000 characters
+of text against 1,500 in the repo, and it is structured around a South African
+Information Officer and the Information Regulator. The live terms page has no
+counterpart in the repo at all. Do not assume `docs/privacy-policy.md` is the
+text being served, and do not publish it over the live page without comparing
+them first.
 
 ### 4.3 Foreground-service demo video (Android)
 

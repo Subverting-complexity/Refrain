@@ -100,15 +100,17 @@ eas submit --platform ios --profile production
 During `eas build`, EAS offers to log in to your **Apple** account to
 manage credentials. This is a separate identity from your Expo login.
 
-⚠️ The prompt may prefill the wrong Apple ID (e.g. a work account). The
-correct one is pinned in `eas.json` under `submit.production.ios`:
+⚠️ The prompt may prefill the wrong Apple ID (e.g. a work account).
+The team and app are pinned in `eas.json` under `submit.production.ios`:
 
-- Apple ID: `adrienne.bosch7@icloud.com`
 - Team: `JTUZQBUGVY` (SUBVERTING COMPLEXITY (PTY) LTD)
 - ASC App ID: `6780801245`
 
-Clear the prefilled value and enter the Apple ID above. Entering a work
-account will fail — it has no access to this app.
+The **Apple ID itself is deliberately not in the repo**, because this
+repository is public and it is a personal address. Set `EXPO_APPLE_ID` in
+your gitignored `.env` (see `.env.example`), or clear the prefilled value
+and type it at the prompt. Entering a work account will fail — it has no
+access to this app.
 
 Export compliance needs no action: `ITSAppUsesNonExemptEncryption` is
 already set to `false` in `app.json`, so Apple skips the encryption

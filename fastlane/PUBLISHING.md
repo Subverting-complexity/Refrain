@@ -127,7 +127,7 @@ Connect API. Create a key with **App Manager** role, download the `.p8` once.
 export ASC_KEY_ID="XXXXXXXXXX"
 export ASC_ISSUER_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 export ASC_KEY_CONTENT="$(cat AuthKey_XXXXXXXXXX.p8)"   # raw contents, incl. BEGIN/END
-export APPLE_ID="adrienne.bosch7@icloud.com"
+export APPLE_ID="<the Apple Developer account email>"
 ```
 
 **Android** — a Google Cloud service-account JSON granted access in Play Console
