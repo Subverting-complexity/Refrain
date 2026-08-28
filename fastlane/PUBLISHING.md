@@ -11,23 +11,54 @@ fastlane/
   Fastfile                    ios/android `listing` lanes
   Gemfile                     pins fastlane
   privacy_details.json        Apple privacy label (DATA_NOT_COLLECTED)
-  creative/render.py          regenerates all screenshots + feature graphic
-  screenshots/en-US/          iOS screenshots (1320×2868)
+  creative/render.py          regenerates all screenshots + feature graphic + Play icon
+  screenshots/en-US/          iOS screenshots: iPhone 6.9" (1320×2868)
+                              and iPad 12.9" (2048×2732) — both uploaded by deliver
+  screenshots-ipad13/en-US/   iPad 13" (2064×2752) — NOT uploaded, see below
   metadata/
     en-US/…                   iOS listing text + review info
     copyright.txt, *category  iOS app-level fields
     android/
       en-US/…                 Play listing text + changelog
-      en-US/images/…          Play phone screenshots (1290×2796) + feature graphic (1024×500)
+      en-US/images/…          Play phone screenshots (1290×2796), feature graphic
+                              (1024×500) and the 512×512 listing icon
       data_safety.csv         Play Data Safety answers (no data collected)
 ```
+
+## iPad screenshots
+
+`ios.supportsTablet` is true in `app.json`, so the listing is iPad compatible
+and App Store Connect wants an iPad screenshot set alongside the iPhone one.
+Apple's current size for that is 13-inch, 2064×2752.
+
+`deliver` still rejects 2064×2752 as an invalid screen size. That is an open
+fastlane bug, not a problem with the files ([#22030], [#29578]). So the
+generator writes two iPad sets:
+
+- **2048×2732** (12.9") into `screenshots/en-US/`. `deliver` accepts this
+  size, so it goes up automatically with `fastlane ios listing`.
+- **2064×2752** (13") into `screenshots-ipad13/en-US/`, deliberately outside
+  the path `deliver` reads so it cannot fail the lane. Upload it by hand in
+  App Store Connect if the 12.9" set does not satisfy the iPad slot.
+
+Delete the 12.9" target from `render.py` once `deliver` learns the 13" size.
+
+One caveat worth knowing: the captures in `assets/appstore_images/` are iPhone
+captures, so the iPad slides show a phone-proportioned screen on a wider
+canvas. That is honest for an app that is iPad _compatible_ rather than
+iPad-specific. Replacing them means capturing the app on an iPad and rerunning
+the generator, nothing more.
+
+[#22030]: https://github.com/fastlane/fastlane/issues/22030
+[#29578]: https://github.com/fastlane/fastlane/issues/29578
 
 ## What's automated vs. console-only
 
 | Area                               | Automated here                  | You do once in the console                                         |
 | ---------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
 | Listing text, keywords, notes      | ✅ deliver / supply             | —                                                                  |
-| Screenshots + feature graphic      | ✅ deliver / supply             | —                                                                  |
+| Screenshots + feature graphic      | ✅ deliver / supply             | iPad 13" set, only while the deliver bug above stands              |
+| Play listing icon (512×512)        | ✅ supply                       | —                                                                  |
 | Privacy label (Apple)              | ✅ `privacy_details.json`       | (first time) fill once, then `refresh_privacy_template`            |
 | Data Safety (Google)               | ⚠️ answers in `data_safety.csv` | Export CSV for exact headers → import, or answer 3 questions in UI |
 | Build upload + submit              | ✅ EAS (`eas submit`)           | —                                                                  |
