@@ -562,8 +562,14 @@ if ($IsRelease) {
 }
 
 # -- Build each platform in turn ----------------------------------------------
+# The loop is wrapped in try/finally so the release is closed however it ends:
+# normally, after a failure stopped it, or on an error nobody anticipated. An
+# open run left behind is what would make the *next* release find a release
+# already in flight, and that is a worse failure than whatever caused it.
 $overallExitCode = 0
 $results = @()
+
+try {
 
 foreach ($target in $Targets) {
     Write-Step "Starting EAS $Profile build for $target (cloud)"
@@ -672,11 +678,13 @@ foreach ($target in $Targets) {
     }
 }
 
-# -- Close the release ---------------------------------------------------------
-# Unconditionally, including after a failure. A platform that was never
-# attempted is left untagged: it did not fail, it was not tried.
-if ($IsRelease) {
-    Stop-Release -AppDir $AppDir
+} finally {
+    # -- Close the release -----------------------------------------------------
+    # Unconditionally, including after a failure. A platform that was never
+    # attempted is left untagged: it did not fail, it was not tried.
+    if ($IsRelease) {
+        Stop-Release -AppDir $AppDir
+    }
 }
 
 # -- Final summary -------------------------------------------------------------
