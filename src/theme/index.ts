@@ -74,8 +74,10 @@ export interface ThemeColors {
   /** Dimming scrim behind centred modal dialogs. */
   overlay: string;
   /**
-   * The four colours the waveform bars are drawn in, darkest-reading to
-   * brightest-reading as a bar becomes more important:
+   * The four colours the waveform bars are drawn in, listed from the least
+   * prominent to the most prominent. Which direction that runs is a property
+   * of the palette, not of this list: dark mode gets brighter as a bar
+   * becomes more important and light mode gets darker.
    *
    * - `waveformDull` — outside the loop, or unplayed with no loop set. The
    *   shape of the rest of the track, as context.

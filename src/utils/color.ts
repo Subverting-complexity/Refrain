@@ -28,8 +28,11 @@ export function withAlpha(hex: string, alpha: number): string {
  * do for a translucent fill, so a graded bar sits on the same ramp as the
  * translucent tints drawn beside it.
  *
- * Six-digit hex only, matching {@link luminance}: anything else yields
- * `#000000` rather than a plausible-looking wrong colour.
+ * Six-digit hex only, the same input rule as {@link luminance}, though the
+ * two fail differently: that one yields `NaN` and this one `#000000`. Either
+ * way the answer is obviously wrong rather than plausibly wrong, which is the
+ * point — a bad token should show as black bars, not as a slightly-off tier
+ * nobody notices.
  */
 export function mix(from: string, to: string, t: number): string {
   const a = channels(from);
