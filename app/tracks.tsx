@@ -3,9 +3,8 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CenteredDialog } from '@/src/components/CenteredDialog';
+import { ConfirmDestructiveDialog } from '@/src/components/ConfirmDestructiveDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
-import { DialogButton } from '@/src/components/DialogButton';
 import { FolderPickerDialog } from '@/src/components/FolderPickerDialog';
 import { ImportButton } from '@/src/components/ImportButton';
 import { SearchBar } from '@/src/components/SearchBar';
@@ -559,28 +558,15 @@ export default function TracksScreen() {
       ) : null}
 
       {deletingTrack ? (
-        <CenteredDialog
+        <ConfirmDestructiveDialog
           title="Delete track?"
           message={`Remove “${deletingTrack.filename}” from your library?`}
+          confirmLabel="Delete"
+          confirmAccessibilityLabel={`Confirm delete ${deletingTrack.filename}`}
+          cancelAccessibilityLabel="Cancel delete"
+          onConfirm={() => void handleDelete(deletingTrack.id)}
           onDismiss={() => setDeletingTrack(null)}
-        >
-          <DialogButton
-            label="Delete"
-            accessibilityLabel={`Confirm delete ${deletingTrack.filename}`}
-            variant="danger"
-            onPress={() => {
-              const target = deletingTrack;
-              setDeletingTrack(null);
-              void handleDelete(target.id);
-            }}
-          />
-          <DialogButton
-            label="Cancel"
-            accessibilityLabel="Cancel delete"
-            variant="default"
-            onPress={() => setDeletingTrack(null)}
-          />
-        </CenteredDialog>
+        />
       ) : null}
 
       <ToastHost toast={toast} onDismiss={hideToast} />
