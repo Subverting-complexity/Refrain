@@ -205,7 +205,7 @@ reviewers, and the answer is that Refrain cannot obtain content on its own.
 ### 2.5 App Review Information
 
 Already in the repo under
-[metadata/en-US/review_information/](metadata/en-US/review_information/) and
+[metadata/review_information/](metadata/review_information/) and
 pushed by `fastlane ios listing`:
 
 | Field             | Value                                                                                |

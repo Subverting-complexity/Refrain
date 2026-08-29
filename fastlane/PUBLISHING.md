@@ -16,7 +16,9 @@ fastlane/
                               and iPad 12.9" (2048×2732) — both uploaded by deliver
   screenshots-ipad13/en-US/   iPad 13" (2064×2752) — NOT uploaded, see below
   metadata/
-    en-US/…                   iOS listing text + review info
+    en-US/…                   iOS listing text
+    review_information/…      App Review contact. App-level, NOT under en-US:
+                              deliver reads metadata/review_information only
     copyright.txt, *category  iOS app-level fields
     android/
       en-US/…                 Play listing text + changelog
@@ -105,13 +107,14 @@ release. It just waits for your publish click afterwards.
    before you submit.** Publish `docs/privacy-policy.md` at `/refrain/privacy`;
    `precheck` fails on a broken URL, and both stores reject an unreachable
    privacy policy.
-2. **Review contact**: `metadata/en-US/review_information/` carries the real
+2. **Review contact**: `metadata/review_information/` carries the real
    App Review contact: Adrienne Bosch, `support@subvertingcomplexity.com`,
    `+27713280153`. Apple uses these to reach you during review, so keep them
    current. Leave `demo_user.txt` and `demo_password.txt` absent; their absence
    is what clears the "Sign-in required" tick in App Store Connect.
-3. **Categories**: `metadata/primary_category.txt` = `MZGenre.Music`,
-   secondary `MZGenre.Education`. Adjust if you prefer.
+3. **Categories**: `metadata/primary_category.txt` = `MUSIC`, secondary
+   `EDUCATION`. Adjust if you prefer. The older `MZGenre.*` spellings still
+   upload but deliver deprecates them on every run.
 4. **App Store name**: the canonical iOS display name is
    `Refrain: Audio Looper` (`metadata/en-US/name.txt`), matching App Store
    Connect. The Play listing title is `Refrain: A/B Loop Player`
@@ -160,6 +163,16 @@ bundle exec fastlane android listing
 
 `ios listing` runs `precheck` first to catch common rejection triggers
 (placeholder text, other-platform mentions, broken URLs).
+
+### Review information is app-level, not per-locale
+
+`deliver` reads it from `metadata/review_information/` and nowhere else. While
+these files sat under `metadata/en-US/` they were silently ignored, and the
+consequence was not a missing contact detail but a crash: with no review
+information uploaded, the version has no App Store Review Detail record, and
+`review_attachment_file` fetches that record without guarding for its absence
+and dies with `No data`. Metadata that had already uploaded stayed uploaded, so
+the run half-succeeded. Keep this directory where it is.
 
 ### The privacy label is not part of it
 
