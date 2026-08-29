@@ -56,17 +56,14 @@ and for which store, prints the equivalent command, and asks for a `y` before
 running anything. It returns to the menu afterwards, so one session can ship
 Android, then iOS, then push a listing.
 
-A store release asks one more question, the version bump, and shows what each
-level would do to the current version rather than only naming the rule:
+Each line is a name and nothing else. The confirmation prints the exact command
+and waits for a `y`, so it is the confirmation that carries the meaning.
 
-```
-   1) Minor (default)
-      1.3.0 -> 1.4.0
-   2) Patch
-      1.3.0 -> 1.3.1
-   3) Major
-      1.3.0 -> 2.0.0
-```
+The release runs with the menu's own console rather than through a pipe
+(`Start-Process -NoNewWindow`). Three things depend on that: colour, which
+PowerShell drops when it is not writing to a console; prompts, since `eas build`
+asks about credentials and a question written to a pipe can never be answered;
+and the release log itself.
 
 The menu exists because the defaults are wrong for a double-click. Typed, a bare
 `Deploy.cmd` meaning "public release of both stores" is a reasonable shorthand.
@@ -77,9 +74,21 @@ and CI are unaffected.
 Three things it offers:
 
 - **Store release** - the public release: version bump, build, submit, listing.
-  Asks for the bump level, defaulting to minor.
 - **Test build** - the `fast` lane: internal testers, no bump, no public listing.
 - **Store listing only** - `-ListingOnly`, below.
+
+### The version bump level
+
+A store release bumps the minor version. `REFRAIN_BUMP_LEVEL` in `.env` changes
+that for this machine (`major`, `minor` or `patch`), and the menu shows the
+current value in its header so it is not a setting you discover from the version
+number afterwards.
+
+It is a setting rather than a question because the answer is the same almost
+every release. For the occasional one that differs, `-Patch` and `-Major`
+override it for a single run, which beats changing a setting and changing it
+back. A value the level does not recognise stops the run rather than falling
+back to minor.
 
 ### `-ListingOnly`
 

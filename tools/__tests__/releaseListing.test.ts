@@ -159,6 +159,7 @@ describe('checkListingPrerequisites', () => {
       platforms: ['ios', 'android'],
       env: complete,
       hasBundler: true,
+      hasFastlane: true,
       hasDefaultPlayKey: false,
       fileExists: () => true,
       ...overrides,
@@ -229,6 +230,26 @@ describe('checkListingPrerequisites', () => {
   it('says how to install the toolchain, not just that it is missing', () => {
     const { problems } = check({ hasBundler: false });
     expect(problems[0]).toContain('bundle install');
+  });
+
+  it('catches bundler being installed while fastlane is not', () => {
+    // The failure this check was written for and did not catch: `bundle` on
+    // PATH with no gems behind it passed the preflight, printed "the listing
+    // toolchain and credentials are in place", and then exited 127 on
+    // `bundle exec fastlane`.
+    const { ok, problems } = check({ hasFastlane: false });
+    expect(ok).toBe(false);
+    expect(problems[0]).toContain('fastlane is not installed');
+    expect(problems[0]).toContain('bundle install');
+  });
+
+  it('reports missing bundler once, not twice', () => {
+    // Without bundler there are no gems either, and naming both would send the
+    // operator looking for two problems that have one fix.
+    const { problems } = check({ hasBundler: false, hasFastlane: false });
+    expect(problems.filter((p) => p.includes('bundle install'))).toHaveLength(
+      1,
+    );
   });
 
   it('asks for nothing when no platform is selected', () => {

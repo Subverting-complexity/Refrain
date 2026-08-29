@@ -218,6 +218,9 @@ export function listingIsLive(listing) {
  *   listing this run intends to push
  * @param {Record<string, string | undefined>} input.env
  * @param {boolean} input.hasBundler whether `bundle` is on PATH
+ * @param {boolean} input.hasFastlane whether `bundle check` in `fastlane/` is
+ *   satisfied, which is the difference between having bundler and having the
+ *   gem it is supposed to run
  * @param {boolean} input.hasDefaultPlayKey whether `pc-api-key.json` is present,
  *   which is what the Android lane falls back to when SUPPLY_JSON_KEY is unset
  * @param {(path: string) => boolean} input.fileExists resolves a credential path
@@ -228,6 +231,7 @@ export function checkListingPrerequisites({
   platforms,
   env,
   hasBundler,
+  hasFastlane,
   hasDefaultPlayKey,
   fileExists,
 }) {
@@ -240,6 +244,15 @@ export function checkListingPrerequisites({
   if (!hasBundler) {
     problems.push(
       "Ruby's 'bundle' is not on PATH. The listing push needs it: run 'cd fastlane && bundle install'.",
+    );
+  } else if (!hasFastlane) {
+    // Two failures, two fixes, and the second one used to pass this check.
+    // Bundler being installed says nothing about fastlane being installed, and
+    // a preflight that confirms the toolchain is "in place" moments before
+    // `bundle exec fastlane` exits 127 is worse than no preflight: it is the
+    // one line on screen telling the operator to look somewhere else.
+    problems.push(
+      "fastlane is not installed. Bundler is, but its gems are missing: run 'cd fastlane && bundle install'.",
     );
   }
 
