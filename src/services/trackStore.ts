@@ -95,6 +95,32 @@ function rowToTrack(row: TrackRow): Track {
 }
 
 /**
+ * The only part of the library read that changes between scopes: a `WHERE`
+ * fragment, already carrying its leading space, and the parameters it binds.
+ * The column list and the order are shared, which is the whole point of
+ * deriving the filter rather than writing out a query per scope.
+ *
+ * Every scope is named and there is no `default`, so adding one to
+ * {@link LoadTracksOptions} without deciding how it filters is a type error
+ * rather than a silent read of the whole library.
+ */
+function scopeFilter(options: LoadTracksOptions): {
+  where: string;
+  params: string[];
+} {
+  switch (options.scope) {
+    case 'all':
+      return { where: '', params: [] };
+    case 'favorites':
+      return { where: ' WHERE isFavorite = 1', params: [] };
+    case 'unfiled':
+      return { where: ' WHERE folderId IS NULL', params: [] };
+    case 'folder':
+      return { where: ' WHERE folderId = ?', params: [options.folderId] };
+  }
+}
+
+/**
  * Reads one slice of the library, newest import first.
  *
  * Manual track ordering is gone, so `importedAt DESC` is the only order the
@@ -107,23 +133,11 @@ export async function loadTracks(
   await migrateFromJson();
   cleanupOrphanFiles();
   const db = getDatabase();
-  const rows =
-    options.scope === 'all'
-      ? db.getAllSync<TrackRow>(
-          `SELECT ${TRACK_COLUMNS} FROM tracks ORDER BY importedAt DESC`,
-        )
-      : options.scope === 'favorites'
-        ? db.getAllSync<TrackRow>(
-            `SELECT ${TRACK_COLUMNS} FROM tracks WHERE isFavorite = 1 ORDER BY importedAt DESC`,
-          )
-        : options.scope === 'unfiled'
-          ? db.getAllSync<TrackRow>(
-              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId IS NULL ORDER BY importedAt DESC`,
-            )
-          : db.getAllSync<TrackRow>(
-              `SELECT ${TRACK_COLUMNS} FROM tracks WHERE folderId = ? ORDER BY importedAt DESC`,
-              options.folderId,
-            );
+  const { where, params } = scopeFilter(options);
+  const rows = db.getAllSync<TrackRow>(
+    `SELECT ${TRACK_COLUMNS} FROM tracks${where} ORDER BY importedAt DESC`,
+    ...params,
+  );
   return rows.map(rowToTrack);
 }
 

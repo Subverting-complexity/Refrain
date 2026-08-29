@@ -112,6 +112,34 @@ function Write-Ok    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundC
 function Write-Warn  { param([string]$msg) Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 function Test-Command { param([string]$cmd) $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
+
+# Shortens an email address to the part that confirms which account it is,
+# without printing the address itself.
+#
+# The domain is what tells the operator whether they picked the work account
+# or the personal one, so it stays whole; the local part is the personal half
+# and is cut to its first few characters. adrienne@example.com prints as
+# adr***@example.com. A local part of three characters or fewer keeps only its
+# first, so a short address does not arrive intact.
+#
+# Anything without an '@' is not an address and falls back to the same mask
+# EXPO_TOKEN uses: enough to recognise, not enough to reuse.
+function Format-MaskedEmail {
+    param([string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { return $Value }
+
+    $at = $Value.LastIndexOf('@')
+    if ($at -lt 1) {
+        $keep = [Math]::Min(3, $Value.Length)
+        return "$($Value.Substring(0, $keep))***"
+    }
+
+    $local = $Value.Substring(0, $at)
+    $domain = $Value.Substring($at)
+    $keep = if ($local.Length -le 3) { 1 } else { 3 }
+    return "$($local.Substring(0, $keep))***$domain"
+}
+
 function Wait-AndExit {
     param([int]$Code = 1)
     Write-Host ""
@@ -547,9 +575,15 @@ if ($monthTotal -ge 25 -and $monthTotal -lt 30) {
 # Apple ID is a personal address. It lives in the gitignored .env, loaded near
 # the top of this script, and eas-cli reads EXPO_APPLE_ID directly before it
 # reaches the prompt.
+#
+# It is masked on the way out for the same reason it is not in eas.json.
+# Deploy output gets pasted into issues and attached to support requests, so
+# printing the address in full puts it in the same public places the .env was
+# meant to keep it out of. The masked form still answers the only question
+# this line exists to answer: which account is this build going to.
 if ($Targets -contains 'ios') {
     if ($env:EXPO_APPLE_ID) {
-        Write-Ok "Apple ID from EXPO_APPLE_ID: $env:EXPO_APPLE_ID"
+        Write-Ok "Apple ID from EXPO_APPLE_ID: $(Format-MaskedEmail $env:EXPO_APPLE_ID)"
     } else {
         Write-Warn "EXPO_APPLE_ID is not set. EAS will prompt and prefill from its cached username,"
         Write-Warn "  which may be a different Apple account. Add EXPO_APPLE_ID to .env (see .env.example)"

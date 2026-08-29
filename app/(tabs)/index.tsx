@@ -5,9 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AccessiblePressable } from '@/src/components/AccessiblePressable';
-import { CenteredDialog } from '@/src/components/CenteredDialog';
+import { ConfirmDestructiveDialog } from '@/src/components/ConfirmDestructiveDialog';
 import { CreateFolderDialog } from '@/src/components/CreateFolderDialog';
-import { DialogButton } from '@/src/components/DialogButton';
 import { DraggablePinnedFolderList } from '@/src/components/DraggablePinnedFolderList';
 import { FolderActionsSheet } from '@/src/components/FolderActionsSheet';
 import { FolderListItem } from '@/src/components/FolderListItem';
@@ -532,7 +531,7 @@ export default function LibraryScreen() {
       ) : null}
 
       {deletingFolder ? (
-        <CenteredDialog
+        <ConfirmDestructiveDialog
           title={`Delete ${deletingFolder.name}?`}
           // Naming the destination and the count is the whole point: the
           // question a reader needs answered before deleting a folder is
@@ -545,25 +544,12 @@ export default function LibraryScreen() {
                   counts.byFolder[deletingFolder.id] === 1 ? 'track' : 'tracks'
                 } move to Unfiled.`
           }
+          confirmLabel="Delete"
+          confirmAccessibilityLabel={`Confirm delete ${deletingFolder.name}`}
+          cancelAccessibilityLabel="Cancel delete"
+          onConfirm={() => void handleDeleteFolder(deletingFolder.id)}
           onDismiss={() => setDeletingFolder(null)}
-        >
-          <DialogButton
-            label="Delete"
-            accessibilityLabel={`Confirm delete ${deletingFolder.name}`}
-            variant="danger"
-            onPress={() => {
-              const target = deletingFolder;
-              setDeletingFolder(null);
-              void handleDeleteFolder(target.id);
-            }}
-          />
-          <DialogButton
-            label="Cancel"
-            accessibilityLabel="Cancel delete"
-            variant="default"
-            onPress={() => setDeletingFolder(null)}
-          />
-        </CenteredDialog>
+        />
       ) : null}
 
       <ToastHost toast={toast} onDismiss={hideToast} />

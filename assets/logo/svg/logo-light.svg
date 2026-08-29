@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 280" width="920" height="280">
   <defs>
     <linearGradient id="brand" x1="15%" y1="0%" x2="85%" y2="100%">
-      <stop offset="0%" stop-color="#3daa80"/>
+      <stop offset="0%" stop-color="#3fae87"/>
       <stop offset="50%" stop-color="#2e9470"/>
       <stop offset="100%" stop-color="#1f7a5c"/>
     </linearGradient>
   </defs>
 
-  <rect width="920" height="280" rx="24" fill="#f2faf7"/>
+  <rect width="920" height="280" rx="24" fill="#dfeee7"/>
 
   <!-- R mark scaled down -->
   <g transform="translate(140,140) scale(0.55)">
@@ -18,5 +18,5 @@
   </g>
 
   <!-- "Refrain" wordmark -->
-  <text x="250" y="158" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="72" font-weight="700" letter-spacing="-1" fill="#1a2e28">Refrain</text>
+  <text x="250" y="158" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="72" font-weight="700" letter-spacing="-1" fill="#12241e">Refrain</text>
 </svg>
