@@ -54,18 +54,18 @@ the generator, nothing more.
 
 ## What's automated vs. console-only
 
-| Area                               | Automated here                  | You do once in the console                                         |
-| ---------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
-| Listing text, keywords, notes      | ✅ deliver / supply             | —                                                                  |
-| Screenshots + feature graphic      | ✅ deliver / supply             | iPad 13" set, only while the deliver bug above stands              |
-| Play listing icon (512×512)        | ✅ supply                       | —                                                                  |
-| Privacy label (Apple)              | ✅ `privacy_details.json`       | (first time) fill once, then `refresh_privacy_template`            |
-| Data Safety (Google)               | ⚠️ answers in `data_safety.csv` | Export CSV for exact headers → import, or answer 3 questions in UI |
-| Build upload + submit              | ✅ EAS (`eas submit`)           | —                                                                  |
-| Release go-live gate               | ✅ Apple (`automatic_release`)  | Play: turn on **Managed publishing** (see below)                   |
-| Pricing & availability             | ❌                              | App Store Connect / Play Console                                   |
-| Bank, tax, agreements              | ❌                              | one-time account setup                                             |
-| Content rating (IARC) / age rating | ❌                              | Play Console questionnaire; Apple age rating in ASC                |
+| Area                               | Automated here                     | You do once in the console                                         |
+| ---------------------------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| Listing text, keywords, notes      | ✅ deliver / supply                | —                                                                  |
+| Screenshots + feature graphic      | ✅ deliver / supply                | iPad 13" set, only while the deliver bug above stands              |
+| Play listing icon (512×512)        | ✅ supply                          | —                                                                  |
+| Privacy label (Apple)              | ⚠️ `fastlane ios privacy`, by hand | Apple ID sign-in each time, or just edit it in the console         |
+| Data Safety (Google)               | ⚠️ answers in `data_safety.csv`    | Export CSV for exact headers → import, or answer 3 questions in UI |
+| Build upload + submit              | ✅ EAS (`eas submit`)              | —                                                                  |
+| Release go-live gate               | ✅ Apple (`automatic_release`)     | Play: turn on **Managed publishing** (see below)                   |
+| Pricing & availability             | ❌                                 | App Store Connect / Play Console                                   |
+| Bank, tax, agreements              | ❌                                 | one-time account setup                                             |
+| Content rating (IARC) / age rating | ❌                                 | Play Console questionnaire; Apple age rating in ASC                |
 
 Every console-only questionnaire — Apple's age rating, privacy label, export
 compliance and trader status; Play's content rating, target audience, Data
@@ -149,7 +149,7 @@ Fastfile takes either; `.p8` is gitignored. See `.env.example`.
 ```bash
 cd fastlane && bundle install          # once
 
-# iOS — push listing (metadata + screenshots + privacy label)
+# iOS — push listing (metadata + screenshots)
 bundle exec fastlane ios listing
 # …and submit the current build for review:
 bundle exec fastlane ios listing submit:true
@@ -160,6 +160,25 @@ bundle exec fastlane android listing
 
 `ios listing` runs `precheck` first to catch common rejection triggers
 (placeholder text, other-platform mentions, broken URLs).
+
+### The privacy label is not part of it
+
+`upload_app_privacy_details_to_app_store` does not support App Store Connect API
+keys. Its first line is an Apple ID and password sign-in and it has no token
+path, so while it was inside `ios listing` the whole push died at that action,
+waiting on a password prompt, before any metadata was uploaded.
+
+It now has its own lane, which is not part of any release:
+
+```bash
+bundle exec fastlane ios privacy
+```
+
+Run it from a terminal that can answer a password prompt, or skip it and edit
+the label in App Store Connect, which is where it already is. Refrain collects
+nothing, so the answer is DATA_NOT_COLLECTED and changes about as often as that
+fact does. `refresh_privacy_template` signs in the same way, for the same
+reason.
 
 ### The release runs these for you
 
