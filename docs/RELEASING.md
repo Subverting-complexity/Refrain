@@ -41,15 +41,17 @@ to say so.
 
 ## How far the version moves
 
-A store release bumps the minor version. `REFRAIN_BUMP_LEVEL` in `.env` changes
-that default for a machine, taking `major`, `minor` or `patch`, and the menu
-shows the value it will use in its header.
+A store release bumps the patch version: `1.7.0` becomes `1.7.1`.
+`REFRAIN_BUMP_LEVEL` in `.env` changes that default for a machine, taking
+`major`, `minor` or `patch`, and the menu shows the value it will use in its
+header.
 
-`-Patch` and `-Major` override the setting for one run. That is the right tool
-for a one-off patch release, which would otherwise mean changing a setting and
-remembering to change it back.
+`-Patch`, `-Minor` and `-Major` override the setting for one run. That is the
+right tool for the occasional release that moves further than usual, which
+would otherwise mean changing a setting and remembering to change it back.
 
-An unrecognised `REFRAIN_BUMP_LEVEL` stops the run. Falling back to minor would
+An unrecognised `REFRAIN_BUMP_LEVEL` stops the run. Falling back to a default
+would
 ship a different version from the one the setting claims, which is the kind of
 quiet disagreement this tooling refuses elsewhere.
 
@@ -280,7 +282,7 @@ The bump happens **once per release**, before any build, so both
 platforms build from one commit carrying one version. What it does:
 
 1. Reads the current version from `app.json`.
-2. Computes the next one — **minor by default**, e.g. `1.2.3` → `1.3.0`.
+2. Computes the next one — **patch by default**, e.g. `1.2.3` → `1.2.4`.
 3. Commits it on the **release branch** (`release/<timestamp>`) cut from
    `main`, and pushes that branch.
 4. Opens a pull request from the release branch into `main` and **merges

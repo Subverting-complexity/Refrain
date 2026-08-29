@@ -57,13 +57,16 @@
 .PARAMETER Patch
     Store lane only: bump the patch version for this run.
 
+.PARAMETER Minor
+    Store lane only: bump the minor version for this run.
+
 .PARAMETER Major
     Store lane only: bump the major version for this run.
 
-    Neither flag is needed for the usual case. The level defaults to minor, and
-    REFRAIN_BUMP_LEVEL in .env changes that default for this machine (major,
-    minor or patch). These two flags override the setting for one run, which is
-    what a one-off patch release wants.
+    None of the three is needed for the usual case. The level defaults to patch,
+    and REFRAIN_BUMP_LEVEL in .env changes that default for this machine (major,
+    minor or patch). The flags override the setting for one run, which is what a
+    one-off larger release wants without a settings change and a change back.
 
 .PARAMETER NoSubmit
     Build only. Do not hand the binary to either store, and do not push either
@@ -113,6 +116,7 @@ param(
     [ValidateSet('development', 'preview', 'production')]
     [string]$Profile = 'production',
     [switch]$Patch,
+    [switch]$Minor,
     [switch]$Major,
     [switch]$NoSubmit,
     [switch]$ListingOnly,
@@ -357,8 +361,9 @@ function Show-BuildSummary {
 }
 
 # -- Resolve the run ----------------------------------------------------------
-if ($Patch -and $Major) {
-    Write-Err "-Patch and -Major are mutually exclusive."
+$bumpFlags = @($Patch, $Minor, $Major) | Where-Object { $_ }
+if ($bumpFlags.Count -gt 1) {
+    Write-Err "-Patch, -Minor and -Major are mutually exclusive."
     exit 1
 }
 
@@ -377,7 +382,7 @@ if ($ListingOnly) {
     if ($Profile -ne 'production') { $conflicts += "-Profile $Profile, which has no public listing to push" }
     if ($Listing -eq 'off')        { $conflicts += "-Listing off, which switches off the only thing this mode does" }
     if ($NoSubmit)                 { $conflicts += "-NoSubmit, which holds back a build this mode does not run" }
-    if ($Patch -or $Major)         { $conflicts += "-Patch/-Major, which bump a version this mode does not touch" }
+    if ($Patch -or $Minor -or $Major) { $conflicts += "-Patch/-Minor/-Major, which bump a version this mode does not touch" }
     if ($conflicts.Count -gt 0) {
         Write-Err "-ListingOnly cannot be combined with:"
         foreach ($conflict in $conflicts) { Write-Err "  $conflict" }
@@ -538,30 +543,32 @@ try {
 # decision for a release, which is why it is not a question the deploy menu
 # asks: the answer is the same almost every time.
 #
-# -Patch and -Major still win, so the occasional patch release stays one flag
-# rather than a settings change and a settings change back.
+# -Patch, -Minor and -Major still win, so the occasional larger release stays
+# one flag rather than a settings change and a settings change back.
 #
-# A value this does not recognise stops the run. Falling back to minor would be
+# A value this does not recognise stops the run. Falling back to the default would be
 # the same silence the -Listing selector refuses elsewhere: a typo that quietly
 # ships a different version than the one the setting says it will.
 # Only worked out for a run that will use it. A listing push or a fast-lane
 # build bumps nothing, and stopping one of those over a typo in a setting it
 # never reads would be a gate on the wrong thing.
-$BumpLevel = 'minor'
+$BumpLevel = 'patch'
 if ($ShouldBump) {
     if ($Patch) {
         $BumpLevel = 'patch'
+    } elseif ($Minor) {
+        $BumpLevel = 'minor'
     } elseif ($Major) {
         $BumpLevel = 'major'
     } else {
         $configuredBump = "$($env:REFRAIN_BUMP_LEVEL)".Trim().ToLowerInvariant()
         if ($configuredBump -eq '') {
-            $BumpLevel = 'minor'
+            $BumpLevel = 'patch'
         } elseif (@('major', 'minor', 'patch') -contains $configuredBump) {
             $BumpLevel = $configuredBump
         } else {
             Write-Err "REFRAIN_BUMP_LEVEL in .env is '$configuredBump'. Expected major, minor or patch."
-            Write-Err "  Leave it blank for the default, which is minor."
+            Write-Err "  Leave it blank for the default, which is patch."
             Pop-Location
             Wait-AndExit 1
         }

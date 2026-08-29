@@ -96,7 +96,7 @@ import {
 
 const DEFAULT_REMOTE = 'origin';
 const DEFAULT_BASE = 'main';
-const DEFAULT_LEVEL = 'minor';
+const DEFAULT_LEVEL = 'patch';
 
 /** Long enough for a slow network, short enough that a hung `gh` is not a wall. */
 const GH_TIMEOUT_MS = 120_000;

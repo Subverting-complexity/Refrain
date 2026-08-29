@@ -113,18 +113,18 @@ function Get-CurrentBranch {
 function Get-BumpLevel {
     try {
         $envPath = Join-Path $RepoRoot '.env'
-        if (-not (Test-Path $envPath)) { return 'minor' }
+        if (-not (Test-Path $envPath)) { return 'patch' }
         foreach ($line in Get-Content $envPath) {
             $trimmed = $line.Trim()
             if (-not $trimmed.StartsWith('REFRAIN_BUMP_LEVEL=')) { continue }
             $value = $trimmed.Substring('REFRAIN_BUMP_LEVEL='.Length).Trim().Trim('"', "'").ToLowerInvariant()
             if (@('major', 'minor', 'patch') -contains $value) { return $value }
             if ($value -ne '') { return "$value (not a level Deploy.ps1 accepts)" }
-            return 'minor'
+            return 'patch'
         }
-        return 'minor'
+        return 'patch'
     } catch {
-        return 'minor'
+        return 'patch'
     }
 }
 

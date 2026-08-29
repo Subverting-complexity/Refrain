@@ -39,15 +39,15 @@ release however many platforms are selected: `.env` loading, prerequisite
 checks, the version bump, and the release branch. Only build, submit and the
 listing push repeat per platform.
 
-| Parameter           | Values                                     | Default      |
-| ------------------- | ------------------------------------------ | ------------ |
-| `-Platform`         | `both`, `ios`, `android`                   | `both`       |
-| `-Lane`             | `store` (public release), `fast` (testers) | `store`      |
-| `-Listing`          | `auto`, `on`, `off`                        | `auto`       |
-| `-Profile`          | `production`, `development`, `preview`     | `production` |
-| `-Patch` / `-Major` | store lane only, the bump level            | minor        |
-| `-NoSubmit`         | build only: no store submit, no listing    | off          |
-| `-ListingOnly`      | push the listing and nothing else          | off          |
+| Parameter                  | Values                                     | Default      |
+| -------------------------- | ------------------------------------------ | ------------ |
+| `-Platform`                | `both`, `ios`, `android`                   | `both`       |
+| `-Lane`                    | `store` (public release), `fast` (testers) | `store`      |
+| `-Listing`                 | `auto`, `on`, `off`                        | `auto`       |
+| `-Profile`                 | `production`, `development`, `preview`     | `production` |
+| `-Patch`/`-Minor`/`-Major` | store lane only, the bump level            | patch        |
+| `-NoSubmit`                | build only: no store submit, no listing    | off          |
+| `-ListingOnly`             | push the listing and nothing else          | off          |
 
 ### The menu
 
@@ -79,16 +79,16 @@ Three things it offers:
 
 ### The version bump level
 
-A store release bumps the minor version. `REFRAIN_BUMP_LEVEL` in `.env` changes
-that for this machine (`major`, `minor` or `patch`), and the menu shows the
-current value in its header so it is not a setting you discover from the version
-number afterwards.
+A store release bumps the patch version: `1.7.0` becomes `1.7.1`.
+`REFRAIN_BUMP_LEVEL` in `.env` changes that for this machine (`major`, `minor`
+or `patch`), and the menu shows the current value in its header so it is not a
+setting you discover from the version number afterwards.
 
 It is a setting rather than a question because the answer is the same almost
-every release. For the occasional one that differs, `-Patch` and `-Major`
-override it for a single run, which beats changing a setting and changing it
-back. A value the level does not recognise stops the run rather than falling
-back to minor.
+every release. For the occasional one that differs, `-Patch`, `-Minor` and
+`-Major` override it for a single run, which beats changing a setting and
+changing it back. A value the level does not recognise stops the run rather
+than falling back to the default.
 
 ### `-ListingOnly`
 
@@ -123,7 +123,7 @@ store release does around the build itself:
 
 - **Version bump** — `VersionBump.ps1` calls `tools/version-bump.mjs`, which
   bumps `expo.version` in `app.json` and `version` in `package.json` together
-  (minor by default; `-Patch` / `-Major` override it), commits that on the
+  (patch by default; `-Patch`/`-Minor`/`-Major` override it), commits that on the
   release branch, and lands it on `main` **through a pull request merged
   immediately**. It needs the GitHub CLI. If the bump is already on `main` it
   is a no-op, which is what lets a retry rebuild the failed platform at the
