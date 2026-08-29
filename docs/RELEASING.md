@@ -81,7 +81,7 @@ The order, once per app:
    to copy from. This is the step that is easy to skip, and skipping it makes
    the next one fail with an error that says nothing about it. See "The caller
    does not have permission" below.
-3. Push the listing: `.	ools\Deploy.cmd -ListingOnly -Platform android`. It
+3. Push the listing: `.\tools\Deploy.cmd -ListingOnly -Platform android`. It
    works now that the track has a release and the app can be submitted for
    review.
 4. Finish Play Console: countries and regions, and turn on Managed publishing.
