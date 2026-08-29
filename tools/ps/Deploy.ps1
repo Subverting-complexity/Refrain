@@ -497,6 +497,41 @@ if ($env:EXPO_TOKEN -eq $easTokenPlaceholder) {
     Write-Ok "EXPO_TOKEN loaded from .env ($($env:EXPO_TOKEN.Substring(0, $maskLen))...) - building as that token's account."
 }
 
+# -- UTF-8 for fastlane --------------------------------------------------------
+# fastlane decides whether it has a UTF-8 locale by looking at LANG, then
+# LC_ALL, then shelling out to `locale`. Windows has none of the three, so every
+# run printed
+#
+#   WARNING: fastlane requires your locale to be set to UTF-8
+#
+# twice: once at startup and once more from an at_exit hook, on the way out of
+# an otherwise clean release.
+#
+# It is not only noise. Without a UTF-8 locale Ruby takes its default external
+# encoding from the console code page, and this repository's store metadata is
+# not ASCII: the Android changelog alone has an en dash in "A-B loops". Most of
+# supply's reads pass encoding: 'UTF-8' explicitly, but not all of them, and the
+# ones that do not are exactly the ones that would mangle a character without
+# saying so.
+#
+# Set only when unset, so a machine or a .env that has already chosen a locale
+# keeps it, and set on this process, which exits at the end of the release.
+foreach ($localeVar in @('LANG', 'LC_ALL')) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($localeVar))) {
+        Set-Item -Path "Env:$localeVar" -Value 'en_US.UTF-8'
+    }
+}
+
+# The other half of the same problem, through a different mechanism. fastlane
+# prints emoji, and a console left on code page 437 renders them as mojibake.
+# This one is display only, and a redirected or unusual host can refuse it, so a
+# failure here is not worth interrupting a release for.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {
+    Write-Warn "Could not switch the console to UTF-8; fastlane's emoji may not render."
+}
+
 # -- How far this release moves the version -----------------------------------
 # Resolved here rather than with the other arguments because REFRAIN_BUMP_LEVEL
 # is read from .env, which is loaded above. It is a setting for a machine, not a
