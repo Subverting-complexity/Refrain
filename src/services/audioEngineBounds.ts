@@ -196,7 +196,15 @@ export function monitorBounds({
  * Build the preview window `[center-2000, center+2000]` clamped to the track.
  * The upper bound falls back to the raw window end when the duration isn't
  * known yet (e.g. the very first preview before a status update lands), so the
- * window is always a non-empty, ordered range.
+ * window is always an ordered range.
+ *
+ * Ordered, but not necessarily non-empty, which the comment inherited from
+ * `audioEngine.ts` used to claim: a centre past the end of a very short track
+ * clamps both ends onto the duration and yields a zero-length window. That
+ * would loop the playhead on the spot if it reached {@link monitorBounds}, so
+ * it is worth knowing rather than being told the opposite. Reaching it means
+ * starting a preview centred beyond the track, which the drag handles do not
+ * currently allow.
  */
 export function computeMonitorWindow({
   centerMs,
@@ -307,7 +315,7 @@ export function loopBoundaryAction({
   didJustFinish,
   positionMs,
   region,
-  monitorActive,
+  monitorOverridesRegion,
   loopEnabled,
   hasCountInHandler,
   hasPlayer,
@@ -318,7 +326,14 @@ export function loopBoundaryAction({
   didJustFinish: boolean;
   positionMs: number;
   region: LoopBounds | null;
-  monitorActive: boolean;
+  /**
+   * Whether a monitor preview is overriding the A/B region, which is not the
+   * same question as the engine's own `monitorActive` flag: a preview only
+   * overrides once it also has a window to loop. Named apart from that flag on
+   * purpose, because passing it here would compile, read correctly, and change
+   * behaviour in the gap between arming a monitor and computing its window.
+   */
+  monitorOverridesRegion: boolean;
   loopEnabled: boolean;
   hasCountInHandler: boolean;
   hasPlayer: boolean;
@@ -340,7 +355,12 @@ export function loopBoundaryAction({
     !restoringTransport;
   if (!atBoundary) return 'none';
 
-  if (!monitorActive && !loopEnabled) return 'stop-at-b';
-  if (!monitorActive && hasCountInHandler) return 'hand-off-to-count-in';
+  // Order matters between these two. A loop the reader has disarmed stops at
+  // B even when a count-in is registered: the count-in is how a loop restarts,
+  // not a reason to restart one that is switched off. Swapping them would
+  // repeat the section forever with the loop toggle ignored.
+  if (!monitorOverridesRegion && !loopEnabled) return 'stop-at-b';
+  if (!monitorOverridesRegion && hasCountInHandler)
+    return 'hand-off-to-count-in';
   return didJustFinish ? 'rewind-and-resume' : 'rewind';
 }

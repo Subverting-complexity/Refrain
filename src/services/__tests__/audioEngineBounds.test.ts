@@ -69,6 +69,16 @@ describe('regionBounds', () => {
     });
   });
 
+  // The comparison is `>=`, not `>`. An A exactly at the end would otherwise
+  // give a zero-length region at the very end: every seek clamps onto it and
+  // every status update reports the playhead at or past `b`, which is the
+  // stuck-playhead failure the clamp above exists to prevent.
+  it('is null when A sits exactly at the end of the track', () => {
+    expect(
+      regionBounds({ markerA: 10000, markerB: 99000, durationMs: 10000 }),
+    ).toBeNull();
+  });
+
   it('is null when both markers are past the end of the track', () => {
     expect(
       regionBounds({ markerA: 20000, markerB: 99000, durationMs: 10000 }),
@@ -160,6 +170,20 @@ describe('reconcileMarkersToDuration', () => {
     ).toEqual({ markerA: 1000, markerB: 4000, changed: false });
   });
 
+  // The comparison is `>`, not `>=`, and the difference is a marker the
+  // reader deliberately placed at the very end of the track. Loosening it
+  // would drop that B on the first status update after every load and, via
+  // the caller's `changed` flag, save the null back over it.
+  it('keeps a B sitting exactly at the end of the track', () => {
+    expect(
+      reconcileMarkersToDuration({
+        markerA: 1000,
+        markerB: 10000,
+        durationMs: 10000,
+      }),
+    ).toEqual({ markerA: 1000, markerB: 10000, changed: false });
+  });
+
   // A loop end the reader never chose is a worse guess than no loop end.
   it('drops a B past the end rather than pinning it there', () => {
     expect(
@@ -236,7 +260,7 @@ describe('monitorBounds', () => {
   it('is null while the monitor is idle', () => {
     expect(
       monitorBounds({
-        monitorActive: false,
+        monitorOverridesRegion: false,
         monitorWindow: { start: 1000, end: 5000 },
       }),
     ).toBeNull();
@@ -416,7 +440,7 @@ describe('loopBoundaryAction', () => {
     didJustFinish: false,
     positionMs: 4000,
     region: { a: 1000, b: 4000 },
-    monitorActive: false,
+    monitorOverridesRegion: false,
     loopEnabled: true,
     hasCountInHandler: false,
     hasPlayer: true,
@@ -449,15 +473,45 @@ describe('loopBoundaryAction', () => {
 
   it('lets the monitor override the loop toggle', () => {
     expect(
-      loopBoundaryAction({ ...atB, monitorActive: true, loopEnabled: false }),
+      loopBoundaryAction({
+        ...atB,
+        monitorOverridesRegion: true,
+        loopEnabled: false,
+      }),
     ).toBe('rewind');
+  });
+
+  // The two "not overridden by a monitor" branches are ordered, and nothing
+  // else in this table sets both of their conditions at once. Swapping them
+  // would leave every other case here passing while a reader who armed a
+  // count-in and then switched the loop off got an endlessly repeating
+  // section instead of a stop at B.
+  it('stops at B when the loop is off, even with a count-in registered', () => {
+    expect(
+      loopBoundaryAction({
+        ...atB,
+        loopEnabled: false,
+        hasCountInHandler: true,
+      }),
+    ).toBe('stop-at-b');
+  });
+
+  it('lets the monitor rewind and resume at the natural end of the track', () => {
+    expect(
+      loopBoundaryAction({
+        ...atB,
+        monitorOverridesRegion: true,
+        playing: false,
+        didJustFinish: true,
+      }),
+    ).toBe('rewind-and-resume');
   });
 
   it('lets the monitor override a registered count-in', () => {
     expect(
       loopBoundaryAction({
         ...atB,
-        monitorActive: true,
+        monitorOverridesRegion: true,
         hasCountInHandler: true,
       }),
     ).toBe('rewind');

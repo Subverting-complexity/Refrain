@@ -42,8 +42,6 @@ export interface MarkerPersistenceDeps {
 
 /** The debounced-save unit returned by {@link createMarkerPersistence}. */
 export interface MarkerPersistence {
-  /** Write the current markers now, bypassing the debounce. */
-  write: () => void;
   /** Queue a debounced write, resetting any timer already running. */
   schedule: () => void;
   /** Write a queued change immediately, if one is pending. */
@@ -69,6 +67,10 @@ export function createMarkerPersistence(
    * Platform-agnostic: the native store is synchronous and the web store
    * returns a promise, so the call goes through `settle`. No-op when no track
    * id is associated with the load.
+   *
+   * Private to this unit: every write is either debounced through
+   * {@link schedule} or forced through {@link flush}, and an exported
+   * write-now would be public surface with no caller.
    */
   function write(): void {
     const trackId = deps.getTrackId();
@@ -87,10 +89,17 @@ export function createMarkerPersistence(
    * write carrying the final value. No-op when the track has no id.
    */
   function schedule(): void {
-    if (deps.getTrackId() == null) return;
+    const scheduledFor = deps.getTrackId();
+    if (scheduledFor == null) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
+      // Drop the write if the loaded track changed under the timer. The engine
+      // flushes before it swaps tracks, so this should never fire, but relying
+      // on a caller's ordering is not the same as defending against it: the
+      // failure it would otherwise cause is writing one track's markers under
+      // another track's id, which corrupts both and does so silently.
+      if (deps.getTrackId() !== scheduledFor) return;
       write();
     }, MARKER_SAVE_DEBOUNCE_MS);
   }
@@ -129,5 +138,5 @@ export function createMarkerPersistence(
     }
   }
 
-  return { write, schedule, flush, restore };
+  return { schedule, flush, restore };
 }

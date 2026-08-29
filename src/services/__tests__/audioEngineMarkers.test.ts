@@ -49,11 +49,12 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-describe('write', () => {
-  it('sends the current markers to the store straight away', () => {
+describe('writing', () => {
+  it('sends the current markers to the store', () => {
     const { persistence } = harness();
 
-    persistence.write();
+    persistence.schedule();
+    persistence.flush();
 
     expect(setActiveMarkers).toHaveBeenCalledWith('track-1', MARKERS);
   });
@@ -61,20 +62,39 @@ describe('write', () => {
   it('does nothing when the load carried no track id', () => {
     const { persistence } = harness(null);
 
-    persistence.write();
+    persistence.schedule();
+    persistence.flush();
+    jest.advanceTimersByTime(MARKER_SAVE_DEBOUNCE_MS);
 
     expect(setActiveMarkers).not.toHaveBeenCalled();
   });
 
-  // The native store is synchronous and the web store returns a promise, so a
-  // rejection must not escape as an unhandled one: losing a marker position is
-  // a smaller harm than an error banner over a working player.
-  it('swallows a store that rejects', async () => {
-    setActiveMarkers.mockRejectedValue(new Error('quota exceeded'));
-    const { persistence } = harness();
+  // The web store returns a promise, so a rejection has to be caught rather
+  // than left to escape: an unhandled rejection is a crash on some runtimes,
+  // and losing a marker position is a much smaller harm than that.
+  //
+  // Asserting that `flush()` does not throw would prove nothing, because
+  // `settle` turns every synchronous throw into a rejected promise, so it
+  // cannot throw whatever the store does. What has to be observed is the
+  // rejection going unhandled, which means listening for it.
+  it('does not let a rejecting store escape as an unhandled rejection', async () => {
+    jest.useRealTimers();
+    const unhandled = jest.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      setActiveMarkers.mockRejectedValue(new Error('quota exceeded'));
+      const { persistence } = harness();
 
-    expect(() => persistence.write()).not.toThrow();
-    await Promise.resolve();
+      persistence.schedule();
+      persistence.flush();
+      // One macrotask: long enough for the microtask queue to drain and for
+      // the process to emit `unhandledRejection` if nothing caught it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+
+    expect(unhandled).not.toHaveBeenCalled();
   });
 
   it('swallows a store that throws synchronously', () => {
@@ -83,7 +103,10 @@ describe('write', () => {
     });
     const { persistence } = harness();
 
-    expect(() => persistence.write()).not.toThrow();
+    expect(() => {
+      persistence.schedule();
+      persistence.flush();
+    }).not.toThrow();
   });
 });
 
@@ -137,6 +160,30 @@ describe('schedule', () => {
     jest.advanceTimersByTime(MARKER_SAVE_DEBOUNCE_MS);
 
     expect(setActiveMarkers).not.toHaveBeenCalled();
+  });
+});
+
+describe('the track a queued write belongs to', () => {
+  // The engine flushes before it swaps tracks, so this should not arise. The
+  // module still has to defend it: writing one track's markers under another
+  // track's id corrupts both rows, and does it silently.
+  it('drops a queued write when the loaded track changed under the timer', () => {
+    const { state, persistence } = harness('track-1');
+
+    persistence.schedule();
+    state.trackId = 'track-2';
+    jest.advanceTimersByTime(MARKER_SAVE_DEBOUNCE_MS);
+
+    expect(setActiveMarkers).not.toHaveBeenCalled();
+  });
+
+  it('still writes when the same track is loaded when the timer fires', () => {
+    const { persistence } = harness('track-1');
+
+    persistence.schedule();
+    jest.advanceTimersByTime(MARKER_SAVE_DEBOUNCE_MS);
+
+    expect(setActiveMarkers).toHaveBeenCalledWith('track-1', MARKERS);
   });
 });
 

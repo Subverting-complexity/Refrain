@@ -461,10 +461,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     didJustFinish: status.didJustFinish,
     positionMs: newState.positionMs,
     region,
-    // `monitor != null`, not the `monitorActive` variable: a preview only
-    // overrides the A/B region once it has a window to loop, and between
-    // arming and the first window the two disagree.
-    monitorActive: monitor != null,
+    monitorOverridesRegion: monitor != null,
     loopEnabled,
     hasCountInHandler: onLoopRestart != null,
     hasPlayer: player != null,
@@ -902,15 +899,6 @@ export async function seekTo(positionMs: number): Promise<void> {
     ? Math.max(region.a, Math.min(positionMs, region.b))
     : positionMs;
   await seekInternal(target);
-}
-
-/** @see bounds.skipBounds */
-function skipBounds(): { lo: number; hi: number } {
-  return bounds.skipBounds({
-    markerA,
-    markerB,
-    durationMs: currentState.durationMs,
-  });
 }
 
 /**
