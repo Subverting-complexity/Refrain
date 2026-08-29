@@ -625,7 +625,11 @@ Cannot find changelog because no version code given - please specify :version_co
 so it has to know which release. It normally learns that from the binary it
 just uploaded, and this lane uploads none, so it has to be told. The first
 message is the metadata, images and screenshots stopping; the second is the
-changelogs stopping after those have already gone up.
+changelogs stopping after those have been uploaded.
+
+Neither leaves the store half-changed. `supply` does the whole push inside one
+Play edit and commits it on its last line, so a failure anywhere rolls back
+everything the run had uploaded.
 
 `skip_upload_changelogs: true` guards neither of them. It looks like it should,
 and it was tried, and the run failed in exactly the same place.
