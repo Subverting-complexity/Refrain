@@ -43,7 +43,7 @@ export function DialogButton({
         styles.button,
         primary
           ? { backgroundColor: theme.colors.accent }
-          : { borderWidth: 1, borderColor: theme.colors.border },
+          : { borderWidth: 1, borderColor: theme.colors.outline },
         { opacity: state.pressed ? 0.7 : 1 },
       ]}
     >

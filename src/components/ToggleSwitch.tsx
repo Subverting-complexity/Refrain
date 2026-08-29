@@ -25,8 +25,28 @@ interface ToggleSwitchProps {
 const TRACK_WIDTH = 52;
 const TRACK_HEIGHT = 32;
 const THUMB_SIZE = 26;
-const THUMB_INSET = 3;
-const THUMB_TRAVEL = TRACK_WIDTH - THUMB_SIZE - THUMB_INSET * 2;
+/**
+ * The ring that identifies the control.
+ *
+ * The off track fails SC 1.4.11 in both themes (1.79 and 1.48 in dark, 1.50
+ * and 1.77 in light) because it is deliberately close to its surroundings so
+ * the knob stays legible on it. The on track fails only in light, where
+ * `accent` is a fill colour at 2.30 against the page; dark mode's accent
+ * already clears the bar at 10.42. So the ring is what carries the boundary
+ * in three of the four state-and-theme combinations, and it is drawn in all
+ * four rather than appearing and disappearing with the value.
+ */
+const TRACK_BORDER = 1;
+/**
+ * The gap between the ring and the knob. One pixel tighter than the gap the
+ * switch had before the ring, so the knob keeps the same 3px clearance from
+ * the outer edge and the pill is unchanged to look at.
+ */
+export const THUMB_INSET = 2;
+// React Native sizes a box including its border, so the thumb travels the
+// content box rather than the full width.
+export const THUMB_TRAVEL =
+  TRACK_WIDTH - TRACK_BORDER * 2 - THUMB_SIZE - THUMB_INSET * 2;
 
 /**
  * The app's single on/off switch. A full-pill track with a floating knob that
@@ -65,7 +85,7 @@ export function ToggleSwitch({
 
   const trackColor = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [theme.colors.border, theme.colors.accent],
+    outputRange: [theme.colors.track, theme.colors.accent],
   });
   const thumbColor = progress.interpolate({
     inputRange: [0, 1],
@@ -84,7 +104,12 @@ export function ToggleSwitch({
       onPress={() => onValueChange(!value)}
       style={style}
     >
-      <Animated.View style={[styles.track, { backgroundColor: trackColor }]}>
+      <Animated.View
+        style={[
+          styles.track,
+          { backgroundColor: trackColor, borderColor: theme.colors.outline },
+        ]}
+      >
         <Animated.View
           style={[
             styles.thumb,
@@ -104,6 +129,7 @@ const styles = StyleSheet.create({
     width: TRACK_WIDTH,
     height: TRACK_HEIGHT,
     borderRadius: TRACK_HEIGHT / 2,
+    borderWidth: TRACK_BORDER,
     justifyContent: 'center',
   },
   thumb: {

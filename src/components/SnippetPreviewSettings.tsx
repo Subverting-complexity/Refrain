@@ -30,7 +30,7 @@ export function SnippetPreviewSettings({
       style={[
         styles.container,
         {
-          borderColor: theme.colors.border,
+          borderColor: theme.colors.track,
           backgroundColor: theme.colors.surface,
         },
         style,

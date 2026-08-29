@@ -37,7 +37,33 @@ export interface ThemeColors {
    * against its dark page, so there this is the same colour.
    */
   accentForeground: string;
-  border: string;
+  /**
+   * The identifying edge of a control: text inputs, unselected chips,
+   * outlined buttons, the pressable list rows, and the toggle's pill.
+   *
+   * Held to 3:1 against both `background` and `surface`, which is what
+   * WCAG 2.1 SC 1.4.11 asks of a control a reader can only find by its
+   * border. It was split out of a single `border` token that also painted
+   * the slider and toggle tracks: those want to stay *close* to their
+   * surroundings so the accent fill and the knob drawn on them stay
+   * legible, which is the opposite need, and one value could not reach
+   * either threshold. See `track`.
+   */
+  outline: string;
+  /**
+   * The filled bar behind a slider's position, the toggle's off state, the
+   * hairline dividers, and the border of a grouping panel that is not itself
+   * a control (the snippet-preview card).
+   *
+   * Tuned from the other side to `outline`: what matters is that
+   * `accentForeground` (the fill) and `textSecondary` (the toggle knob)
+   * stay at or above 3:1 when drawn on it, so it cannot move far from the
+   * page without taking one of those below the line. That is also why a
+   * panel border belongs here rather than on `outline`: nothing about a
+   * container has to be found by its edge, and giving it the heavier colour
+   * would make a box read as loudly as the controls inside it.
+   */
+  track: string;
   error: string;
   errorText: string;
   /**
@@ -51,6 +77,33 @@ export interface ThemeColors {
   markerBText: string;
   /** Dimming scrim behind centred modal dialogs. */
   overlay: string;
+  /**
+   * The four colours the waveform bars are drawn in, listed from the least
+   * prominent to the most prominent. Which direction that runs is a property
+   * of the palette, not of this list: dark mode gets brighter as a bar
+   * becomes more important and light mode gets darker.
+   *
+   * - `waveformDull` — outside the loop, or unplayed with no loop set. The
+   *   shape of the rest of the track, as context.
+   * - `waveformLoop` — inside the A/B region but not played yet. This is
+   *   what tells the reader where the loop window is before it plays, so
+   *   the step between it and `waveformDull` is the one that matters most.
+   * - `waveformPlayed` / `waveformPeak` — the played tier, which is a pair
+   *   rather than a single value: a played bar is `mix`ed between the two
+   *   by its own amplitude, so the waveform still reads as a waveform.
+   *   `waveformPlayed` is the quietest bar and is therefore the end that
+   *   has to clear the step above `waveformLoop`.
+   *
+   * Opaque, and stated per theme rather than derived as one accent at three
+   * alphas. The alphas were shared by both palettes, so neither could be
+   * tuned without moving the other, and a single accent through alpha
+   * cannot reach far enough from a near-white card to fit three legible
+   * steps underneath it. See #268.
+   */
+  waveformDull: string;
+  waveformLoop: string;
+  waveformPlayed: string;
+  waveformPeak: string;
 }
 
 export interface ThemeTypography {
@@ -91,7 +144,14 @@ const darkColors: ThemeColors = {
   accent: '#7edbb8',
   accentText: '#111d1f',
   accentForeground: '#7edbb8',
-  border: '#2a4a4e',
+  // 3.82 against the page and 3.15 against a card. The card is the binding
+  // case, and this is close to the lightest the outline needs to be: a
+  // heavier edge would draw a box around every input for no further gain.
+  outline: '#507e83',
+  // Unchanged from the `border` it replaces, so every track, divider and
+  // panel edge looks exactly as it did. The slider fill sits on it at 5.81
+  // and the toggle knob at 3.74.
+  track: '#2a4a4e',
   error: '#f87171',
   errorText: '#1a1a1a',
   markerA: '#ffb02e',
@@ -99,6 +159,14 @@ const darkColors: ThemeColors = {
   markerB: '#ff5d77',
   markerBText: '#40060f',
   overlay: 'rgba(0, 0, 0, 0.5)',
+  // Against the card: 1.70, 4.40, 7.10, 10.96. The steps between them are
+  // 1.70, 2.59, 1.61 and 1.54, with the largest share given to the one that
+  // signals the loop window. Muted at the dull end and vivid in the middle,
+  // so the loop reads as the brightest thing on the card short of the peaks.
+  waveformDull: '#2e5548',
+  waveformLoop: '#2fa17b',
+  waveformPlayed: '#4ecca2',
+  waveformPeak: '#c9e9de',
 };
 
 const lightColors: ThemeColors = {
@@ -116,16 +184,17 @@ const lightColors: ThemeColors = {
   accent: '#3fae87',
   accentText: '#08211a',
   accentForeground: '#1c7757',
-  // Deeper than the page by more than the surface is, so an outlined
-  // control still has an edge once the page itself is tinted. It stops
-  // short of the 3:1 that WCAG 1.4.11 asks of a control identified by its
-  // outline alone: a border that dark reads as a box drawn around every
-  // input. Dark mode does not reach 3:1 either (1.79), so this is a
-  // standing limit of both palettes rather than something light mode
-  // gives up — see #267. The value is also capped from the other side, by
-  // the seek and volume tracks, which are painted in it: darken it much
-  // further and the accent fill sitting on the track drops below 3:1.
-  border: '#a6c9b8',
+  // 3.15 against the page and 3.72 against a card. The page is the binding
+  // case here, the reverse of dark mode, because the page is the darker of
+  // the two surfaces a control can sit on. This is as light as the outline
+  // can be and still clear 3:1, which is the value that keeps it from
+  // reading as a box drawn around every input.
+  outline: '#578e7a',
+  // Unchanged from the `border` it replaces. It cannot go much darker
+  // without taking the accent fill that sits on the seek and volume tracks
+  // below 3:1 (it is at 3.05 now), which is exactly the pull that made a
+  // single token unable to serve both roles.
+  track: '#a6c9b8',
   error: '#c62828',
   errorText: '#ffffff',
   // Both marker colours have to work as text, not only as a fill: the A/B
@@ -141,6 +210,14 @@ const lightColors: ThemeColors = {
   // Tinted to the palette and lighter than dark mode's scrim: a flat black
   // wash over a light page reads as a different app's dialog.
   overlay: 'rgba(10, 28, 22, 0.45)',
+  // The same four steps as dark mode, at the other end of the scale: here a
+  // more important bar is darker rather than brighter, so the ramp runs from
+  // a muted pale green out of the way of the card to a near-black green at
+  // the peaks. Against the card: 1.70, 4.41, 7.04, 11.02.
+  waveformDull: '#a4cec0',
+  waveformLoop: '#278666',
+  waveformPlayed: '#1d634b',
+  waveformPeak: '#1b4235',
 };
 
 export const darkTheme: Theme = {

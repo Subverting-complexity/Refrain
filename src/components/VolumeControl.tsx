@@ -72,7 +72,7 @@ export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
         >
           <SliderBar
             progress={displayVolume}
-            trackColor={theme.colors.border}
+            trackColor={theme.colors.track}
             fillColor={theme.colors.accentForeground}
             pan={pan}
             onLayout={handleLayout}

@@ -1,7 +1,9 @@
 import React from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
+import { darkTheme } from '../../theme';
+import { MARKER_LINE_HALO } from '../WaveformMarkers';
 import { WaveformView } from '../WaveformView';
 
 jest.mock('../../hooks/useTheme');
@@ -117,17 +119,25 @@ describe('WaveformView', () => {
     expect(bars).toHaveLength(DEFAULT_PEAKS.length);
   });
 
-  // Bars are tinted by appending an alpha byte to the accent hex. Played bars
-  // sit at a high alpha (>= 0.5 base); unplayed/dull bars at a low one.
-  function barAlpha(bar: ReturnType<typeof findBars>[number]): number {
+  /**
+   * A bar's fill. Each tier is an opaque token now rather than the accent at
+   * a tier-specific alpha, so a bar is classified by which token it matches
+   * — except a played one, which is mixed between two of them by its own
+   * amplitude and so matches neither exactly.
+   */
+  function barFill(bar: ReturnType<typeof findBars>[number]): string {
     const styled = bar.props.style.find(
-      (s: Record<string, unknown>) =>
-        typeof s?.backgroundColor === 'string' &&
-        (s.backgroundColor as string).startsWith('#7edbb8'),
+      (s: Record<string, unknown>) => typeof s?.backgroundColor === 'string',
     ) as { backgroundColor: string } | undefined;
-    if (!styled) return 0;
-    return parseInt(styled.backgroundColor.slice(7, 9), 16);
+    return styled?.backgroundColor ?? '';
   }
+
+  const isDull = (bar: ReturnType<typeof findBars>[number]) =>
+    barFill(bar) === darkTheme.colors.waveformDull;
+  const isLoop = (bar: ReturnType<typeof findBars>[number]) =>
+    barFill(bar) === darkTheme.colors.waveformLoop;
+  const isPlayed = (bar: ReturnType<typeof findBars>[number]) =>
+    !isDull(bar) && !isLoop(bar) && barFill(bar).startsWith('#');
 
   it('colors bars based on playback progress', () => {
     const tree = renderWaveform({ positionMs: 5000 });
@@ -135,11 +145,60 @@ describe('WaveformView', () => {
 
     // progress = 0.5; bar centres are (i+0.5)/5 → 0.1, 0.3, 0.5 played and
     // 0.7, 0.9 unplayed.
-    const played = bars.filter((b) => barAlpha(b) >= 128);
-    const dull = bars.filter((b) => barAlpha(b) < 128);
+    expect(bars.filter(isPlayed)).toHaveLength(3);
+    expect(bars.filter(isDull)).toHaveLength(2);
+  });
 
-    expect(played).toHaveLength(3);
-    expect(dull).toHaveLength(2);
+  // The middle tier is the whole point of #268: it is what tells the reader
+  // where the loop window is before it has played.
+  it('gives the unplayed part of the loop region its own tier', () => {
+    const tree = renderWaveform({
+      positionMs: 0,
+      markerA: 2000,
+      markerB: 8000,
+    });
+    const bars = findBars(tree);
+
+    // Region 0.2..0.8 of a 10s track covers the bars centred at 0.3, 0.5
+    // and 0.7; nothing has played, so all three sit in the loop tier.
+    expect(bars.filter(isLoop)).toHaveLength(3);
+    expect(bars.filter(isDull)).toHaveLength(2);
+  });
+
+  // Grading is what keeps the waveform reading as a waveform rather than a
+  // block of colour, so a quiet played bar and a loud one must not match.
+  it('grades a played bar by its amplitude', () => {
+    const tree = renderWaveform({ positionMs: 10000, peaks: [0.1, 1] });
+    const [quiet, loud] = findBars(tree);
+
+    expect(barFill(quiet)).not.toBe(barFill(loud));
+    expect(barFill(loud)).toBe(darkTheme.colors.waveformPeak);
+  });
+
+  // Both ends of the range have to be pinned, not just the loud one. With only
+  // the top pinned, grading from the *dull* tier instead of the played one
+  // passes every other test here while collapsing a quiet played bar to 1.12
+  // against the bars around it, which is the bug #268 was filed for.
+  it('starts the played range at the played tier, not below it', () => {
+    const tree = renderWaveform({ positionMs: 10000, peaks: [0, 1] });
+    const [silent] = findBars(tree);
+
+    expect(barFill(silent)).toBe(darkTheme.colors.waveformPlayed);
+  });
+
+  // `Math.max` passes NaN through, so an unguarded height reaches the style as
+  // the string "NaN%". A 32-bit float WAV can carry a NaN sample, and
+  // `normalizePeaks` does not filter individual samples.
+  it('keeps a bar height numeric when its peak is not', () => {
+    const tree = renderWaveform({ positionMs: 0, peaks: [NaN, 0.5] });
+    const [bad] = findBars(tree);
+    const height = (
+      bad.props.style.find(
+        (entry: Record<string, unknown>) => entry?.height !== undefined,
+      ) as { height: string }
+    ).height;
+
+    expect(height).not.toContain('NaN');
   });
 
   it('renders a cursor element', () => {
@@ -229,7 +288,7 @@ describe('WaveformView', () => {
     expect(onSeek).toHaveBeenCalledWith(10000);
   });
 
-  it('renders A/B marker lines in their marker colors', () => {
+  it('renders A/B marker lines in their marker colors, edged in the card colour', () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
     const markerLine = (color: string) =>
@@ -239,7 +298,8 @@ describe('WaveformView', () => {
           node.props.style &&
           Array.isArray(node.props.style) &&
           node.props.style.some(
-            (s: Record<string, unknown>) => s && s.width === 2,
+            (s: Record<string, unknown>) =>
+              s && s.width === 2 + MARKER_LINE_HALO * 2,
           ) &&
           node.props.style.some(
             (s: Record<string, unknown>) => s && s.backgroundColor === color,
@@ -248,6 +308,15 @@ describe('WaveformView', () => {
 
     expect(markerLine('#ffb02e')).toHaveLength(1);
     expect(markerLine('#ff5d77')).toHaveLength(1);
+
+    // The edge is what keeps the line visible where its own colour cannot,
+    // so its absence is a real regression rather than a styling detail.
+    for (const color of ['#ffb02e', '#ff5d77']) {
+      const flat = StyleSheet.flatten(markerLine(color)[0].props.style);
+      expect(flat.borderColor).toBe(darkTheme.colors.surface);
+      expect(flat.borderLeftWidth).toBe(MARKER_LINE_HALO);
+      expect(flat.borderRightWidth).toBe(MARKER_LINE_HALO);
+    }
   });
 
   it('renders labelled grab handles for the markers', () => {

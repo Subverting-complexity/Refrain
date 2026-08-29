@@ -16,6 +16,49 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${byte}`;
 }
 
+/**
+ * Blend two opaque `#rrggbb` colours in sRGB, `t` of the way from `from` to
+ * `to`. `t` is clamped to 0..1 so a caller can hand it an unbounded ratio
+ * without guarding the ends.
+ *
+ * The waveform uses it to grade a played bar by its amplitude: the tier is a
+ * pair of colours rather than one, so the quietest bar and the loudest one
+ * can each be placed at the contrast they need. Blending in sRGB rather than
+ * a perceptual space is deliberate — it is what the browser and the platform
+ * do for a translucent fill, so a graded bar sits on the same ramp as the
+ * translucent tints drawn beside it.
+ *
+ * Six-digit hex only, the same input rule as {@link luminance}, though the
+ * two fail differently: that one yields `NaN` and this one `#000000`. Either
+ * way the answer is obviously wrong rather than plausibly wrong, which is the
+ * point — a bad token should show as black bars, not as a slightly-off tier
+ * nobody notices.
+ */
+export function mix(from: string, to: string, t: number): string {
+  const a = channels(from);
+  const b = channels(to);
+  // NaN reads as 0 rather than propagating. The clamp below cannot catch it:
+  // `Math.min` passes NaN straight through, a NaN channel stringifies to the
+  // literal "NaN", and the result would be `#NaNNaNNaN` — not a colour at all,
+  // and one the platform is free to throw on. The caller's amplitude comes
+  // from peak analysis, where a single bad sample survives normalisation.
+  // Infinities need no special case: the clamp takes them to the ends.
+  const k = Number.isNaN(t) ? 0 : Math.max(0, Math.min(1, t));
+  const blended = a.map((value, i) => Math.round(value + (b[i] - value) * k));
+  return `#${blended.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** The three sRGB channels of an opaque hex, or zeros if it is not one. */
+function channels(hex: string): [number, number, number] {
+  if (!/^#?[0-9a-fA-F]{6}$/.test(hex)) return [0, 0, 0];
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
 /** One sRGB channel, 0..255, linearised per WCAG 2.1. */
 function linearize(value: number): number {
   const c = value / 255;

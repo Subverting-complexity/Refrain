@@ -70,14 +70,14 @@ describe('DialogButton', () => {
     );
   });
 
-  it('outlines the default variant with the border color', () => {
+  it('outlines the default variant with the outline color', () => {
     const tree = renderButton({ variant: 'default' });
     const flat = StyleSheet.flatten(
       findHost(tree).props.style({ pressed: false }),
     );
     expect(flat.backgroundColor).toBeUndefined();
     expect(flat.borderWidth).toBe(1);
-    expect(flat.borderColor).toBe(darkTheme.colors.border);
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('renders the default label in textPrimary color', () => {

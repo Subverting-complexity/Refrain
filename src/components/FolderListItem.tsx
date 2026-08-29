@@ -145,7 +145,7 @@ export function FolderListItem({
           listRowStyles.row,
           {
             backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.outline,
           },
         ]}
       >

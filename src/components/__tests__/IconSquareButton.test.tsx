@@ -57,12 +57,15 @@ describe('IconSquareButton', () => {
     expect(flat.height).toBe(48);
   });
 
-  it('uses accent colors when active', () => {
+  it('fills with the accent when active and keeps the outline ring', () => {
     const tree = renderButton({ active: true });
     const node = findHost(tree);
     const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
-    expect(flat.borderColor).toBe(darkTheme.colors.accent);
+    // The ring stays `outline` in both states. The accent fill is what says
+    // "on"; it cannot also be the control's boundary, because in light mode
+    // it is 2.30 against the page and SC 1.4.11 wants 3:1.
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('uses surface colors when inactive', () => {
@@ -70,7 +73,7 @@ describe('IconSquareButton', () => {
     const node = findHost(tree);
     const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe(darkTheme.colors.surface);
-    expect(flat.borderColor).toBe(darkTheme.colors.border);
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('sets opacity 0.4 when disabled', () => {
@@ -187,7 +190,7 @@ describe('IconSquareButton', () => {
       const node = findHost(tree);
       const flat = StyleSheet.flatten(node.props.style({ pressed: false }));
       expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
-      expect(flat.borderColor).toBe(darkTheme.colors.accent);
+      expect(flat.borderColor).toBe(darkTheme.colors.outline);
       const icon = tree.root.findAll((node) => node.props.name === 'repeat')[0];
       expect(icon.props.color).toBe(darkTheme.colors.accentText);
     });
