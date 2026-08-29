@@ -98,6 +98,10 @@ export const DEFAULT_COUNTDOWN_CONFIG: CountdownConfig = Object.freeze({
   repeat: 'once',
 } as const);
 
+// The two string sanitizers below are the same shape as each other and stay
+// apart on purpose: each one's comment names the safe fallback and says why,
+// and a generic two-member union-snapper would have nowhere to put that.
+
 /**
  * Snaps any stored string onto a known mode; anything unrecognised is
  * `silent`, the quieter of the two and so the safer thing to fall back to.
@@ -114,26 +118,43 @@ export function sanitizeCountdownRepeat(
 }
 
 /**
- * Snaps any number onto a known seconds preset.
+ * Builds a sanitizer that snaps any number onto one of `presets`, falling
+ * back to `fallback`.
  *
  * The preset list is the whole contract: every entry is finite and positive,
  * so NaN, Infinity and non-positive values all fail the membership test and
- * land on the default without needing a separate range check.
+ * land on the fallback without needing a separate range check.
  */
-export function sanitizeCountdownSeconds(
-  seconds: number,
-): CountdownSecondsPreset {
-  return (COUNTDOWN_SECONDS_PRESETS as readonly number[]).includes(seconds)
-    ? (seconds as CountdownSecondsPreset)
-    : DEFAULT_COUNTDOWN_SECONDS;
+function snapToPreset<T extends number>(
+  presets: readonly T[],
+  fallback: T,
+): (value: number) => T {
+  return (value) =>
+    (presets as readonly number[]).includes(value) ? (value as T) : fallback;
 }
 
-/** Snaps any number onto a known bar count, on the same reasoning as seconds. */
-export function sanitizeCountdownBars(bars: number): CountdownBarsPreset {
-  return (COUNTDOWN_BARS_PRESETS as readonly number[]).includes(bars)
-    ? (bars as CountdownBarsPreset)
-    : DEFAULT_COUNTDOWN_BARS;
-}
+/** Snaps any number onto a known seconds preset. */
+export const sanitizeCountdownSeconds = snapToPreset(
+  COUNTDOWN_SECONDS_PRESETS,
+  DEFAULT_COUNTDOWN_SECONDS,
+);
+
+/** Snaps any number onto a known bar count. */
+export const sanitizeCountdownBars = snapToPreset(
+  COUNTDOWN_BARS_PRESETS,
+  DEFAULT_COUNTDOWN_BARS,
+);
+
+/**
+ * A duration as it comes back from storage: the right shape, but with the
+ * amount still unchecked. Both amounts are plain numbers here because a
+ * stored key can hold anything, which is what the sanitizer below is for.
+ * Every {@link CountdownDuration} is already one of these, so callers holding
+ * a checked duration can pass it straight through.
+ */
+type StoredCountdownDuration =
+  | { type: 'bars'; bars: number }
+  | { type: 'seconds'; seconds: number };
 
 /**
  * Snaps a duration onto known values, keeping its type. An unrecognised type
@@ -141,7 +162,7 @@ export function sanitizeCountdownBars(bars: number): CountdownBarsPreset {
  * back to the default seconds duration.
  */
 export function sanitizeCountdownDuration(
-  duration: CountdownDuration,
+  duration: StoredCountdownDuration,
 ): CountdownDuration {
   if (duration.type === 'bars') {
     return { type: 'bars', bars: sanitizeCountdownBars(duration.bars) };
@@ -171,21 +192,20 @@ export function sanitizeCountdownConfig(
  * own key, so the one not in use keeps whatever it was last set to.
  */
 function getCountdownDuration(): CountdownDuration {
-  const type = settingsStore.getSetting(DURATION_TYPE_KEY);
-  if (type === 'bars') {
-    return {
-      type: 'bars',
-      bars: sanitizeCountdownBars(
-        settingsStore.getNumber(BARS_KEY, DEFAULT_COUNTDOWN_BARS),
-      ),
-    };
-  }
-  return {
-    type: 'seconds',
-    seconds: sanitizeCountdownSeconds(
-      settingsStore.getNumber(SECONDS_KEY, DEFAULT_COUNTDOWN_SECONDS),
-    ),
-  };
+  const stored: StoredCountdownDuration =
+    settingsStore.getSetting(DURATION_TYPE_KEY) === 'bars'
+      ? {
+          type: 'bars',
+          bars: settingsStore.getNumber(BARS_KEY, DEFAULT_COUNTDOWN_BARS),
+        }
+      : {
+          type: 'seconds',
+          seconds: settingsStore.getNumber(
+            SECONDS_KEY,
+            DEFAULT_COUNTDOWN_SECONDS,
+          ),
+        };
+  return sanitizeCountdownDuration(stored);
 }
 
 /** The persisted count-in config, with every part snapped to known values. */
@@ -213,6 +233,8 @@ export function setCountdownConfig(config: CountdownConfig): void {
   settingsStore.setBoolean(ENABLED_KEY, sanitized.enabled);
   settingsStore.setSetting(MODE_KEY, sanitized.mode);
   settingsStore.setSetting(DURATION_TYPE_KEY, sanitized.duration.type);
+  // This branch stays: the two arms write to different keys, and writing only
+  // the one in force is what lets the other amount survive a type switch.
   if (sanitized.duration.type === 'bars') {
     settingsStore.setNumber(BARS_KEY, sanitized.duration.bars);
   } else {
