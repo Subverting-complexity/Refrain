@@ -19,9 +19,8 @@ import {
 } from './skipIntervalStore';
 import * as webAudioGain from './webAudioGain';
 import * as webMediaSession from './webMediaSession';
-import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
+import { PlaybackState, PlaybackStatus } from '../types';
 import { errorMessage } from '../utils/errorMessage';
-import { settle } from '../utils/settle';
 
 export type PlaybackListener = (state: PlaybackState) => void;
 
@@ -462,6 +461,9 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     didJustFinish: status.didJustFinish,
     positionMs: newState.positionMs,
     region,
+    // `monitor != null`, not the `monitorActive` variable: a preview only
+    // overrides the A/B region once it has a window to loop, and between
+    // arming and the first window the two disagree.
     monitorActive: monitor != null,
     loopEnabled,
     hasCountInHandler: onLoopRestart != null,
