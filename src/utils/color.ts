@@ -37,7 +37,13 @@ export function withAlpha(hex: string, alpha: number): string {
 export function mix(from: string, to: string, t: number): string {
   const a = channels(from);
   const b = channels(to);
-  const k = Math.max(0, Math.min(1, t));
+  // NaN reads as 0 rather than propagating. The clamp below cannot catch it:
+  // `Math.min` passes NaN straight through, a NaN channel stringifies to the
+  // literal "NaN", and the result would be `#NaNNaNNaN` — not a colour at all,
+  // and one the platform is free to throw on. The caller's amplitude comes
+  // from peak analysis, where a single bad sample survives normalisation.
+  // Infinities need no special case: the clamp takes them to the ends.
+  const k = Number.isNaN(t) ? 0 : Math.max(0, Math.min(1, t));
   const blended = a.map((value, i) => Math.round(value + (b[i] - value) * k));
   return `#${blended.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }

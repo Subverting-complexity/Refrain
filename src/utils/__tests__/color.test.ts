@@ -107,6 +107,18 @@ describe('mix', () => {
     expect(mix('#000000', '#ffffff', 42)).toBe('#ffffff');
   });
 
+  // The clamp cannot catch NaN: it passes straight through `Math.min`, the
+  // channels stringify to the literal "NaN", and the result is `#NaNNaNNaN`,
+  // which is not a colour and which the platform may throw on.
+  it('treats NaN as 0 rather than propagating it', () => {
+    expect(mix('#102030', '#ffffff', NaN)).toBe('#102030');
+  });
+
+  it('clamps the infinities to the ends like any other out-of-range value', () => {
+    expect(mix('#102030', '#ffffff', Infinity)).toBe('#ffffff');
+    expect(mix('#102030', '#ffffff', -Infinity)).toBe('#102030');
+  });
+
   it('keeps two-digit channels zero-padded', () => {
     expect(mix('#000000', '#0f0f0f', 1)).toBe('#0f0f0f');
     expect(mix('#000000', '#101010', 0.5)).toBe('#080808');
