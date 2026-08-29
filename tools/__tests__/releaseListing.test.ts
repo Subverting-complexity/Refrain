@@ -19,6 +19,7 @@ import {
   assertListingSelector,
   checkListingPrerequisites,
   decideListingPush,
+  listingIsLive,
   LISTING_PATHS,
   ListingError,
 } from '../lib/release-listing.mjs';
@@ -159,6 +160,7 @@ describe('checkListingPrerequisites', () => {
       env: complete,
       hasBundler: true,
       hasDefaultPlayKey: false,
+      fileExists: () => true,
       ...overrides,
     });
   }
@@ -240,5 +242,82 @@ describe('checkListingPrerequisites', () => {
     expect(check({ env: { ...complete, ASC_ISSUER_ID: '   ' } }).ok).toBe(
       false,
     );
+  });
+
+  it('refuses a key path that points at nothing', () => {
+    // A variable pointing at a .p8 that has since been moved is a missing key
+    // that reads as a present one, and this check exists precisely so that
+    // costs seconds rather than a paid-for build.
+    const { ok, problems } = check({
+      platforms: ['ios'],
+      env: { ...complete, ASC_KEY_CONTENT: undefined, ASC_KEY_PATH: 'gone.p8' },
+      fileExists: () => false,
+    });
+
+    expect(ok).toBe(false);
+    expect(problems).toEqual([
+      "ASC_KEY_PATH points at 'gone.p8', which does not exist (needed for the ios listing push).",
+    ]);
+  });
+
+  it('refuses a Play service-account path that points at nothing', () => {
+    const { ok, problems } = check({
+      platforms: ['android'],
+      env: { SUPPLY_JSON_KEY: './pc-api-key.json' },
+      fileExists: () => false,
+    });
+
+    expect(ok).toBe(false);
+    expect(problems[0]).toContain('SUPPLY_JSON_KEY points at');
+  });
+
+  it('checks the file only for the spelling that names one', () => {
+    // ASC_KEY_CONTENT carries the key rather than pointing at it, so a machine
+    // using that spelling has no file to find.
+    expect(check({ platforms: ['ios'], fileExists: () => false }).ok).toBe(
+      true,
+    );
+  });
+});
+
+describe('listingIsLive', () => {
+  // The exact sentences Invoke-ListingPush in tools/ps/Deploy.ps1 returns and
+  // Deploy.ps1 records in the outcome tag. They are the input to this rule, so
+  // a reword on that side that is not made here would be caught by these.
+  it('counts a listing fastlane pushed', () => {
+    expect(listingIsLive('pushed')).toBe(true);
+    expect(listingIsLive('pushed: --listing on')).toBe(true);
+  });
+
+  it('counts a listing that was already what the store carried', () => {
+    expect(
+      listingIsLive(
+        'not pushed: unchanged since the last successful store release',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not count a push that failed after the binary shipped', () => {
+    // The outcome tag stays a success on purpose -- the build shipped -- so the
+    // listing field is the only thing that says the store never caught up.
+    expect(listingIsLive('failed: fastlane exited 1')).toBe(false);
+    expect(listingIsLive('failed: bundle is not installed')).toBe(false);
+  });
+
+  it('does not count a release that was told to skip the listing', () => {
+    expect(listingIsLive('not pushed: -Listing off')).toBe(false);
+    expect(
+      listingIsLive(
+        'not pushed: -NoSubmit, so there was no submit for it to follow',
+      ),
+    ).toBe(false);
+    expect(listingIsLive('not attempted')).toBe(false);
+  });
+
+  it('does not count a tag written before listing pushes existed', () => {
+    // No Listing field at all. Reading that as live would skip a push that has
+    // never happened; reading it as not live costs one idempotent push.
+    expect(listingIsLive(undefined)).toBe(false);
+    expect(listingIsLive('')).toBe(false);
   });
 });

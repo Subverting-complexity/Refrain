@@ -43,6 +43,17 @@ const LISTING_FILES = {
 /** The exit code `listing-check` uses for "nothing to push". */
 const SKIP = 20;
 
+/**
+ * What `Invoke-ListingPush` in `tools/ps/Deploy.ps1` records after a push that
+ * worked, and therefore what makes a release usable as `auto`'s baseline.
+ *
+ * A successful binary is not enough on its own. The listing push can fail after
+ * the binary has already shipped, which deliberately leaves the outcome a
+ * success, so the listing field is the only thing that says whether the store
+ * ever caught up.
+ */
+const LISTING_PUSHED = ['--listing', 'pushed'];
+
 function run(repo: Repo, args: string[]): ToolRun {
   return runTool('release-branch.mjs', repo.workDir, args);
 }
@@ -332,6 +343,23 @@ describe('release-branch.mjs (integration)', () => {
       repo = setupRepo();
       expect(run(repo, ['stop']).status).toBe(0);
     });
+
+    it('does not prune a second time when finish already closed the release', () => {
+      // `finish` prunes as the last selected platform reports, and the deploy
+      // script calls `stop` a moment later on every release. Pruning here as
+      // well rescans every ref and prints a second summary for work that has
+      // just been done.
+      repo = setupRepo();
+      startRelease(repo, 'ios');
+      expect(finish(repo, 'ios', 'success').output).toContain(
+        'release branch(es) kept',
+      );
+
+      const result = run(repo, ['stop']);
+
+      expect(result.output).toContain('nothing to close');
+      expect(result.output).not.toContain('release branch(es) kept');
+    });
   });
 
   describe('retrying after a partial failure', () => {
@@ -485,8 +513,8 @@ describe('release-branch.mjs (integration)', () => {
     it("skips when nothing in that platform's listing changed", () => {
       repo = setupRepo('1.0.0', LISTING_FILES);
       startRelease(repo, 'both');
-      finish(repo, 'ios', 'success');
-      finish(repo, 'android', 'success');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
+      finish(repo, 'android', 'success', LISTING_PUSHED);
 
       expect(run(repo, ['listing-check', '--platform', 'ios']).status).toBe(
         SKIP,
@@ -497,8 +525,8 @@ describe('release-branch.mjs (integration)', () => {
       // An iOS copy change must not push the Play listing.
       repo = setupRepo('1.0.0', LISTING_FILES);
       startRelease(repo, 'both');
-      finish(repo, 'ios', 'success');
-      finish(repo, 'android', 'success');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
+      finish(repo, 'android', 'success', LISTING_PUSHED);
 
       writeFile(repo.workDir, IOS_LISTING, 'A new description for Apple.\n');
       commitAll(repo.workDir, 'docs(store): reword the App Store description');
@@ -512,7 +540,7 @@ describe('release-branch.mjs (integration)', () => {
     it('ignores a change to something that is not listing content', () => {
       repo = setupRepo('1.0.0', LISTING_FILES);
       startRelease(repo, 'ios');
-      finish(repo, 'ios', 'success');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
 
       writeFile(repo.workDir, 'src/app.ts', 'export const x = 1;\n');
       commitAll(repo.workDir, 'feat: unrelated code');
@@ -527,7 +555,7 @@ describe('release-branch.mjs (integration)', () => {
       // baseline would skip a listing change that has never been published.
       repo = setupRepo('1.0.0', LISTING_FILES);
       startRelease(repo, 'ios');
-      finish(repo, 'ios', 'success');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
 
       writeFile(
         repo.workDir,
@@ -537,9 +565,59 @@ describe('release-branch.mjs (integration)', () => {
       commitAll(repo.workDir, 'docs(store): reword');
 
       startRelease(repo, 'ios', 'fast');
-      finish(repo, 'ios', 'success');
+      // A fast-lane run never pushes the listing, so this is not a state the
+      // deploy script can produce. It is set here so the lane is the only thing
+      // that can disqualify this release as the baseline, rather than the test
+      // passing because the listing field disqualified it first.
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
 
       expect(run(repo, ['listing-check', '--platform', 'ios']).status).toBe(0);
+    });
+
+    it('ignores a release whose listing push failed after the binary shipped', () => {
+      // The outcome tag is a success and stays one: the build went to the
+      // store and cannot be withdrawn. The store *page* never caught up,
+      // though, so diffing against that commit would find no listing change
+      // since and skip the push, leaving the old copy up release after release
+      // with nothing on screen saying so.
+      repo = setupRepo('1.0.0', LISTING_FILES);
+      startRelease(repo, 'ios');
+      finish(repo, 'ios', 'success', [
+        '--listing',
+        'failed: fastlane exited 1',
+      ]);
+
+      expect(run(repo, ['listing-check', '--platform', 'ios']).status).toBe(0);
+    });
+
+    it('ignores a release that was told to skip the listing', () => {
+      repo = setupRepo('1.0.0', LISTING_FILES);
+      startRelease(repo, 'ios');
+      finish(repo, 'ios', 'success', ['--listing', 'not pushed: -Listing off']);
+
+      expect(run(repo, ['listing-check', '--platform', 'ios']).status).toBe(0);
+    });
+
+    it('falls back to the last release that did reach the store', () => {
+      // Skipping the release whose listing failed is not the same as having no
+      // baseline at all. The one before it is still an honest comparison, and
+      // using it keeps `auto` from pushing on every release forever after a
+      // single failure.
+      repo = setupRepo('1.0.0', LISTING_FILES);
+      startRelease(repo, 'ios');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
+
+      writeFile(repo.workDir, 'src/app.ts', 'export const x = 1;');
+      commitAll(repo.workDir, 'feat: unrelated code');
+      startRelease(repo, 'ios');
+      finish(repo, 'ios', 'success', [
+        '--listing',
+        'failed: fastlane exited 1',
+      ]);
+
+      expect(run(repo, ['listing-check', '--platform', 'ios']).status).toBe(
+        SKIP,
+      );
     });
 
     it('never pushes on the fast lane, even when asked directly', () => {
@@ -562,7 +640,7 @@ describe('release-branch.mjs (integration)', () => {
     it('pushes regardless when told to', () => {
       repo = setupRepo('1.0.0', LISTING_FILES);
       startRelease(repo, 'ios');
-      finish(repo, 'ios', 'success');
+      finish(repo, 'ios', 'success', LISTING_PUSHED);
 
       expect(
         run(repo, ['listing-check', '--platform', 'ios', '--listing', 'on'])

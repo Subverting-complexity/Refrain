@@ -47,7 +47,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { capture, quietShellDeprecation } from './lib/exec.mjs';
 import { configureColour, detail, fail, formatTimestamp, ok, say, warn } from './lib/format.mjs';
@@ -78,6 +78,7 @@ import {
   assertListingSelector,
   checkListingPrerequisites,
   decideListingPush,
+  listingIsLive,
   LISTING_PATHS,
   ListingError,
 } from './lib/release-listing.mjs';
@@ -504,6 +505,12 @@ function finish(options) {
  * Called unconditionally at the end of a deploy, so the case where every
  * platform already reported is a no-op rather than an error.
  *
+ * It is a no-op down to the prune as well. `finish` already prunes when the
+ * last selected platform reports, and this runs a moment later on every
+ * release, so pruning here regardless would scan every ref and print a second
+ * summary for work that has just been done. There is a release to close, or
+ * there is nothing to do; `prune` is its own command for the other case.
+ *
  * @param {import('./lib/release-branch-options.mjs').ReleaseOptions} options
  */
 function stop(options) {
@@ -513,17 +520,18 @@ function stop(options) {
 
   if (!state) {
     detail('No release is open, so there is nothing to close.');
-  } else {
-    const outstanding = unreported(state);
-    if (outstanding.length === 0) {
-      ok(`Closed ${state.branch}.`);
-    } else {
-      warn(`${state.branch} ended early. Never attempted: ${outstanding.join(', ')}.`);
-      detail('Those platforms are left untagged: they did not fail, they were not tried.');
-      detail(`Retry with: Deploy.cmd -Platform ${outstanding.join(',')}`);
-    }
-    writeState(repoRoot, null);
+    return 0;
   }
+
+  const outstanding = unreported(state);
+  if (outstanding.length === 0) {
+    ok(`Closed ${state.branch}.`);
+  } else {
+    warn(`${state.branch} ended early. Never attempted: ${outstanding.join(', ')}.`);
+    detail('Those platforms are left untagged: they did not fail, they were not tried.');
+    detail(`Retry with: Deploy.cmd -Platform ${outstanding.join(',')}`);
+  }
+  writeState(repoRoot, null);
 
   if (!options.noPrune) return prune({ ...options, command: 'prune', remote });
   return 0;
@@ -652,12 +660,20 @@ function deleteBranch(repoRoot, remote, branches, branch) {
 }
 
 /**
- * The commit of the last successful store-lane release for one platform.
+ * The commit of the last store-lane release that left the store listing showing
+ * its own content, for one platform.
  *
  * Read from the outcome tags rather than from a file, because the tags are the
- * only record that survives a pruned branch and a fresh clone. The lane is not
- * in the tag *name*, so each candidate's message is read until one says it went
- * to the store — newest first, so that is usually one extra git call.
+ * only record that survives a pruned branch and a fresh clone. Neither the lane
+ * nor the listing result is in the tag *name*, so each candidate's message is
+ * read until one qualifies — newest first, so that is usually one extra git
+ * call.
+ *
+ * A successful *binary* is not enough. The listing push can fail after the
+ * binary has already shipped, which deliberately leaves the outcome a success,
+ * and `-Listing off` skips it outright. Diffing against either would find no
+ * listing change since and skip the push, and the store page would stay on the
+ * old copy release after release. See {@link listingIsLive}.
  *
  * @param {string} repoRoot
  * @param {'ios' | 'android'} platform
@@ -679,6 +695,7 @@ function lastStoreRelease(repoRoot, platform) {
     // A tag written before lanes existed has no Lane line. Treating it as a
     // store release is the safe reading: those releases all went to the store.
     if ((fields.lane ?? 'store') !== 'store') continue;
+    if (!listingIsLive(fields.listing)) continue;
     const commit = resolveCommit(repoRoot, `refs/tags/${tag}`);
     if (commit) return { tag, commit };
   }
@@ -757,6 +774,11 @@ function listingPreflight(options) {
     env: process.env,
     hasBundler: bundler.code === 0,
     hasDefaultPlayKey: existsSync(join(repoRoot, 'pc-api-key.json')),
+    // Resolved against the repository root rather than the current directory,
+    // because that is where fastlane runs from and therefore how it will read a
+    // relative path out of `.env`. `resolve` rather than `join`, so an absolute
+    // path is left as the absolute path it already is.
+    fileExists: (path) => existsSync(resolve(repoRoot, path)),
   });
 
   if (passed) {

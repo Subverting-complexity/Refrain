@@ -165,16 +165,23 @@ bundle exec fastlane android listing
 
 A store-lane release (`tools\Deploy.cmd`) pushes each platform's listing after
 that platform's binary submit, and by default only when that platform's listing
-files have changed since its last successful store release. `-Listing on`
-pushes regardless, `-Listing off` skips it. The commands above are the manual
-equivalent, for a listing-only change or for finishing a push that failed.
+files have changed since the last store release that actually left the store
+carrying them. A release whose listing push failed, or that ran with
+`-Listing off`, is passed over as the comparison point in favour of the one
+before it, so a single failure does not leave the store page stuck on the old
+copy. `-Listing on` pushes regardless, `-Listing off` skips it. The commands
+above are the manual equivalent, for a listing-only change or for finishing a
+push that failed.
 
-Two things the release deliberately does not do:
+Three things the release deliberately does not do:
 
 - **The fast lane never pushes the public listing.** TestFlight carries its own
   "What to Test" text and the Play internal track does not use the production
   listing, so pushing public copy from a tester build would publish changes
   nobody asked to publish.
+- **`-NoSubmit` never pushes the listing.** The listing follows the binary
+  submit, so a build-only run has nothing for it to follow, and pushing anyway
+  would describe a build that never left the machine.
 - **`submit:true` is never part of a release run.** Submitting for review needs
   a build Apple has finished processing, which takes 5 to 15 minutes and is
   outside our control. Run it yourself once TestFlight shows the build as
