@@ -866,7 +866,16 @@ foreach ($target in $Targets) {
             Write-Err "  - If Apple credentials expired, re-run without -NonInteractive"
         } else {
             Write-Err "  - Check the Play service-account JSON named by eas.json is present"
-            Write-Err "  - A brand-new app may need its first AAB uploaded by hand in Play Console"
+            # The submission, not the build, is what fails on an app Play has
+            # never published, and it fails AFTER the twenty minutes of build
+            # time. Naming the recovery matters more than naming the cause:
+            # the AAB is already built and needs no rebuild to go up.
+            Write-Err "  - 'missing the required metadata' means Play has never published this"
+            Write-Err "    app, so it takes draft releases only. The build is fine and is"
+            Write-Err "    already uploaded; submit it without rebuilding:"
+            Write-Err "      eas submit --platform android --profile production-draft --id <build-id>"
+            Write-Err "    Then publish the app once in Play Console and this stops happening."
+            Write-Err "    See docs/RELEASING.md, 'The first Android release'."
         }
         Write-Err "  - Run 'eas login' to re-authenticate with Expo"
         Write-Err "  - Check build logs at https://expo.dev"
