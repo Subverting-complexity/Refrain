@@ -872,12 +872,19 @@ foreach ($target in $Targets) {
             # the AAB is already built and needs no rebuild to go up.
             Write-Err "  - 'missing the required metadata' means Play has never published this"
             Write-Err "    app, so it takes draft releases only. The build is fine and is"
-            Write-Err "    already uploaded; submit it without rebuilding:"
+            Write-Err "    already uploaded; submit it without rebuilding. Set EXPO_TOKEN"
+            Write-Err "    from .env first, or eas falls back to your global login, which is"
+            Write-Err "    a different account and fails with 'Entity not authorized':"
             Write-Err "      eas submit --platform android --profile production-draft --id <build-id>"
             Write-Err "    Then publish the app once in Play Console and this stops happening."
             Write-Err "    See docs/RELEASING.md, 'The first Android release'."
         }
-        Write-Err "  - Run 'eas login' to re-authenticate with Expo"
+        # Not 'run eas login'. This project authenticates as its own robot
+        # account through EXPO_TOKEN in .env, and a bare shell that skips .env
+        # gets whichever account the machine last logged in as. Sending someone
+        # to eas login is what turns a missing token into a switched identity.
+        Write-Err "  - Auth here is EXPO_TOKEN from .env, not 'eas login'. Check .env"
+        Write-Err "    still has it; 'eas whoami' should say the subvertingcomplexity account"
         Write-Err "  - Check build logs at https://expo.dev"
     }
 
