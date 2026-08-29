@@ -75,14 +75,26 @@ The order, once per app:
 
 1. Submit a build with the draft profile. An existing build needs no rebuild:
    `eas submit --platform android --profile production-draft --id <build-id>`.
-2. Push the listing: `.	ools\Deploy.cmd -ListingOnly -Platform android`. It
-   works now that the track has a release.
-3. Finish Play Console: countries and regions, and turn on Managed publishing.
-4. Publish the app for the first time in Play Console. That is what takes it out
+2. **Fill the main store listing by hand in Play Console.** Short description,
+   full description, icon, feature graphic and the phone screenshots, all of
+   which are in [../fastlane/metadata/android/](../fastlane/metadata/android/)
+   to copy from. This is the step that is easy to skip, and skipping it makes
+   the next one fail with an error that says nothing about it. See "The caller
+   does not have permission" below.
+3. Push the listing: `.\tools\Deploy.cmd -ListingOnly -Platform android`. It
+   works now that the track has a release and the app can be submitted for
+   review.
+4. Finish Play Console: countries and regions, and turn on Managed publishing.
+5. Publish the app for the first time in Play Console. That is what takes it out
    of draft-app state, and only a person can do it.
 
 After that the ordinary `production` profile applies and nothing here is needed
-again.
+again, and the listing is pushed from the repository rather than typed.
+
+Step 2 is a genuine one-off. It is there because the API cannot fill an empty
+listing on an app that has never been published, and Play will not publish an
+app whose listing is empty. A person breaking that circle once is the only way
+out of it.
 
 ## Pushing a listing on its own
 
@@ -611,6 +623,63 @@ the service account is configured correctly.
 Fix: upload that first AAB by hand in Play Console. The API works normally
 afterwards. Do not work around it by widening the service account's
 permissions, and do not retry in a loop.
+
+### Play rejects the commit: "The caller does not have permission"
+
+```
+Google Api Error: Invalid request - The caller does not have permission
+```
+
+Raised by `edits.commit`, at the end of a run that reported every upload as
+successful. It is not about credentials, and auditing the service account's
+permissions is a dead end.
+
+What it looks like when the API is taken apart, one operation per edit:
+
+| Edit contains                      | `edits.commit`          |
+| ---------------------------------- | ----------------------- |
+| nothing                            | OK                      |
+| release notes on the draft release | OK                      |
+| store listing text                 | 403 `PERMISSION_DENIED` |
+| a listing image                    | 403 `PERMISSION_DENIED` |
+
+The staging calls all return 200. Only the commit is refused, and only when the
+edit touches the store listing. Retrying the commit with
+`changesNotSentForReview: true` gets a different and far more useful answer:
+
+```
+Changes are sent for review automatically.
+The query parameter changesNotSentForReview must not be set.
+```
+
+That is the tell. Committing a listing change submits the app for review, and
+committing a release-notes change does not. What is being refused is the review
+submission.
+
+On this project it went away the moment the main store listing was filled in by
+hand in Play Console. That fits Play refusing a review submission for an app
+that is not yet in a submittable state, and reporting it as `PERMISSION_DENIED`.
+The mechanism is inferred from that one observation rather than from anything
+Google documents, so treat it as the likeliest explanation and not a certainty.
+
+Fix: complete the main store listing in Play Console, then run the lane again.
+That is step 2 of "The first Android release" above.
+
+### Play rejects the commit: "A change was made to the application outside of this Edit"
+
+```
+Google Api Error: Invalid request -
+A change was made to the application outside of this Edit, please create a new edit.
+```
+
+Not a failure so much as a collision. Play allows one writer at a time and
+invalidates whichever edit went stale. The listing push holds an edit open for
+the fifty seconds it spends uploading images, and anything else touching the app
+in that window kills it: somebody saving in Play Console, or a concurrent
+`eas submit`.
+
+Fix: make sure nothing else is touching Play, and run it again. Nothing is left
+half-done, because the edit is never committed.
 
 ### `fastlane android listing` fails asking for a version code
 
