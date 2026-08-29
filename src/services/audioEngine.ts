@@ -8,7 +8,9 @@ import {
 import type { EventSubscription } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
-import * as markerStore from './markerStore';
+import * as bounds from './audioEngineBounds';
+import { LoopBounds, MonitorWindow } from './audioEngineBounds';
+import { createMarkerPersistence } from './audioEngineMarkers';
 import * as settingsStore from './settingsStore';
 import {
   DEFAULT_SKIP_PREFERENCE,
@@ -17,20 +19,13 @@ import {
 } from './skipIntervalStore';
 import * as webAudioGain from './webAudioGain';
 import * as webMediaSession from './webMediaSession';
-import { ActiveMarkers, PlaybackState, PlaybackStatus } from '../types';
+import { PlaybackState, PlaybackStatus } from '../types';
 import { errorMessage } from '../utils/errorMessage';
-import { settle } from '../utils/settle';
 
 export type PlaybackListener = (state: PlaybackState) => void;
 
 const VOLUME_SETTING_KEY = 'playback.volume';
 const DEFAULT_VOLUME = 1;
-
-// Trailing-edge debounce for per-track marker writes. A marker drag fires
-// changes at the ~20/sec drag-throttle cadence; coalescing them into one write
-// this far after the last change avoids a write storm while still capturing the
-// final value (the timer always writes the latest markers, never a stale one).
-const MARKER_SAVE_DEBOUNCE_MS = 300;
 
 // expo-audio reports time in seconds; the engine's public contract is in
 // milliseconds (markers, positionMs/durationMs), so convert at the boundary.
@@ -66,8 +61,14 @@ let webGainActive = false;
 // no track is loaded or the loader was called without one (markers then live
 // only in memory, as before). Set by loadTrack, cleared by unloadTrack.
 let currentTrackId: string | null = null;
-// Pending debounced marker-save timer, or null when no write is queued.
-let markerSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+// The debounced marker-save unit. It owns its own timer and every call into
+// `markerStore`; this module keeps the markers themselves and tells it how to
+// read them. See `audioEngineMarkers.ts`.
+const markerPersistence = createMarkerPersistence({
+  getTrackId: () => currentTrackId,
+  getMarkers: () => ({ markerA, markerB, loopEnabled }),
+});
 
 // --- Rolling monitor (marker-drag preview) ----------------------------------
 // A transient preview mode: while a marker is being dragged, a short window
@@ -76,13 +77,10 @@ let markerSaveTimer: ReturnType<typeof setTimeout> | null = null;
 // markerB/loopEnabled — it overrides the active loop region for its lifetime
 // only. See startMonitor/updateMonitor/stopMonitor below.
 
-// Half-width of the preview window: 2s before to 2s after the center.
-const MONITOR_HALF_WINDOW_MS = 2000;
-
 // Whether the rolling monitor is currently previewing.
 let monitorActive = false;
 // The current preview window in ms, clamped to the track, or null when idle.
-let monitorWindow: { start: number; end: number } | null = null;
+let monitorWindow: MonitorWindow | null = null;
 // Transport state captured at startMonitor, restored verbatim at stopMonitor.
 let savedTransport: { positionMs: number; isPlaying: boolean } | null = null;
 // True while stopMonitor's restore seek is in flight. The monitor window is
@@ -454,15 +452,23 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
   const monitor = monitorBounds();
   const region =
     monitor ?? regionBounds() ?? trackLoopBounds(newState.durationMs);
-  if (
-    status.isLoaded &&
-    (status.playing || status.didJustFinish) &&
-    region &&
-    newState.positionMs >= region.b &&
-    player &&
-    !restoringTransport
-  ) {
-    if (!monitor && !loopEnabled) {
+  // Which outcome the boundary calls for is a question about values, so the
+  // choice lives in `audioEngineBounds` where it can be covered as a table.
+  // What stays here is the sequencing: the seeks, stops and notifications.
+  const boundaryAction = bounds.loopBoundaryAction({
+    isLoaded: status.isLoaded,
+    playing: status.playing,
+    didJustFinish: status.didJustFinish,
+    positionMs: newState.positionMs,
+    region,
+    monitorOverridesRegion: monitor != null,
+    loopEnabled,
+    hasCountInHandler: onLoopRestart != null,
+    hasPlayer: player != null,
+    restoringTransport,
+  });
+  if (boundaryAction !== 'none' && region != null && player != null) {
+    if (boundaryAction === 'stop-at-b') {
       // Loop disarmed: play the A..B region once, then stop at B. The next
       // play() restarts from A (see play()).
       stopPlayback(player);
@@ -475,7 +481,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     const rewinding = player;
     const rewound = rewindToLoopStart(rewinding, region.a);
 
-    if (!monitor && onLoopRestart) {
+    if (boundaryAction === 'hand-off-to-count-in') {
       // A per-loop count-in is registered: pause at A and hand off so the
       // caller can run the lead-in before resuming.
       //
@@ -488,7 +494,9 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
       stopPlayback(player);
       currentState = { ...newState, positionMs: region.a, status: 'paused' };
       notify(currentState);
-      onLoopRestart();
+      // `hand-off-to-count-in` is only returned when a handler is registered;
+      // the optional call is what tells the compiler so.
+      onLoopRestart?.();
       return;
     }
 
@@ -501,7 +509,7 @@ function onPlaybackStatusUpdate(status: AudioStatus): void {
     // playhead jumped back to the loop start and sat there paused. Every
     // other restart keeps an already-playing player running, which is why
     // only the wrap at the end stalled.
-    if (status.didJustFinish) {
+    if (boundaryAction === 'rewind-and-resume') {
       const stopsBefore = transportStopCount;
       void rewound
         .then((landed) => {
@@ -690,7 +698,14 @@ async function loadTrackImpl(
     // Restore saved markers last, after the load's reset so they aren't
     // clobbered. Silent and best-effort; no-op without a track id or saved row.
     if (currentTrackId != null) {
-      await restoreActiveMarkers(currentTrackId);
+      const saved = await markerPersistence.restore(currentTrackId);
+      if (saved) {
+        markerA = saved.markerA;
+        markerB = saved.markerB;
+        loopEnabled = saved.loopEnabled;
+        currentState = { ...currentState, markerA, markerB, loopEnabled };
+        notify(currentState);
+      }
     }
   } catch (err) {
     // Release a player that never became the live one, and drop any listener
@@ -817,155 +832,90 @@ export async function stop(): Promise<void> {
 }
 
 /**
- * The active A/B region, or null when both markers aren't set (or A is not
- * before B). When set, seeks and skips are confined to [a, b] so the playhead
- * stays inside the region — independent of whether the loop is armed (the loop
- * toggle only decides whether reaching B rewinds or stops).
+ * The arithmetic these delegate to lives in `audioEngineBounds.ts`, where it
+ * is a pure function of its arguments and can be unit-tested without driving
+ * a player through the expo-audio mock. What stays here is the binding: each
+ * one reads the module state the rule needs. Call sites are unchanged.
  */
-function regionBounds(): { a: number; b: number } | null {
-  if (markerA == null || markerB == null) return null;
-  if (markerA >= markerB) return null;
-  // Clamp B to the track. Saved markers are restored without knowing the new
-  // track's length — a track re-imported over the same id from a shorter
-  // file, or a duration corrected after the markers were saved, leaves B past
-  // the end. The playhead can then never reach B, so the loop never rewinds
-  // and `play()` finds the position neither before A nor at B and starts at
-  // the very end, which finishes immediately: the Play button looks dead with
-  // nothing explaining why. Clamping keeps the region reachable.
-  const duration = currentState.durationMs;
-  if (duration > 0 && markerB > duration) {
-    if (markerA >= duration) return null;
-    return { a: markerA, b: duration };
-  }
-  return { a: markerA, b: markerB };
+
+/** @see bounds.regionBounds */
+function regionBounds(): LoopBounds | null {
+  return bounds.regionBounds({
+    markerA,
+    markerB,
+    durationMs: currentState.durationMs,
+  });
+}
+
+/** @see bounds.trackLoopBounds */
+function trackLoopBounds(durationMs: number): LoopBounds | null {
+  return bounds.trackLoopBounds({ loopEnabled, markerA, durationMs });
 }
 
 /**
- * Fallback loop bounds when no complete A/B region exists: with the loop
- * armed, the track loops end-to-start — from A when only A is set, else from
- * the beginning — so the loop toggle works whether or not markers are placed.
- * Null when the loop is off or the duration is not yet known (a zero-duration
- * "region" would trap the playhead at 0).
- */
-function trackLoopBounds(durationMs: number): { a: number; b: number } | null {
-  if (!loopEnabled || durationMs <= 0) return null;
-  return { a: usableMarkerA(durationMs), b: durationMs };
-}
-
-/**
- * Bring restored markers inside the track once its real length is known.
+ * Bring restored markers inside the track once its real length is known, and
+ * queue a save when that changed anything.
  *
- * Markers are restored during load, before any duration has been reported, so
- * a track re-imported from a shorter file (or one whose estimated duration is
- * later corrected downward) can carry markers past its end. Reconciling here —
- * the moment the duration arrives — keeps three things honest at once: the
- * loop bounds, what the waveform and time readouts show, and what the
- * debounced save writes back. Doing it only in `regionBounds` fixed the
- * looping while leaving the reader looking at a B flag beyond the end of their
- * own waveform, and saved that value again.
- *
- * A B past the end is dropped rather than pinned to the end: a loop end the
- * reader never chose is a worse guess than no loop end. An A past the end goes
- * with it, since it can no longer start anything.
+ * `bounds.reconcileMarkersToDuration` decides; this applies. Splitting them
+ * that way is what lets the rule be tested without a store or a player, and
+ * it keeps the marker variables assigned in one place.
  */
 function reconcileMarkersToDuration(durationMs: number): void {
-  if (durationMs <= 0) return;
-  let changed = false;
-  if (markerB != null && markerB > durationMs) {
-    markerB = null;
-    changed = true;
-  }
-  if (markerA != null && markerA >= durationMs) {
-    markerA = null;
-    changed = true;
-  }
-  if (changed) scheduleMarkerSave();
+  const next = bounds.reconcileMarkersToDuration({
+    markerA,
+    markerB,
+    durationMs,
+  });
+  if (!next.changed) return;
+  markerA = next.markerA;
+  markerB = next.markerB;
+  markerPersistence.schedule();
 }
 
-/**
- * Marker A if it lands inside the track, else the start.
- *
- * Markers are restored without knowing the new track's length, so a track
- * re-imported from a shorter file can leave A past the end. Used as a loop
- * start it would give an inverted region — the playhead is always past `b`,
- * so every status update would rewind to a point beyond the end, finish
- * immediately, and rewind again, spinning at the update rate while reporting
- * a position past the end of the track. A marker that cannot be reached is
- * not a loop start; fall back to the beginning.
- */
+/** @see bounds.usableMarkerA */
 function usableMarkerA(durationMs: number): number {
-  if (markerA == null) return 0;
-  if (durationMs > 0 && markerA >= durationMs) return 0;
-  return markerA;
+  return bounds.usableMarkerA({ markerA, durationMs });
 }
 
-/**
- * The active monitor window expressed as loop bounds, or null when the monitor
- * is idle. Shares the `{ a, b }` shape with `regionBounds()` so the status
- * handler can treat it as a drop-in loop region that takes precedence over the
- * A/B markers while a preview is running.
- */
-function monitorBounds(): { a: number; b: number } | null {
-  if (!monitorActive || monitorWindow == null) return null;
-  return { a: monitorWindow.start, b: monitorWindow.end };
+/** @see bounds.monitorBounds */
+function monitorBounds(): LoopBounds | null {
+  return bounds.monitorBounds({ monitorActive, monitorWindow });
 }
 
-/**
- * Build the preview window `[center-2000, center+2000]` clamped to the track.
- * The upper bound falls back to the raw window end when the duration isn't
- * known yet (e.g. the very first preview before a status update lands), so the
- * window is always a non-empty, ordered range.
- */
-function computeMonitorWindow(centerMs: number): {
-  start: number;
-  end: number;
-} {
-  const duration = currentState.durationMs;
-  const upper = duration > 0 ? duration : centerMs + MONITOR_HALF_WINDOW_MS;
-  const start = Math.max(0, Math.min(centerMs - MONITOR_HALF_WINDOW_MS, upper));
-  const end = Math.max(
-    start,
-    Math.min(centerMs + MONITOR_HALF_WINDOW_MS, upper),
-  );
-  return { start, end };
+/** @see bounds.computeMonitorWindow */
+function computeMonitorWindow(centerMs: number): MonitorWindow {
+  return bounds.computeMonitorWindow({
+    centerMs,
+    durationMs: currentState.durationMs,
+  });
 }
 
 export async function seekTo(positionMs: number): Promise<void> {
   if (!player) return;
-  const bounds = regionBounds();
-  const target = bounds
-    ? Math.max(bounds.a, Math.min(positionMs, bounds.b))
+  // Named `region` rather than `bounds`: that name now belongs to the
+  // arithmetic module imported at the top of the file.
+  const region = regionBounds();
+  const target = region
+    ? Math.max(region.a, Math.min(positionMs, region.b))
     : positionMs;
   await seekInternal(target);
 }
 
 /**
- * The range a skip may move within: the active A/B region when one is set,
- * otherwise the whole track. Shared by every skip path so the in-app buttons
- * and the lock screen confine the playhead identically.
- */
-function skipBounds(): { lo: number; hi: number } {
-  const bounds = regionBounds();
-  return bounds
-    ? { lo: bounds.a, hi: bounds.b }
-    : { lo: 0, hi: currentState.durationMs };
-}
-
-/**
  * Where a skip in `direction` from `fromMs` should land under the current
- * preference: the region edge in `full` mode, otherwise the configured
- * interval away. Always clamped to `skipBounds()`.
+ * preference. The preference is read here — best-effort, falling back to the
+ * default — and handed to the arithmetic, so the rule itself does not depend
+ * on storage.
  */
 function skipTargetMs(direction: 1 | -1, fromMs: number): number {
-  const { lo, hi } = skipBounds();
-  const preference = readSkipPreference();
-  const raw =
-    preference.mode === 'full'
-      ? direction < 0
-        ? lo
-        : hi
-      : fromMs + direction * preference.seconds * 1000;
-  return Math.max(lo, Math.min(raw, hi));
+  return bounds.skipTargetMs({
+    direction,
+    fromMs,
+    preference: readSkipPreference(),
+    markerA,
+    markerB,
+    durationMs: currentState.durationMs,
+  });
 }
 
 async function applySkip(direction: 1 | -1): Promise<void> {
@@ -1117,7 +1067,7 @@ async function unloadTrackImpl(): Promise<void> {
   // Persist any change still inside the debounce window for the outgoing track
   // before its id and markers are cleared, so a quick navigate-away doesn't
   // drop the last edit. Must run before currentTrackId is nulled below.
-  flushMarkerSave();
+  markerPersistence.flush();
   currentTrackId = null;
   // The next track starts with no movement history, so the first status update
   // it reports can't be read as a jump from the outgoing track's playhead.
@@ -1257,73 +1207,6 @@ export async function loadPersistedVolume(): Promise<void> {
   notify(currentState);
 }
 
-/**
- * Write the current marker set for the loaded track to the store. Best-effort
- * and platform-agnostic: the native store is synchronous and the web store
- * returns a promise, so the call goes through `settle` and its rejection is
- * swallowed — a failed persist must never surface as a playback error. No-op
- * when no track id is associated with the load.
- */
-function writeActiveMarkers(): void {
-  const trackId = currentTrackId;
-  if (trackId == null) return;
-  const snapshot: ActiveMarkers = { markerA, markerB, loopEnabled };
-  void settle(() => markerStore.setActiveMarkers(trackId, snapshot)).catch(
-    () => {
-      // Persistence is best-effort; swallow write failures on both platforms.
-    },
-  );
-}
-
-/**
- * Queue a debounced persist of the active markers. Each marker change resets
- * the timer, so a burst of changes (e.g. a drag) collapses into a single write
- * carrying the final value. No-op when the track has no id.
- */
-function scheduleMarkerSave(): void {
-  if (currentTrackId == null) return;
-  if (markerSaveTimer) clearTimeout(markerSaveTimer);
-  markerSaveTimer = setTimeout(() => {
-    markerSaveTimer = null;
-    writeActiveMarkers();
-  }, MARKER_SAVE_DEBOUNCE_MS);
-}
-
-/**
- * Flush any queued marker save immediately. Called before the loaded track is
- * torn down so a change made within the debounce window is persisted for the
- * outgoing track rather than lost (or clobbered by the unload reset).
- */
-function flushMarkerSave(): void {
-  if (markerSaveTimer) {
-    clearTimeout(markerSaveTimer);
-    markerSaveTimer = null;
-    writeActiveMarkers();
-  }
-}
-
-/**
- * Restore the persisted markers for the loaded track, overriding the
- * post-load defaults (empty markers, loop armed). Silent: it mutates the
- * engine's marker state directly — not via the public setters — so it neither
- * re-triggers a save nor surfaces UI churn beyond the single state notify.
- * A track with no saved row is left empty (current behaviour). Best-effort:
- * a read failure leaves the defaults in place.
- */
-async function restoreActiveMarkers(trackId: string): Promise<void> {
-  try {
-    const saved = await settle(() => markerStore.getActiveMarkers(trackId));
-    if (!saved) return;
-    markerA = saved.markerA;
-    markerB = saved.markerB;
-    loopEnabled = saved.loopEnabled;
-    currentState = { ...currentState, markerA, markerB, loopEnabled };
-    notify(currentState);
-  } catch {
-    // Best-effort: a failed restore leaves the track with empty markers.
-  }
-}
-
 export function setMarkerA(positionMs: number): void {
   markerA = positionMs;
   if (markerB != null && positionMs >= markerB) {
@@ -1331,7 +1214,7 @@ export function setMarkerA(positionMs: number): void {
   }
   currentState = { ...currentState, markerA, markerB };
   notify(currentState);
-  scheduleMarkerSave();
+  markerPersistence.schedule();
 }
 
 /**
@@ -1345,7 +1228,7 @@ export function setMarkerB(positionMs: number): boolean {
   markerB = positionMs;
   currentState = { ...currentState, markerB };
   notify(currentState);
-  scheduleMarkerSave();
+  markerPersistence.schedule();
   return true;
 }
 
@@ -1354,7 +1237,7 @@ export function clearMarkers(): void {
   markerB = null;
   currentState = { ...currentState, markerA: null, markerB: null };
   notify(currentState);
-  scheduleMarkerSave();
+  markerPersistence.schedule();
 }
 
 /** Clear only the B (loop end) marker, leaving A in place so it can be
@@ -1363,7 +1246,7 @@ export function clearMarkerB(): void {
   markerB = null;
   currentState = { ...currentState, markerB: null };
   notify(currentState);
-  scheduleMarkerSave();
+  markerPersistence.schedule();
 }
 
 /**
@@ -1433,7 +1316,7 @@ export function setLoopEnabled(enabled: boolean): void {
   loopEnabled = enabled;
   currentState = { ...currentState, loopEnabled };
   notify(currentState);
-  scheduleMarkerSave();
+  markerPersistence.schedule();
 }
 
 export function subscribe(cb: PlaybackListener): () => void {
