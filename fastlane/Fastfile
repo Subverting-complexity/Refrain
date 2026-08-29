@@ -171,9 +171,11 @@ platform :android do
       track: "production",
     )
 
-    # Checked before anything is uploaded rather than after. Half a listing on
-    # the store and an error at the end is a worse place to stop than not
-    # starting, and this is the one precondition the lane can see up front.
+    # Checked before anything is uploaded rather than after. Nothing is lost
+    # either way -- supply does the whole push inside one Play edit and only
+    # commits it on the last line, so a failure anywhere rolls the lot back --
+    # but stopping here costs seconds instead of the minutes the screenshots
+    # take, and it can say what to do about it.
     if version_codes.empty?
       UI.error("The Play listing cannot be pushed yet: the production track has no release.")
       UI.error("")
