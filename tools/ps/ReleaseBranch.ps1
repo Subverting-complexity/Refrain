@@ -242,15 +242,22 @@ function Test-ListingPrerequisites {
         [Parameter(Mandatory = $true)][string]$AppDir,
         [Parameter(Mandatory = $true)][string]$Platforms,
         [ValidateSet('store', 'fast')][string]$Lane = 'store',
-        [ValidateSet('auto', 'on', 'off')][string]$Selector = 'auto'
+        [ValidateSet('auto', 'on', 'off')][string]$Selector = 'auto',
+        [switch]$ListingOnly
     )
 
-    $code = Invoke-ReleaseTool -AppDir $AppDir -ToolArgs @(
+    $toolArgs = @(
         'listing-preflight',
         '--platforms', $Platforms,
         '--lane', $Lane,
         '--listing', $Selector
     )
+    # Changes no check. It only stops a failed -ListingOnly run advising the
+    # operator to skip the listing and ship the binary, which is a run that has
+    # no binary to ship.
+    if ($ListingOnly) { $toolArgs += '--listing-only' }
+
+    $code = Invoke-ReleaseTool -AppDir $AppDir -ToolArgs $toolArgs
     return ($code -eq 0)
 }
 

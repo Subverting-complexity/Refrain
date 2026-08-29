@@ -262,6 +262,32 @@ describe('the listing commands', () => {
       parseArgs(['listing-preflight', '--platforms', 'both']).platforms,
     ).toEqual(['ios', 'android']);
   });
+
+  it('reads --listing-only, which decides what a failed preflight advises', () => {
+    expect(
+      parseArgs([
+        'listing-preflight',
+        '--platforms',
+        'android',
+        '--listing-only',
+      ]),
+    ).toMatchObject({ platforms: ['android'], listingOnly: true });
+  });
+
+  it('leaves listingOnly off when it is not asked for', () => {
+    // The advice it selects is "ship the binary without the listing", which is
+    // right for a release and impossible for a run that builds nothing. A
+    // default that guessed wrong would print unusable advice on a failure.
+    expect(
+      parseArgs(['listing-preflight', '--platforms', 'ios']).listingOnly,
+    ).toBe(false);
+  });
+
+  it('refuses --listing-only on a check, which has no advice to change', () => {
+    expect(() =>
+      parseArgs(['listing-check', '--platform', 'ios', '--listing-only']),
+    ).toThrow(/Unknown option/);
+  });
 });
 
 describe('option values', () => {

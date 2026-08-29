@@ -65,6 +65,17 @@
     store's listing: the listing follows the submit, so with no submit there is
     nothing for it to follow.
 
+.PARAMETER ListingOnly
+    Push the store listing and nothing else: no build, no submit, no version
+    bump, no release branch. For a listing fix that does not need a new binary,
+    where a full release would burn a version and a build to deliver corrected
+    copy. Store lane and production profile only.
+
+.PARAMETER NoPause
+    Skip the keypress this script waits for before closing. For a caller that
+    does its own pausing, which is what DeployMenu.ps1 does when it runs this
+    script and then returns to its menu.
+
 .PARAMETER NonInteractive
     Run without prompts (for CI). Fails if credentials are not already cached.
 
@@ -85,6 +96,7 @@
     .\tools\Deploy.cmd -Platform android -Listing on
     .\tools\Deploy.cmd -Profile development -Platform ios
     .\tools\Deploy.cmd -Patch
+    .\tools\Deploy.cmd -ListingOnly -Platform android
 #>
 param(
     [ValidateSet('both', 'ios', 'android')]
@@ -98,6 +110,8 @@ param(
     [switch]$Patch,
     [switch]$Major,
     [switch]$NoSubmit,
+    [switch]$ListingOnly,
+    [switch]$NoPause,
     [switch]$NonInteractive,
     [switch]$SkipChecks,
     [switch]$SkipClean,
@@ -114,6 +128,10 @@ function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -Foreground
 function Test-Command { param([string]$cmd) $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Wait-AndExit {
     param([int]$Code = 1)
+    # DeployMenu.ps1 runs this script as a child process and pauses itself
+    # before redrawing its menu, so pausing here too would be a keypress the
+    # operator has to make twice to get back to a menu they are already at.
+    if ($NoPause) { exit $Code }
     Write-Host ""
     Write-Host "Press any key to close this window..." -ForegroundColor DarkGray
     try {
@@ -298,6 +316,36 @@ if ($Patch -and $Major) {
 }
 $BumpLevel = if ($Major) { 'major' } elseif ($Patch) { 'patch' } else { 'minor' }
 
+# -ListingOnly is the store listing on its own: the copy, screenshots and
+# privacy declarations, with no binary anywhere near it. It earns a mode of its
+# own because a listing fix is frequently the only thing that needs to reach the
+# store, and the alternative is a full release that burns a version and a cloud
+# build to deliver a corrected sentence.
+#
+# The flags it refuses are the ones that would leave it doing nothing at all.
+# Each of these would be silently accepted otherwise, and a mode that can be
+# asked to do nothing is one that gets run twice before anybody notices.
+if ($ListingOnly) {
+    $conflicts = @()
+    if ($Lane -ne 'store')         { $conflicts += "-Lane $Lane, which never touches the public listing" }
+    if ($Profile -ne 'production') { $conflicts += "-Profile $Profile, which has no public listing to push" }
+    if ($Listing -eq 'off')        { $conflicts += "-Listing off, which switches off the only thing this mode does" }
+    if ($NoSubmit)                 { $conflicts += "-NoSubmit, which holds back a build this mode does not run" }
+    if ($Patch -or $Major)         { $conflicts += "-Patch/-Major, which bump a version this mode does not touch" }
+    if ($conflicts.Count -gt 0) {
+        Write-Err "-ListingOnly cannot be combined with:"
+        foreach ($conflict in $conflicts) { Write-Err "  $conflict" }
+        exit 1
+    }
+
+    # 'auto' asks whether the listing changed since the last successful store
+    # release. Asked of a run whose whole purpose is to push the listing, the
+    # answer is sometimes still "no", and the operator is left looking at a
+    # summary that says nothing happened. An explicitly typed -Listing auto is
+    # left alone: somebody who asked that question wanted it asked.
+    if (-not $PSBoundParameters.ContainsKey('Listing')) { $Listing = 'on' }
+}
+
 # A development or preview build is not something anyone ships, so it earns
 # neither a version bump nor a branch/tag record -- recording either would fill
 # both with attempts nobody will ever look up. It never submits either.
@@ -324,7 +372,12 @@ $SubmitProfile = if ($Lane -eq 'store') { 'production' } else { 'internal' }
 # increments the native build number remotely on every production build
 # regardless, so consecutive test builds are already distinguishable without
 # burning a marketing version on builds nobody outside the team sees.
-$ShouldBump = $IsRelease -and ($Lane -eq 'store')
+# The -not $ListingOnly on both of these is belt to the listing-only block's
+# braces: that block returns long before either flag is read, so neither
+# changes what runs today. They are the flags anyone reads to answer "does this
+# run bump a version, does it push a listing after a build", and leaving them
+# saying yes for a mode that does neither is how the next edit gets it wrong.
+$ShouldBump = $IsRelease -and ($Lane -eq 'store') -and (-not $ListingOnly)
 
 # Whether this run pushes the public store listing at all. Resolved once here
 # rather than restated at each call site, so the prerequisite check and the push
@@ -336,20 +389,28 @@ $ShouldBump = $IsRelease -and ($Lane -eq 'store')
 # build that never left this machine. On iOS it would go further than that: the
 # listing lane opens the App Store version record for the new version, so the
 # store would be carrying a version with no binary behind it.
-$ShouldPushListing = $IsRelease -and ($Lane -eq 'store') -and ($Listing -ne 'off') -and (-not $NoSubmit)
+$ShouldPushListing = $IsRelease -and ($Lane -eq 'store') -and ($Listing -ne 'off') -and (-not $NoSubmit) -and (-not $ListingOnly)
 
 # -- Banner -------------------------------------------------------------------
 Write-Host ""
-Write-Host "  Refrain - Build & Deploy" -ForegroundColor White
-Write-Host "  ========================" -ForegroundColor DarkGray
-Write-Host "  Platforms : $($Targets -join ' then ')" -ForegroundColor Gray
-Write-Host "  Profile   : $Profile" -ForegroundColor Gray
-if ($IsRelease) {
-    Write-Host "  Lane      : $Lane ($(if ($Lane -eq 'store') { 'public store release' } else { 'internal testers' }))" -ForegroundColor Gray
+if ($ListingOnly) {
+    Write-Host "  Refrain - Store listing" -ForegroundColor White
+    Write-Host "  =======================" -ForegroundColor DarkGray
+    Write-Host "  Stores    : $($Targets -join ' then ')" -ForegroundColor Gray
     Write-Host "  Listing   : $Listing" -ForegroundColor Gray
+    Write-Host "  No build, no submit, no version bump: store copy only." -ForegroundColor DarkGray
 } else {
-    Write-Host "  Lane      : none - a $Profile build is not a release" -ForegroundColor Gray
-    Write-Host "  No version bump, no release branch, no submit, no listing push." -ForegroundColor DarkGray
+    Write-Host "  Refrain - Build & Deploy" -ForegroundColor White
+    Write-Host "  ========================" -ForegroundColor DarkGray
+    Write-Host "  Platforms : $($Targets -join ' then ')" -ForegroundColor Gray
+    Write-Host "  Profile   : $Profile" -ForegroundColor Gray
+    if ($IsRelease) {
+        Write-Host "  Lane      : $Lane ($(if ($Lane -eq 'store') { 'public store release' } else { 'internal testers' }))" -ForegroundColor Gray
+        Write-Host "  Listing   : $Listing" -ForegroundColor Gray
+    } else {
+        Write-Host "  Lane      : none - a $Profile build is not a release" -ForegroundColor Gray
+        Write-Host "  No version bump, no release branch, no submit, no listing push." -ForegroundColor DarkGray
+    }
 }
 
 # -- Locate project -----------------------------------------------------------
@@ -383,6 +444,46 @@ if ($env:EXPO_TOKEN -eq $easTokenPlaceholder) {
 } elseif (-not [string]::IsNullOrEmpty($env:EXPO_TOKEN)) {
     $maskLen = [Math]::Min(6, $env:EXPO_TOKEN.Length)
     Write-Ok "EXPO_TOKEN loaded from .env ($($env:EXPO_TOKEN.Substring(0, $maskLen))...) - building as that token's account."
+}
+
+# -- Listing-only run ---------------------------------------------------------
+# Placed ahead of every EAS concern on purpose: a listing push talks to fastlane
+# and the stores directly, so it needs neither the EAS CLI, nor a login, nor
+# eas.json, and gating it on any of those would fail a run for a reason that has
+# nothing to do with what it does.
+#
+# It writes no release branch and no outcome tag, because it is not a release.
+# The visible consequence is that a later -Listing auto cannot see that this
+# push happened and may push the same content again. That is the harmless
+# direction: a repeat push is idempotent, and a skipped one is not.
+if ($ListingOnly) {
+    Write-Step "Checking the listing setup"
+    if (-not (Test-ListingPrerequisites -AppDir $AppDir -Platforms $Platform -Lane $Lane -Selector $Listing -ListingOnly)) {
+        Write-Err "Nothing was pushed. Fix the listing setup and run it again."
+        Pop-Location
+        Wait-AndExit 1
+    }
+
+    $listingResults = @()
+    $listingExitCode = 0
+    foreach ($target in $Targets) {
+        $outcome = Invoke-ListingPush -AppDir $AppDir -BuildPlatform $target -BuildLane $Lane -Selector $Listing
+        if ($outcome -like 'failed:*') { $listingExitCode = 1 }
+        $listingResults += [PSCustomObject]@{ Platform = $target; Listing = $outcome }
+    }
+
+    Write-Host ""
+    Write-Host "  Listing summary" -ForegroundColor White
+    Write-Host "  ---------------" -ForegroundColor DarkGray
+    foreach ($listingResult in $listingResults) {
+        $colour = if ($listingResult.Listing -like 'failed:*') { 'Red' } else { 'Green' }
+        Write-Host "  $($listingResult.Platform.PadRight(8)) $($listingResult.Listing)" -ForegroundColor $colour
+    }
+    Write-Host ""
+    Write-Host "  No build, no submit, and no version bump: this pushed store copy only." -ForegroundColor DarkGray
+
+    Pop-Location
+    Wait-AndExit $listingExitCode
 }
 
 # -- Verify eas.json exists ---------------------------------------------------

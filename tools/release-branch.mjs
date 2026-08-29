@@ -789,7 +789,11 @@ function listingPreflight(options) {
   fail('The store listing cannot be pushed with the current setup:');
   problems.forEach((problem) => detail(problem));
   say();
-  detail('See fastlane/PUBLISHING.md, or re-run with -Listing off to ship the binary only.');
+  detail(
+    options.listingOnly
+      ? 'See fastlane/PUBLISHING.md. Nothing else in this run depends on it, so nothing was done.'
+      : 'See fastlane/PUBLISHING.md, or re-run with -Listing off to ship the binary only.',
+  );
   return 1;
 }
 

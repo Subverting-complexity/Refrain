@@ -169,9 +169,20 @@ files have changed since the last store release that actually left the store
 carrying them. A release whose listing push failed, or that ran with
 `-Listing off`, is passed over as the comparison point in favour of the one
 before it, so a single failure does not leave the store page stuck on the old
-copy. `-Listing on` pushes regardless, `-Listing off` skips it. The commands
-above are the manual equivalent, for a listing-only change or for finishing a
-push that failed.
+copy. `-Listing on` pushes regardless, `-Listing off` skips it.
+
+For a listing change that needs no new binary, there is a third route that does
+not involve a build at all:
+
+```powershell
+.\tools\Deploy.cmd -ListingOnly -Platform android
+```
+
+That runs the same fastlane lane as the commands above, with the credential
+preflight and `.env` loading a release gets, but no build, no submit, no version
+bump and no release branch. The bare `bundle exec fastlane` commands above are
+still the right thing for finishing a push that failed partway, or for anything
+that needs a lane argument such as `submit:true`.
 
 Three things the release deliberately does not do:
 

@@ -25,12 +25,12 @@ or call it from a terminal to pass arguments (`tools\Deploy.cmd -Platform ios`).
 Every entry below has a clickable `tools\<name>.cmd` launcher and the underlying
 `tools\ps\<name>.ps1`.
 
-| Script                  | Purpose                                                                                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `QualityGate`           | Single entry point that runs every static check in sequence (health → assets → typecheck → lint → format → SDK dependency check → tests + coverage). Pass `-Install` for `npm ci` first, `-SkipTests` to skip Jest. |
-| `Deploy`                | The single store-release entry point. Cloud build and submit via EAS for `-Platform both` (default), `ios` or `android`, on the `store` or `fast` lane, plus the store listing push. No Mac needed. See below.      |
-| `BuildAndDeployAndroid` | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`.                                                                                                                |
-| `LaunchWeb`             | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                  |
+| Script          | Purpose                                                                                                                                                                                                                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QualityGate`   | Single entry point that runs every static check in sequence (health → assets → typecheck → lint → format → SDK dependency check → tests + coverage). Pass `-Install` for `npm ci` first, `-SkipTests` to skip Jest.                                                                           |
+| `Deploy`        | The single store-release entry point. Double-clicked it opens a menu; given arguments it runs that release directly. Cloud build and submit via EAS for `-Platform both` (default), `ios` or `android`, on the `store` or `fast` lane, plus the store listing push. No Mac needed. See below. |
+| `LaunchAndroid` | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`. Nothing to do with the stores.                                                                                                                                                           |
+| `LaunchWeb`     | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                                                                                            |
 
 ## `Deploy` — the one release entry point
 
@@ -47,6 +47,56 @@ listing push repeat per platform.
 | `-Profile`          | `production`, `development`, `preview`     | `production` |
 | `-Patch` / `-Major` | store lane only, the bump level            | minor        |
 | `-NoSubmit`         | build only: no store submit, no listing    | off          |
+| `-ListingOnly`      | push the listing and nothing else          | off          |
+
+### The menu
+
+`Deploy.cmd` with no arguments opens `ps/DeployMenu.ps1`, which asks what to run
+and for which store, prints the equivalent command, and asks for a `y` before
+running anything. It returns to the menu afterwards, so one session can ship
+Android, then iOS, then push a listing.
+
+A store release asks one more question, the version bump, and shows what each
+level would do to the current version rather than only naming the rule:
+
+```
+   1) Minor (default)
+      1.3.0 -> 1.4.0
+   2) Patch
+      1.3.0 -> 1.3.1
+   3) Major
+      1.3.0 -> 2.0.0
+```
+
+The menu exists because the defaults are wrong for a double-click. Typed, a bare
+`Deploy.cmd` meaning "public release of both stores" is a reasonable shorthand.
+Double-clicked, it is the most consequential thing in the repo happening because
+somebody opened a folder. Arguments still bypass the menu entirely, so scripts
+and CI are unaffected.
+
+Three things it offers:
+
+- **Store release** - the public release: version bump, build, submit, listing.
+  Asks for the bump level, defaulting to minor.
+- **Test build** - the `fast` lane: internal testers, no bump, no public listing.
+- **Store listing only** - `-ListingOnly`, below.
+
+### `-ListingOnly`
+
+Pushes the store listing (copy, screenshots, privacy declarations) through
+fastlane and does nothing else: no build, no submit, no version bump, no release
+branch. It is the mode for a listing that needs correcting when the binary does
+not, where a full release would spend a version and a cloud build on a corrected
+sentence.
+
+Store lane and production profile only. It refuses `-Lane fast`, `-Listing off`,
+`-NoSubmit`, `-Patch` and `-Major` rather than accepting them and doing nothing,
+and it defaults `-Listing` to `on`, because `auto` can decide that a run whose
+only job is the listing has no listing to push.
+
+It writes no outcome tag, so a later `-Listing auto` cannot see that it happened
+and may push the same content again. A repeat push is idempotent; a skipped one
+would not be, so that is the safe direction.
 
 With both platforms selected they build **sequentially, iOS first**, each as
 its own single-platform EAS invocation, and a failure stops the release. The
@@ -113,10 +163,16 @@ they expect to be invoked by `QualityGate.ps1`:
 .\tools\Deploy.cmd -Profile development -Platform ios
 
 # Daily loop on a physical Android device
-.\tools\BuildAndDeployAndroid.cmd
+.\tools\LaunchAndroid.cmd
 
-# Ship a public release to both stores
+# Pick a release from a menu
 .\tools\Deploy.cmd
+
+# Ship a public release to both stores without the menu
+.\tools\Deploy.cmd -Platform both -Lane store
+
+# Fix a store listing without building anything
+.\tools\Deploy.cmd -ListingOnly -Platform android
 
 # Get a build in front of internal testers without a public release
 .\tools\Deploy.cmd -Lane fast
@@ -179,7 +235,7 @@ Native-backed subsystems behave differently in a browser than on device:
 
 For anything audio-related — loop import, playback, A/B markers against a real
 clip — use `Deploy.cmd -Profile development -Platform ios` or
-`BuildAndDeployAndroid.cmd` on a real device.
+`LaunchAndroid.cmd` on a real device.
 
 ```powershell
 # Launch web preview on port 8081 (opens browser once Metro is ready)

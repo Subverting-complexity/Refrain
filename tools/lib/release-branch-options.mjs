@@ -84,7 +84,11 @@ export const COMMANDS = {
   'listing-preflight': {
     summary: 'Check the listing toolchain and credentials before the first build.',
     values: ['platforms', 'lane', 'listing'],
-    flags: [],
+    // --listing-only changes no check, only the advice printed when one fails.
+    // A run that is pushing the listing and nothing else has no binary, so
+    // telling its operator to ship the binary without the listing is advice
+    // they cannot take, offered at the one moment they are looking for advice.
+    flags: ['listingOnly'],
     required: ['platforms'],
   },
   help: { summary: 'Show this text.', values: [], flags: [], required: [] },
@@ -149,6 +153,7 @@ function readInteger(option, raw) {
  * @property {boolean} submitted
  * @property {boolean} noPrune
  * @property {boolean} dryRun
+ * @property {boolean} listingOnly
  */
 
 /**
@@ -206,6 +211,7 @@ export function parseArgs(argv) {
   options.submitted = flags.has('submitted');
   options.noPrune = flags.has('noPrune');
   options.dryRun = flags.has('dryRun');
+  options.listingOnly = flags.has('listingOnly');
 
   const platforms = values.get('platforms');
   if (platforms !== undefined) {
@@ -332,7 +338,14 @@ function assertValues(options) {
  * @returns {ReleaseOptions}
  */
 function blank(command) {
-  return { command, allowDirty: false, submitted: false, noPrune: false, dryRun: false };
+  return {
+    command,
+    allowDirty: false,
+    submitted: false,
+    noPrune: false,
+    dryRun: false,
+    listingOnly: false,
+  };
 }
 
 /** The text `help` prints, and what a usage error prints after itself. */
@@ -354,7 +367,7 @@ export function usage() {
     '  listing-check      --platform <ios|android> [--lane <store|fast>]',
     '                     [--listing <auto|on|off>] [--remote <name>]',
     '  listing-preflight  --platforms <both|ios|android> [--lane <store|fast>]',
-    '                     [--listing <auto|on|off>]',
+    '                     [--listing <auto|on|off>] [--listing-only]',
   ];
   return lines.join('\n');
 }

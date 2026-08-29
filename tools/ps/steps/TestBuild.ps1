@@ -7,7 +7,7 @@
     gate and is what `eas build` calls internally.
 
     Full native build integrity is exercised by
-    BuildAndDeployAndroid.ps1 / Deploy.ps1.
+    LaunchAndroid.ps1 / Deploy.ps1.
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
