@@ -105,15 +105,24 @@ platform :ios do
   end
 end
 
-# What supply is told to push, minus the one thing that can be absent.
+# Where the Play service-account JSON lives.
+#
+# Its own method because two callers need the same answer: the version-code
+# lookup and the upload that follows it, and a lookup pointed at a different
+# account than the upload would report a version code that is not there.
+def play_json_key
+  ENV["SUPPLY_JSON_KEY"] || "pc-api-key.json"
+end
+
+# What supply is told to push, minus the version code, which the lane looks up.
 #
 # A hash from a plain method rather than a second lane, matching
-# asc_key_options above: the lane needs to make this call twice with one option
-# different, and two copies of the same eight settings is how they drift.
+# asc_key_options above: keeping the settings in one place is how they stay
+# consistent with each other.
 def play_listing_options
   {
     package_name: APP_ID,
-    json_key: ENV["SUPPLY_JSON_KEY"] || "pc-api-key.json",
+    json_key: play_json_key,
     metadata_path: "fastlane/metadata/android",
     track: "production",
     skip_upload_aab: true,             # binary comes from EAS
@@ -136,38 +145,50 @@ platform :android do
   # asked to publish. So production is the only track this lane has any business
   # writing to.
   #
-  # The one failure worth explaining rather than just reporting.
+  # WHY THE VERSION CODE IS LOOKED UP, when this lane uploads no binary.
   #
-  # supply scopes its entire metadata upload to a release on the track, not
-  # just the changelogs. From its own uploader:
+  # supply hangs the whole listing off a release on the track rather than off
+  # the app, so it needs to know which release. It normally learns that from
+  # the binary it just uploaded, and this lane uploads none, so it has to be
+  # told. Two separate failures come out of not telling it:
   #
-  #   UI.user_error!("Could not find release for version code '...' to update
-  #                   changelog") unless release
+  #   Could not find release for version code '' to update changelog
+  #   Cannot find changelog because no version code given
   #
-  # That check runs whenever metadata, images or screenshots are being
-  # uploaded, and skip_upload_changelogs does not guard it. So on an app with
-  # no release anywhere, the entire listing push fails and there is no
-  # combination of options that gets round it. An earlier version of this lane
-  # retried without changelogs; it failed identically, because the changelogs
-  # were never the problem.
+  # The first is the metadata, images and screenshots; the second is the
+  # changelogs. skip_upload_changelogs guards neither of them, and an earlier
+  # version of this lane retried without changelogs on the strength of that
+  # guess. It failed identically.
   #
-  # The fix is ordering, not options, and it is not something a lane can do for
-  # you, so the lane says what to do instead of failing with fastlane's wording.
+  # So the lane reads the track first and passes the highest code it finds.
+  # That is always the release EAS most recently put there, which is the
+  # release this listing belongs to. Hardcoding it would go stale on the next
+  # build.
   lane :listing do
-    begin
-      upload_to_play_store(play_listing_options)
-    rescue StandardError => error
-      raise unless error.message.to_s.include?("Could not find release for version code")
+    version_codes = google_play_track_version_codes(
+      package_name: APP_ID,
+      json_key: play_json_key,
+      track: "production",
+    )
 
+    # Checked before anything is uploaded rather than after. Half a listing on
+    # the store and an error at the end is a worse place to stop than not
+    # starting, and this is the one precondition the lane can see up front.
+    if version_codes.empty?
       UI.error("The Play listing cannot be pushed yet: the production track has no release.")
       UI.error("")
-      UI.error("supply attaches the whole listing to a release, so a build has to land on the")
-      UI.error("track before any of it can go up. Skipping changelogs does not help.")
+      UI.error("supply attaches the listing to a release, so a build has to land on the track")
+      UI.error("before any of it can go up. Skipping changelogs does not help.")
       UI.error("")
       UI.error("On an app that has never been published, Google accepts only draft releases,")
       UI.error("so the first build goes up with the 'production-draft' submit profile in")
       UI.error("eas.json. Once it is on the track, run this lane again.")
-      raise
+      UI.user_error!("No release on the production track.")
     end
+
+    version_code = version_codes.max
+    UI.message("Attaching the listing to version code #{version_code} on the production track.")
+
+    upload_to_play_store(play_listing_options.merge(version_code: version_code))
   end
 end

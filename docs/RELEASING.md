@@ -612,16 +612,30 @@ Fix: upload that first AAB by hand in Play Console. The API works normally
 afterwards. Do not work around it by widening the service account's
 permissions, and do not retry in a loop.
 
-### `fastlane android listing` fails on changelogs before the first release
+### `fastlane android listing` fails asking for a version code
 
-[../fastlane/Fastfile](../fastlane/Fastfile) sets `skip_upload_changelogs:
-false`. `supply` attaches changelogs to the releases on the target track, so on
-an app with no release on any track there is nothing to attach them to and the
-lane can error.
+Two different messages, one cause:
 
-Fix: set `skip_upload_changelogs: true` for that one run, push the listing,
-then set it back to `false` once a build has landed on the track. In the
-meantime `-Listing off` ships the binary without the listing.
+```
+Could not find release for version code '' to update changelog
+Cannot find changelog because no version code given - please specify :version_code
+```
+
+`supply` hangs the listing off a release on the track rather than off the app,
+so it has to know which release. It normally learns that from the binary it
+just uploaded, and this lane uploads none, so it has to be told. The first
+message is the metadata, images and screenshots stopping; the second is the
+changelogs stopping after those have already gone up.
+
+`skip_upload_changelogs: true` guards neither of them. It looks like it should,
+and it was tried, and the run failed in exactly the same place.
+
+The lane in [../fastlane/Fastfile](../fastlane/Fastfile) now reads the track
+first with `google_play_track_version_codes` and passes the highest code it
+finds, so neither message should appear again. If the track genuinely has no
+release, it says so and stops before uploading anything, and the fix is the
+ordering in "The first Android release" above: the binary goes up first, as a
+draft.
 
 ### iOS submission fails: "bundle version must be higher than …"
 
