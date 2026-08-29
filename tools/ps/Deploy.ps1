@@ -55,10 +55,15 @@
     no release branch, no submit and no listing push -- they are not releases.
 
 .PARAMETER Patch
-    Store lane only: bump the patch version instead of the default minor.
+    Store lane only: bump the patch version for this run.
 
 .PARAMETER Major
-    Store lane only: bump the major version instead of the default minor.
+    Store lane only: bump the major version for this run.
+
+    Neither flag is needed for the usual case. The level defaults to minor, and
+    REFRAIN_BUMP_LEVEL in .env changes that default for this machine (major,
+    minor or patch). These two flags override the setting for one run, which is
+    what a one-off patch release wants.
 
 .PARAMETER NoSubmit
     Build only. Do not hand the binary to either store, and do not push either
@@ -235,7 +240,8 @@ function Invoke-ListingPush {
         [Parameter(Mandatory = $true)][string]$AppDir,
         [Parameter(Mandatory = $true)][ValidateSet('ios', 'android')][string]$BuildPlatform,
         [Parameter(Mandatory = $true)][ValidateSet('store', 'fast')][string]$BuildLane,
-        [Parameter(Mandatory = $true)][ValidateSet('auto', 'on', 'off')][string]$Selector
+        [Parameter(Mandatory = $true)][ValidateSet('auto', 'on', 'off')][string]$Selector,
+        [switch]$ListingOnly
     )
 
     if (-not (Test-ListingNeeded -AppDir $AppDir -Platform $BuildPlatform -Lane $BuildLane -Selector $Selector)) {
@@ -262,10 +268,23 @@ function Invoke-ListingPush {
         return 'pushed'
     }
 
+    Write-Host ""
+    if ($ListingOnly) {
+        # A listing-only run shipped nothing, so the release banner below would
+        # be a plain lie about the most consequential thing it could say. This
+        # failure is also the whole run rather than a loose end after one, so it
+        # needs no shouting: the exit code and the summary already carry it.
+        Write-Err "The $BuildPlatform store listing was not pushed."
+        Write-Err "  Nothing else ran, so nothing is half-done. Fix the cause and run it again."
+        Write-Err "  The equivalent by hand is:"
+        Write-Err "    cd fastlane; bundle exec fastlane $BuildPlatform listing"
+        Write-Host ""
+        return "failed: fastlane exited $code"
+    }
+
     # Deliberately loud. The build succeeded and went to the store, so nothing
     # else on screen says anything is wrong, and a quiet warning here is one
     # that gets read as part of a successful release.
-    Write-Host ""
     Write-Err "============================================================"
     Write-Err " The $BuildPlatform BINARY SHIPPED. Its STORE LISTING did not."
     Write-Err "============================================================"
@@ -342,7 +361,6 @@ if ($Patch -and $Major) {
     Write-Err "-Patch and -Major are mutually exclusive."
     exit 1
 }
-$BumpLevel = if ($Major) { 'major' } elseif ($Patch) { 'patch' } else { 'minor' }
 
 # -ListingOnly is the store listing on its own: the copy, screenshots and
 # privacy declarations, with no binary anywhere near it. It earns a mode of its
@@ -474,6 +492,43 @@ if ($env:EXPO_TOKEN -eq $easTokenPlaceholder) {
     Write-Ok "EXPO_TOKEN loaded from .env ($($env:EXPO_TOKEN.Substring(0, $maskLen))...) - building as that token's account."
 }
 
+# -- How far this release moves the version -----------------------------------
+# Resolved here rather than with the other arguments because REFRAIN_BUMP_LEVEL
+# is read from .env, which is loaded above. It is a setting for a machine, not a
+# decision for a release, which is why it is not a question the deploy menu
+# asks: the answer is the same almost every time.
+#
+# -Patch and -Major still win, so the occasional patch release stays one flag
+# rather than a settings change and a settings change back.
+#
+# A value this does not recognise stops the run. Falling back to minor would be
+# the same silence the -Listing selector refuses elsewhere: a typo that quietly
+# ships a different version than the one the setting says it will.
+# Only worked out for a run that will use it. A listing push or a fast-lane
+# build bumps nothing, and stopping one of those over a typo in a setting it
+# never reads would be a gate on the wrong thing.
+$BumpLevel = 'minor'
+if ($ShouldBump) {
+    if ($Patch) {
+        $BumpLevel = 'patch'
+    } elseif ($Major) {
+        $BumpLevel = 'major'
+    } else {
+        $configuredBump = "$($env:REFRAIN_BUMP_LEVEL)".Trim().ToLowerInvariant()
+        if ($configuredBump -eq '') {
+            $BumpLevel = 'minor'
+        } elseif (@('major', 'minor', 'patch') -contains $configuredBump) {
+            $BumpLevel = $configuredBump
+        } else {
+            Write-Err "REFRAIN_BUMP_LEVEL in .env is '$configuredBump'. Expected major, minor or patch."
+            Write-Err "  Leave it blank for the default, which is minor."
+            Pop-Location
+            Wait-AndExit 1
+        }
+    }
+    Write-Ok "Version bump: $BumpLevel"
+}
+
 # -- Listing-only run ---------------------------------------------------------
 # Placed ahead of every EAS concern on purpose: a listing push talks to fastlane
 # and the stores directly, so it needs neither the EAS CLI, nor a login, nor
@@ -495,7 +550,7 @@ if ($ListingOnly) {
     $listingResults = @()
     $listingExitCode = 0
     foreach ($target in $Targets) {
-        $outcome = Invoke-ListingPush -AppDir $AppDir -BuildPlatform $target -BuildLane $Lane -Selector $Listing
+        $outcome = Invoke-ListingPush -AppDir $AppDir -BuildPlatform $target -BuildLane $Lane -Selector $Listing -ListingOnly
         if ($outcome -like 'failed:*') { $listingExitCode = 1 }
         $listingResults += [PSCustomObject]@{ Platform = $target; Listing = $outcome }
     }

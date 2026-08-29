@@ -10,14 +10,14 @@ happened.
 .\tools\Deploy.cmd
 ```
 
-Run with no arguments it opens a menu: what to run, for which store, and for a
-store release how far to move the version, then the equivalent command and a `y`
-before anything happens. It comes back to the menu afterwards, so one session
-can ship Android, then iOS, then push a listing.
+Run with no arguments it opens a menu: what to run and for which store, then the
+equivalent command and a `y` before anything happens. It comes back to the menu
+afterwards, so one session can ship Android, then iOS, then push a listing.
 
-The bump question shows the result rather than the rule (`1.3.0 -> 1.4.0`) and
-defaults to minor, which is the same default a bare `Deploy.cmd -Lane store`
-carries.
+The menu runs the release with its own console rather than through a pipe, which
+is what keeps the colours, the EAS credential prompts and the build log working.
+A piped release loses all three, and the lost prompt is the worst of them: the
+run stops dead at a question nobody can see.
 
 Every argument below skips the menu and runs that release directly, which is
 what a script or a repeat run wants.
@@ -38,6 +38,20 @@ what a script or a repeat run wants.
 Note the second row. A bare `Deploy.cmd` used to mean a public release of both
 stores, and now means the menu. The full release is still one line, it just has
 to say so.
+
+## How far the version moves
+
+A store release bumps the minor version. `REFRAIN_BUMP_LEVEL` in `.env` changes
+that default for a machine, taking `major`, `minor` or `patch`, and the menu
+shows the value it will use in its header.
+
+`-Patch` and `-Major` override the setting for one run. That is the right tool
+for a one-off patch release, which would otherwise mean changing a setting and
+remembering to change it back.
+
+An unrecognised `REFRAIN_BUMP_LEVEL` stops the run. Falling back to minor would
+ship a different version from the one the setting claims, which is the kind of
+quiet disagreement this tooling refuses elsewhere.
 
 ## Pushing a listing on its own
 

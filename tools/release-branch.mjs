@@ -769,10 +769,22 @@ function listingPreflight(options) {
   }
 
   const bundler = capture('bundle', ['--version'], { quiet: true, timeoutMs: 30_000 });
+  // `bundle check` from fastlane/, because that is where the Gemfile lives and
+  // bundler resolves relative to the directory it runs in. Skipped when bundler
+  // itself is missing, where it could only fail for the reason already found.
+  const gems =
+    bundler.code === 0
+      ? capture('bundle', ['check'], {
+          quiet: true,
+          timeoutMs: 60_000,
+          cwd: join(repoRoot, 'fastlane'),
+        })
+      : { code: 1 };
   const { ok: passed, problems } = checkListingPrerequisites({
     platforms: options.platforms ?? [],
     env: process.env,
     hasBundler: bundler.code === 0,
+    hasFastlane: gems.code === 0,
     hasDefaultPlayKey: existsSync(join(repoRoot, 'pc-api-key.json')),
     // Resolved against the repository root rather than the current directory,
     // because that is where fastlane runs from and therefore how it will read a
