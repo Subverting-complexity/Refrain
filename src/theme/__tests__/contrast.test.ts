@@ -18,6 +18,7 @@
  */
 import { darkTheme, lightTheme, Theme, ThemeColors } from '..';
 import { pillColors } from '../../components/chipStyles';
+import { REGION_TINT_ALPHA } from '../../components/WaveformMarkers';
 import { contrastRatio, mix } from '../../utils/color';
 
 /** WCAG 2.1 AA for body text and icons that carry meaning. */
@@ -60,6 +61,22 @@ const TRACK_MIN = 1.45;
  * and the amplitude grading only has to read as grading.
  */
 const WAVEFORM_DULL_MIN = 1.6;
+/**
+ * How far a line drawn *over* the bars has to sit from the tier underneath it.
+ *
+ * The A and B marker lines and the playhead cursor each cross all four tiers,
+ * which between them span most of the usable luminance range, so no single
+ * line colour clears 3:1 against all of them. Each line is therefore drawn
+ * with a 1px edge in the card colour, and it is legible when either the line
+ * or its edge separates from the tier. That is what this floor measures.
+ *
+ * It sits below 3 because the binding case cannot reach it: over the dull
+ * tier the card-coloured edge is nearly invisible by design (1.70), so the
+ * marker's own colour has to carry it, and the deepest marker manages 2.81.
+ * Lifting that would mean pulling the dull tier away from the card, which is
+ * the separation #268 needed in the first place.
+ */
+const OVERLAY_MIN = 2.5;
 const WAVEFORM_LOOP_STEP_MIN = 2.5;
 const WAVEFORM_STEP_MIN = 1.5;
 
@@ -133,15 +150,18 @@ const WAVEFORM_TIERS: (keyof ThemeColors)[] = [
   'waveformPeak',
 ];
 
-/** Every token asserted above, plus the ones covered by a named test. */
+/**
+ * Every token that some assertion above actually measures.
+ *
+ * Built only from the pair lists and the tier ramp, with no hand-written
+ * additions. A literal escape hatch here would be the easiest way to satisfy
+ * the backstop at the end of this file without measuring anything, which is
+ * the one thing that backstop exists to prevent.
+ */
 const COVERED = new Set<keyof ThemeColors>([
   ...TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
   ...NON_TEXT_PAIRS.flatMap(([, fg, bg]) => [fg, bg]),
   ...WAVEFORM_TIERS,
-  'accent',
-  'track',
-  'surface',
-  'background',
 ]);
 
 describe.each([
@@ -200,18 +220,22 @@ describe.each([
     ).toBeGreaterThanOrEqual(WAVEFORM_DULL_MIN);
   });
 
-  it('separates the loop tier from the dull one', () => {
-    expect(
-      contrastRatio(colors.waveformLoop, colors.waveformDull),
-    ).toBeGreaterThanOrEqual(WAVEFORM_LOOP_STEP_MIN);
-  });
-
-  it.each([
-    ['played from loop', 'waveformPlayed' as const, 'waveformLoop' as const],
-    ['peak from played', 'waveformPeak' as const, 'waveformPlayed' as const],
-  ])('separates %s', (_label, above, below) => {
+  // Derived from WAVEFORM_TIERS rather than written out as literal pairs, so
+  // a tier added to that list is measured against its neighbour instead of
+  // merely counting as covered by the backstop at the end of this file.
+  it.each(
+    WAVEFORM_TIERS.slice(1).map((tier, i) => [
+      `${tier} from ${WAVEFORM_TIERS[i]}`,
+      tier,
+      WAVEFORM_TIERS[i],
+    ]),
+  )('separates %s', (_label, above, below) => {
+    // The dull-to-loop step is the one that signals the loop window, so it
+    // carries a higher floor than the two above it.
+    const floor =
+      below === 'waveformDull' ? WAVEFORM_LOOP_STEP_MIN : WAVEFORM_STEP_MIN;
     expect(contrastRatio(colors[above], colors[below])).toBeGreaterThanOrEqual(
-      WAVEFORM_STEP_MIN,
+      floor,
     );
   });
 
@@ -219,7 +243,9 @@ describe.each([
   // draws after the bars, so the loop tier is seen through that wash. The
   // two must not fight: the step that signals the loop has to survive it.
   it('keeps the loop step intact under the marker region tint', () => {
-    const tinted = mix(colors.waveformLoop, colors.markerA, 0.05);
+    // The alpha is imported rather than restated, so moving the tint in the
+    // component moves what this measures.
+    const tinted = mix(colors.waveformLoop, colors.markerA, REGION_TINT_ALPHA);
     expect(contrastRatio(tinted, colors.waveformDull)).toBeGreaterThanOrEqual(
       WAVEFORM_LOOP_STEP_MIN,
     );
@@ -230,6 +256,37 @@ describe.each([
       contrastRatio(colors[tier], colors.surface),
     );
     expect(ratios).toEqual([...ratios].sort((a, b) => a - b));
+  });
+
+  // #268 made the loop tier vivid, which is what let it signal the loop. The
+  // markers that *define* that region are drawn on top of it, so the same
+  // change can bury them: before the lines gained their edge, the A line
+  // measured 1.08 against the loop tier in light mode, and the region's own
+  // boundary became the least visible thing on the card.
+  it.each([
+    ['the A marker line', 'markerA' as const],
+    ['the B marker line', 'markerB' as const],
+    ['the playhead cursor', 'textPrimary' as const],
+  ])('keeps %s legible over every waveform tier', (_label, mark) => {
+    const worst = Math.min(
+      ...WAVEFORM_TIERS.map((tier) =>
+        Math.max(
+          contrastRatio(colors[mark], colors[tier]),
+          // The edge, which is the card colour.
+          contrastRatio(colors.surface, colors[tier]),
+        ),
+      ),
+    );
+    expect(worst).toBeGreaterThanOrEqual(OVERLAY_MIN);
+  });
+
+  // `mix` answers `#000000` for input it cannot parse, which is deliberate on
+  // the render path and dangerous on this one: a marker colour in any other
+  // form would silently measure a tier blended toward black instead, and the
+  // assertion above it would keep passing against something not on screen.
+  it('feeds the tint assertion a colour mix can actually parse', () => {
+    expect(colors.markerA).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(colors.waveformLoop).toMatch(/^#[0-9a-f]{6}$/i);
   });
 
   it('covers every colour token', () => {

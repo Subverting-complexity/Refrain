@@ -82,12 +82,11 @@ export function IconSquareButton({
               ? theme.colors.accent
               : theme.colors.surface,
           // Transparent rather than zero-width, so the icon sits in the same
-          // place whichever variant is in play.
-          borderColor: ghost
-            ? 'transparent'
-            : active
-              ? theme.colors.accent
-              : theme.colors.outline,
+          // place whichever variant is in play. `outline` when active as well
+          // as when idle: an active button is an `accent` fill, which in light
+          // mode is 2.30 against the page, so the fill cannot carry the
+          // button's own boundary and the ring has to.
+          borderColor: ghost ? 'transparent' : theme.colors.outline,
           opacity: disabled ? 0.4 : pressState.pressed ? 0.7 : 1,
         } as ViewStyle,
       ]}

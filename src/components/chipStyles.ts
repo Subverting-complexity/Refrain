@@ -38,7 +38,11 @@ export function pillColors(theme: Theme, selected: boolean) {
     : theme.colors.textPrimary;
   return {
     backgroundColor: selected ? theme.colors.accent : 'transparent',
-    borderColor: selected ? theme.colors.accent : theme.colors.outline,
+    // `outline` in both states. A selected pill is an `accent` fill, which in
+    // light mode is 2.30 against the page, so the fill cannot carry the
+    // control's own boundary; the ring does, exactly as it does on the toggle
+    // and on the selected option in `FolderPickerDialog`.
+    borderColor: theme.colors.outline,
     textColor: selected ? selectedText : theme.colors.textPrimary,
   };
 }

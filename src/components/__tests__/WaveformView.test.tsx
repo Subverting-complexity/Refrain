@@ -1,8 +1,9 @@
 import React from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { darkTheme } from '../../theme';
+import { MARKER_LINE_HALO } from '../WaveformMarkers';
 import { WaveformView } from '../WaveformView';
 
 jest.mock('../../hooks/useTheme');
@@ -174,6 +175,32 @@ describe('WaveformView', () => {
     expect(barFill(loud)).toBe(darkTheme.colors.waveformPeak);
   });
 
+  // Both ends of the range have to be pinned, not just the loud one. With only
+  // the top pinned, grading from the *dull* tier instead of the played one
+  // passes every other test here while collapsing a quiet played bar to 1.12
+  // against the bars around it, which is the bug #268 was filed for.
+  it('starts the played range at the played tier, not below it', () => {
+    const tree = renderWaveform({ positionMs: 10000, peaks: [0, 1] });
+    const [silent] = findBars(tree);
+
+    expect(barFill(silent)).toBe(darkTheme.colors.waveformPlayed);
+  });
+
+  // `Math.max` passes NaN through, so an unguarded height reaches the style as
+  // the string "NaN%". A 32-bit float WAV can carry a NaN sample, and
+  // `normalizePeaks` does not filter individual samples.
+  it('keeps a bar height numeric when its peak is not', () => {
+    const tree = renderWaveform({ positionMs: 0, peaks: [NaN, 0.5] });
+    const [bad] = findBars(tree);
+    const height = (
+      bad.props.style.find(
+        (entry: Record<string, unknown>) => entry?.height !== undefined,
+      ) as { height: string }
+    ).height;
+
+    expect(height).not.toContain('NaN');
+  });
+
   it('renders a cursor element', () => {
     const tree = renderWaveform({ positionMs: 2500 });
 
@@ -261,7 +288,7 @@ describe('WaveformView', () => {
     expect(onSeek).toHaveBeenCalledWith(10000);
   });
 
-  it('renders A/B marker lines in their marker colors', () => {
+  it('renders A/B marker lines in their marker colors, edged in the card colour', () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
     const markerLine = (color: string) =>
@@ -271,7 +298,8 @@ describe('WaveformView', () => {
           node.props.style &&
           Array.isArray(node.props.style) &&
           node.props.style.some(
-            (s: Record<string, unknown>) => s && s.width === 2,
+            (s: Record<string, unknown>) =>
+              s && s.width === 2 + MARKER_LINE_HALO * 2,
           ) &&
           node.props.style.some(
             (s: Record<string, unknown>) => s && s.backgroundColor === color,
@@ -280,6 +308,15 @@ describe('WaveformView', () => {
 
     expect(markerLine('#ffb02e')).toHaveLength(1);
     expect(markerLine('#ff5d77')).toHaveLength(1);
+
+    // The edge is what keeps the line visible where its own colour cannot,
+    // so its absence is a real regression rather than a styling detail.
+    for (const color of ['#ffb02e', '#ff5d77']) {
+      const flat = StyleSheet.flatten(markerLine(color)[0].props.style);
+      expect(flat.borderColor).toBe(darkTheme.colors.surface);
+      expect(flat.borderLeftWidth).toBe(MARKER_LINE_HALO);
+      expect(flat.borderRightWidth).toBe(MARKER_LINE_HALO);
+    }
   });
 
   it('renders labelled grab handles for the markers', () => {

@@ -63,12 +63,15 @@ describe('ChipGroup', () => {
     });
   });
 
-  it('fills the selected chip with the accent color', () => {
+  it('fills the selected chip with the accent and keeps the outline ring', () => {
     const tree = renderGroup({ value: 5 });
     const selected = findChip(tree, 'Length 5s');
     const flat = StyleSheet.flatten(selected.props.style({ pressed: false }));
     expect(flat.backgroundColor).toBe(darkTheme.colors.accent);
-    expect(flat.borderColor).toBe(darkTheme.colors.accent);
+    // The ring stays `outline` in both states. The accent fill is what says
+    // "on"; it cannot also be the control's boundary, because in light mode
+    // it is 2.30 against the page and SC 1.4.11 wants 3:1.
+    expect(flat.borderColor).toBe(darkTheme.colors.outline);
   });
 
   it('outlines unselected chips with the outline color', () => {

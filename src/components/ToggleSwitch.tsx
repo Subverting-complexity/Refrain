@@ -26,11 +26,15 @@ const TRACK_WIDTH = 52;
 const TRACK_HEIGHT = 32;
 const THUMB_SIZE = 26;
 /**
- * The ring that identifies the control. Neither fill reaches 3:1 against
- * what the switch sits on — the off track is deliberately close to its
- * surroundings so the knob stays legible on it, and light mode's accent is
- * a fill colour at 2.30 against the page — so without this ring there is no
- * state in which the switch's own boundary meets WCAG 2.1 SC 1.4.11.
+ * The ring that identifies the control.
+ *
+ * The off track fails SC 1.4.11 in both themes (1.79 and 1.48 in dark, 1.50
+ * and 1.77 in light) because it is deliberately close to its surroundings so
+ * the knob stays legible on it. The on track fails only in light, where
+ * `accent` is a fill colour at 2.30 against the page; dark mode's accent
+ * already clears the bar at 10.42. So the ring is what carries the boundary
+ * in three of the four state-and-theme combinations, and it is drawn in all
+ * four rather than appearing and disappearing with the value.
  */
 const TRACK_BORDER = 1;
 /**
@@ -38,10 +42,10 @@ const TRACK_BORDER = 1;
  * switch had before the ring, so the knob keeps the same 3px clearance from
  * the outer edge and the pill is unchanged to look at.
  */
-const THUMB_INSET = 2;
+export const THUMB_INSET = 2;
 // React Native sizes a box including its border, so the thumb travels the
 // content box rather than the full width.
-const THUMB_TRAVEL =
+export const THUMB_TRAVEL =
   TRACK_WIDTH - TRACK_BORDER * 2 - THUMB_SIZE - THUMB_INSET * 2;
 
 /**

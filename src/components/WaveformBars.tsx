@@ -28,6 +28,21 @@ export interface WaveformBarsProps {
  * fraction space and only picks each bar's tonal tier from them. Memoised
  * because the playhead moves every frame while the peaks never do.
  */
+/**
+ * A bar's height as a percentage of the band, floored so a silent passage
+ * still draws something to click on.
+ *
+ * `Math.max` passes NaN through, so a bad peak would otherwise reach the style
+ * as the string "NaN%". A peak can be NaN: `normalizePeaks` guards the maximum
+ * it divides by but not the individual samples, and a 32-bit float WAV can
+ * carry a NaN or an infinity straight through decoding. The colour of such a
+ * bar is guarded in `mix`; this is the same guard for its other dimension.
+ */
+function barHeightPct(peak: number): number {
+  if (!Number.isFinite(peak)) return 4;
+  return Math.max(4, peak * 100);
+}
+
 export const WaveformBars = React.memo(function WaveformBars({
   peaks,
   progress,
@@ -76,7 +91,7 @@ export const WaveformBars = React.memo(function WaveformBars({
             key={index}
             style={[
               styles.bar,
-              { height: `${Math.max(4, peak * 100)}%`, backgroundColor },
+              { height: `${barHeightPct(peak)}%`, backgroundColor },
             ]}
           />
         );

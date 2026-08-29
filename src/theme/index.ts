@@ -51,13 +51,17 @@ export interface ThemeColors {
    */
   outline: string;
   /**
-   * The filled bar behind a slider's position, the toggle's off state,
-   * hairline dividers, and the loading placeholders.
+   * The filled bar behind a slider's position, the toggle's off state, the
+   * hairline dividers, and the border of a grouping panel that is not itself
+   * a control (the snippet-preview card).
    *
    * Tuned from the other side to `outline`: what matters is that
    * `accentForeground` (the fill) and `textSecondary` (the toggle knob)
    * stay at or above 3:1 when drawn on it, so it cannot move far from the
-   * page without taking one of those below the line.
+   * page without taking one of those below the line. That is also why a
+   * panel border belongs here rather than on `outline`: nothing about a
+   * container has to be found by its edge, and giving it the heavier colour
+   * would make a box read as loudly as the controls inside it.
    */
   track: string;
   error: string;
@@ -145,8 +149,8 @@ const darkColors: ThemeColors = {
   // heavier edge would draw a box around every input for no further gain.
   outline: '#507e83',
   // Unchanged from the `border` it replaces, so every track, divider and
-  // placeholder looks exactly as it did. The slider fill sits on it at
-  // 5.81 and the toggle knob at 3.74.
+  // panel edge looks exactly as it did. The slider fill sits on it at 5.81
+  // and the toggle knob at 3.74.
   track: '#2a4a4e',
   error: '#f87171',
   errorText: '#1a1a1a',

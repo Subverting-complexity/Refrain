@@ -14,7 +14,7 @@ import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { WaveformBars } from './WaveformBars';
-import { WaveformMarkers } from './WaveformMarkers';
+import { MARKER_LINE_HALO, WaveformMarkers } from './WaveformMarkers';
 import {
   DEFAULT_WAVEFORM_HEIGHT,
   HANDLE_ZONE,
@@ -240,6 +240,7 @@ export function WaveformView({
                 {
                   left: `${progress * 100}%`,
                   backgroundColor: theme.colors.textPrimary,
+                  borderColor: theme.colors.surface,
                 },
               ]}
             />
@@ -275,8 +276,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: HANDLE_ZONE,
     bottom: HANDLE_ZONE,
-    width: 2,
-    marginLeft: -1,
+    // Same edge treatment as the marker lines, for the same reason: the
+    // playhead crosses all four bar tiers, and against the loudest bars its
+    // own colour measures 1.16. The card-coloured edge carries the boundary
+    // exactly where the cursor colour cannot. The 2px core is unchanged.
+    width: 2 + MARKER_LINE_HALO * 2,
+    marginLeft: -(1 + MARKER_LINE_HALO),
+    borderLeftWidth: MARKER_LINE_HALO,
+    borderRightWidth: MARKER_LINE_HALO,
     borderRadius: 1,
   },
 });
