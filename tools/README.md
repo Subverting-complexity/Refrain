@@ -46,6 +46,7 @@ listing push repeat per platform.
 | `-Listing`          | `auto`, `on`, `off`                        | `auto`       |
 | `-Profile`          | `production`, `development`, `preview`     | `production` |
 | `-Patch` / `-Major` | store lane only, the bump level            | minor        |
+| `-NoSubmit`         | build only: no store submit, no listing    | off          |
 
 With both platforms selected they build **sequentially, iOS first**, each as
 its own single-platform EAS invocation, and a failure stops the release. The
@@ -74,10 +75,10 @@ store release does around the build itself:
   platform finishes, and closes the release afterwards. Every attempt —
   including one that never finishes — leaves a record in git.
 - **Store listing** — the same tool decides whether a platform's listing
-  changed since its last successful store release, and checks fastlane's
-  toolchain and credentials **before the first build**, so a missing App Store
-  Connect key costs seconds rather than a paid-for build that shipped without
-  its listing.
+  changed since the last store release that actually left the store carrying
+  it, and checks fastlane's toolchain and credentials **before the first
+  build**, so a missing App Store Connect key costs seconds rather than a
+  paid-for build that shipped without its listing.
 
 All of it is Node (`tools/version-bump.mjs`, `tools/release-branch.mjs`, and
 the pure logic under `tools/lib/`) rather than PowerShell, so the rules can be

@@ -370,8 +370,9 @@ same run, after that platform's binary submit.
 `-Listing` chooses when:
 
 - **`auto`** (default) pushes a platform's listing only when that
-  platform's listing files changed since its last successful store-lane
-  release. If there has never been one, the listing counts as changed.
+  platform's listing files changed since the last store-lane release
+  that actually left the store carrying them. If there has never been
+  one, the listing counts as changed.
 - **`on`** pushes regardless.
 - **`off`** skips it.
 
@@ -387,9 +388,28 @@ internal track does not use the production listing, so pushing public
 listing copy from a tester build would publish changes nobody asked to
 publish.
 
+**`-NoSubmit` does not push it either.** The listing follows the binary
+submit, so a run that hands the binary to neither store has nothing for
+it to follow. Pushing anyway would publish the new copy, screenshots and
+privacy label for a build that never left the machine, and on iOS would
+go further still: the listing lane opens the App Store version record for
+the new version, so the store would carry a version with no binary behind
+it.
+
 **After the binary, not before.** On iOS the review submission is part of
 the listing tooling and needs a build attached to the version, so it
 cannot run first.
+
+**The comparison passes over a release whose listing never reached the
+store.** A listing push can fail after the binary has already shipped,
+and the platform's outcome tag stays a success, because the build did
+ship. Diffing against that commit would find no listing change since and
+skip the push, so the store page would sit on the old copy release after
+release with nothing on screen saying so. `auto` therefore only compares
+against a release whose tag records the listing as pushed, or as already
+matching what the store carried. One that failed, or that ran with
+`-Listing off` or `-NoSubmit`, is passed over in favour of the release
+before it.
 
 **A listing failure does not turn a shipped build into a failed
 release.** The binary has gone to the store and cannot be withdrawn, so
@@ -401,8 +421,11 @@ loudly, because nothing else on screen would suggest anything is wrong.
 needs Ruby with the fastlane bundle installed, plus credentials entirely
 separate from the EAS token. A missing App Store Connect key fails the
 release in seconds rather than after a build has been paid for and
-shipped. Run `cd fastlane && bundle install` once, and see
-`.env.example` for the credentials.
+shipped. That includes a credential path pointing at a file that is no
+longer there, which is how this goes wrong in practice: `ASC_KEY_PATH`
+and `SUPPLY_JSON_KEY` are checked for existence, not just for being set.
+Run `cd fastlane && bundle install` once, and see `.env.example` for the
+credentials.
 
 ### iOS review submission is a separate step
 

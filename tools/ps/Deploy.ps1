@@ -45,7 +45,8 @@
     declarations) after the binary: 'auto' (default) pushes a platform's
     listing only when that platform's listing files changed since its last
     successful store release, 'on' pushes regardless, 'off' skips it.
-    Store lane only; the fast lane never pushes the public listing.
+    Store lane only; the fast lane never pushes the public listing, and neither
+    does a -NoSubmit run.
 
 .PARAMETER Profile
     EAS build profile: 'production' (default, the only one that releases),
@@ -60,7 +61,9 @@
     Store lane only: bump the major version instead of the default minor.
 
 .PARAMETER NoSubmit
-    Build only. Do not hand the binary to either store.
+    Build only. Do not hand the binary to either store, and do not push either
+    store's listing: the listing follows the submit, so with no submit there is
+    nothing for it to follow.
 
 .PARAMETER NonInteractive
     Run without prompts (for CI). Fails if credentials are not already cached.
@@ -163,6 +166,14 @@ function Import-DotEnv {
     listing that would not push is not a failed release. It is, however, a
     thing somebody has to go and finish, which is why the failure path shouts
     rather than logging a warning among the build output.
+
+    Two of those sentences are load-bearing rather than decorative. 'pushed' and
+    'not pushed: unchanged ...' are what the next release's -Listing auto reads
+    back out of the tag to decide it has a commit worth diffing against; see
+    listingIsLive in tools/lib/release-listing.mjs, which matches on those two
+    prefixes. Reword either one here without changing it there and every later
+    auto decision quietly becomes a push. Anything unrecognised is read as "the
+    store did not catch up at that release", which is the harmless direction.
 
     fastlane is run from the fastlane/ directory because that is where its
     Gemfile lives; fastlane itself then resolves the project root as the parent,
@@ -315,6 +326,18 @@ $SubmitProfile = if ($Lane -eq 'store') { 'production' } else { 'internal' }
 # burning a marketing version on builds nobody outside the team sees.
 $ShouldBump = $IsRelease -and ($Lane -eq 'store')
 
+# Whether this run pushes the public store listing at all. Resolved once here
+# rather than restated at each call site, so the prerequisite check and the push
+# itself cannot disagree about whether a listing is happening.
+#
+# -NoSubmit is the part worth spelling out. The listing push runs after the
+# binary submit, so a run that submits nothing has nothing for it to follow, and
+# pushing anyway would publish the new copy, screenshots and privacy label for a
+# build that never left this machine. On iOS it would go further than that: the
+# listing lane opens the App Store version record for the new version, so the
+# store would be carrying a version with no binary behind it.
+$ShouldPushListing = $IsRelease -and ($Lane -eq 'store') -and ($Listing -ne 'off') -and (-not $NoSubmit)
+
 # -- Banner -------------------------------------------------------------------
 Write-Host ""
 Write-Host "  Refrain - Build & Deploy" -ForegroundColor White
@@ -458,7 +481,7 @@ function Assert-Prerequisites {
     # from the EAS token. Checked before the first build, so a missing App
     # Store Connect key fails the release in seconds rather than after a build
     # has already been paid for and shipped.
-    if ($IsRelease -and $Lane -eq 'store' -and $Listing -ne 'off') {
+    if ($ShouldPushListing) {
         if (-not (Test-ListingPrerequisites -AppDir $AppDir -Platforms $Platform -Lane $Lane -Selector $Listing)) {
             Write-Err "Fix the listing setup, or re-run with -Listing off to ship the binary only."
             Pop-Location
@@ -625,12 +648,14 @@ foreach ($target in $Targets) {
     # cannot run first. Only after a successful build, because a listing update
     # for a release that never shipped describes a version nobody can install.
     $listingResult = 'not attempted'
-    if ($IsRelease -and $succeeded -and $Lane -eq 'store' -and $Listing -ne 'off') {
+    if ($ShouldPushListing -and $succeeded) {
         $listingResult = Invoke-ListingPush -AppDir $AppDir -BuildPlatform $target -BuildLane $Lane -Selector $Listing
     } elseif ($IsRelease -and $Lane -ne 'store') {
         $listingResult = "not pushed: the $Lane lane does not touch the public listing"
     } elseif ($IsRelease -and $Listing -eq 'off') {
         $listingResult = 'not pushed: -Listing off'
+    } elseif ($IsRelease -and $NoSubmit) {
+        $listingResult = 'not pushed: -NoSubmit, so there was no submit for it to follow'
     }
 
     # -- Record this platform's outcome ---------------------------------------

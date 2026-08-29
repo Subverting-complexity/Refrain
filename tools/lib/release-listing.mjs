@@ -68,6 +68,23 @@ export const LISTING_CREDENTIALS = {
   android: [['SUPPLY_JSON_KEY']],
 };
 
+/**
+ * The credentials above that name a file rather than carrying a value.
+ *
+ * Checked for existence as well as for being set, because a variable pointing
+ * at a `.p8` that has since been moved is a missing key that reads as a present
+ * one. The whole point of a preflight is that a missing key costs seconds
+ * rather than a paid-for build, and only checking that the variable is
+ * non-blank gives that check away for exactly the spelling a Windows release
+ * uses.
+ *
+ * @type {Record<'ios' | 'android', string[]>}
+ */
+export const LISTING_CREDENTIAL_PATHS = {
+  ios: ['ASC_KEY_PATH'],
+  android: ['SUPPLY_JSON_KEY'],
+};
+
 /** What the operator can ask for on a run. */
 export const LISTING_SELECTORS = /** @type {const} */ (['auto', 'on', 'off']);
 
@@ -150,6 +167,45 @@ export function decideListingPush({ platform, selector, lane, previousCommit, ch
 }
 
 /**
+ * The listing results that mean the store page is showing the listing content
+ * from that release's commit.
+ *
+ * These are the exact sentences `Invoke-ListingPush` in `tools/ps/Deploy.ps1`
+ * returns, and they end up verbatim in the outcome tag's `Listing:` field. They
+ * are read back by `lastStoreRelease` in `tools/release-branch.mjs` to choose
+ * what `auto` diffs against, so rewording either of them there without changing
+ * this list would quietly turn every later `auto` decision into a push.
+ *
+ * `pushed` is fastlane having pushed it; `not pushed: unchanged` is the store
+ * already carrying it, which leaves it just as live.
+ */
+const LIVE_LISTING_PREFIXES = ['pushed', 'not pushed: unchanged'];
+
+/**
+ * Whether a release left the store listing showing its own commit's content.
+ *
+ * `auto` diffs the commit being released against the last successful store-lane
+ * release, and that comparison is only meaningful if the store actually caught
+ * up at that release. It often did not: the listing push can fail after the
+ * binary has already shipped (the outcome tag stays a success, deliberately),
+ * and `-Listing off` skips it outright. Treating either as the baseline would
+ * see no listing change since and skip the push, leaving the store page on the
+ * old copy release after release with nothing on screen saying so.
+ *
+ * Unrecognised text — including a tag written before listing pushes existed,
+ * which has no `Listing:` field at all — is read as "not live". That is the
+ * fail-safe direction: an unnecessary push is idempotent and harmless, and a
+ * skipped one is neither.
+ *
+ * @param {string | undefined} listing the tag message's `Listing` field
+ * @returns {boolean}
+ */
+export function listingIsLive(listing) {
+  const text = (listing ?? '').trim().toLowerCase();
+  return LIVE_LISTING_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+/**
  * What is missing before fastlane could push a listing.
  *
  * Checked once, before the first build, rather than at the point of use. A
@@ -164,9 +220,17 @@ export function decideListingPush({ platform, selector, lane, previousCommit, ch
  * @param {boolean} input.hasBundler whether `bundle` is on PATH
  * @param {boolean} input.hasDefaultPlayKey whether `pc-api-key.json` is present,
  *   which is what the Android lane falls back to when SUPPLY_JSON_KEY is unset
+ * @param {(path: string) => boolean} input.fileExists resolves a credential path
+ *   the same way fastlane will, which is relative to the repository root
  * @returns {{ ok: boolean, problems: string[] }}
  */
-export function checkListingPrerequisites({ platforms, env, hasBundler, hasDefaultPlayKey }) {
+export function checkListingPrerequisites({
+  platforms,
+  env,
+  hasBundler,
+  hasDefaultPlayKey,
+  fileExists,
+}) {
   /** @type {string[]} */
   const problems = [];
   const wanted = PLATFORMS.filter((platform) => platforms.includes(platform));
@@ -187,6 +251,14 @@ export function checkListingPrerequisites({ platforms, env, hasBundler, hasDefau
       if (spellings.includes('SUPPLY_JSON_KEY') && hasDefaultPlayKey) continue;
       const named = spellings.join(' or ');
       problems.push(`${named} is not set (needed for the ${platform} listing push).`);
+    }
+
+    for (const name of LISTING_CREDENTIAL_PATHS[platform]) {
+      const path = (env[name] ?? '').trim();
+      if (path === '' || fileExists(path)) continue;
+      problems.push(
+        `${name} points at '${path}', which does not exist (needed for the ${platform} listing push).`,
+      );
     }
   }
 
