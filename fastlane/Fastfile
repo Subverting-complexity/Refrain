@@ -15,7 +15,7 @@
 # shell still works; the Windows deploy script loads .env, so it uses the path.
 #
 # Usage:
-#   bundle exec fastlane ios listing                 # push metadata + screenshots + privacy label
+#   bundle exec fastlane ios listing                 # push metadata + screenshots
 #   bundle exec fastlane ios listing submit:true     # also submit the current build for review
 #   bundle exec fastlane android listing             # push Play listing metadata + screenshots
 #   bundle exec fastlane ios refresh_privacy_template # capture exact Apple privacy enums once
@@ -45,24 +45,21 @@ end
 
 # ---------------------------------------------------------------------------
 platform :ios do
-  desc "Upload App Store listing: metadata, screenshots, and privacy nutrition label"
+  desc "Upload App Store listing: metadata and screenshots"
+  #
+  # The privacy nutrition label is NOT pushed here, and that is not an
+  # oversight. upload_app_privacy_details_to_app_store does not support App
+  # Store Connect API keys: its first line is
+  #
+  #   Spaceship::ConnectAPI.login(params[:username], use_portal: false, use_tunes: true, ...)
+  #
+  # which is an Apple ID and password, and it has no token path at all. In this
+  # lane that meant the whole listing push died at its first action, waiting on
+  # a password prompt, before a single field of metadata was uploaded. Every
+  # other part of the listing authenticates with the key perfectly well, so the
+  # one action that cannot is the one that moved out. See the privacy lane.
   lane :listing do |options|
     api_key = app_store_connect_api_key(asc_key_options)
-
-    # Privacy "nutrition label". Refrain collects nothing -> DATA_NOT_COLLECTED.
-    #
-    # No api_key: here, deliberately. This action does not take one -- its
-    # options are username, app_identifier, team_id, team_name, json_path,
-    # output_json_path, skip_json_file_saving, skip_upload and skip_publish --
-    # and passing it aborts the lane before anything is uploaded. It does not
-    # need one either: app_store_connect_api_key above defaults to
-    # set_spaceship_token: true, which installs the token globally, and every
-    # later action authenticates with it whether or not it accepts a key of its
-    # own.
-    upload_app_privacy_details_to_app_store(
-      app_identifier: APP_ID,
-      json_path: "fastlane/privacy_details.json",
-    )
 
     deliver(
       api_key: api_key,
@@ -78,12 +75,29 @@ platform :ios do
     )
   end
 
+  desc "Push the privacy nutrition label. Needs an interactive Apple ID sign-in, not the API key"
+  #
+  # Split out of the listing lane because it cannot run the way the rest of the
+  # release runs. Both privacy actions sign in with an Apple ID and password
+  # and ignore the API key entirely, so this lane prompts, and in a
+  # non-interactive shell it does not prompt so much as fail.
+  #
+  # Run it by hand, from a terminal, when the label in App Store Connect needs
+  # to change. It is not part of any release and nothing calls it
+  # automatically. Refrain collects nothing, so the label is DATA_NOT_COLLECTED
+  # and changes about as often as that fact does.
+  lane :privacy do
+    upload_app_privacy_details_to_app_store(
+      app_identifier: APP_ID,
+      json_path: "fastlane/privacy_details.json",
+    )
+  end
+
   desc "One-time: fill the privacy questionnaire in App Store Connect, then run this to capture the exact enum JSON as a reusable template"
+  #
+  # Same Apple ID sign-in as the privacy lane above, for the same reason: the
+  # download action has no api_key parameter and no token path.
   lane :refresh_privacy_template do
-    # Called for its side effect rather than its return value: it installs the
-    # App Store Connect token globally, and the download action below has no
-    # api_key parameter to hand it to.
-    app_store_connect_api_key(asc_key_options)
     download_app_privacy_details_from_app_store(
       app_identifier: APP_ID,
       output_json_path: "fastlane/privacy_details.json",
@@ -96,7 +110,7 @@ end
 # A hash from a plain method rather than a second lane, matching
 # asc_key_options above: the lane needs to make this call twice with one option
 # different, and two copies of the same eight settings is how they drift.
-def play_listing_options(skip_changelogs)
+def play_listing_options
   {
     package_name: APP_ID,
     json_key: ENV["SUPPLY_JSON_KEY"] || "pc-api-key.json",
@@ -104,7 +118,7 @@ def play_listing_options(skip_changelogs)
     track: "production",
     skip_upload_aab: true,             # binary comes from EAS
     skip_upload_apk: true,
-    skip_upload_changelogs: skip_changelogs,
+    skip_upload_changelogs: false,
     validate_only: false,
   }
 end
@@ -122,30 +136,38 @@ platform :android do
   # asked to publish. So production is the only track this lane has any business
   # writing to.
   #
-  # The changelog retry. supply attaches changelogs to whatever release is on
-  # the track, so on an app with no release anywhere there is no version for
-  # them to describe and the upload dies with "Could not find release for
-  # version code ''". That failure takes the whole listing down with it --
-  # title, description, screenshots, feature graphic -- none of which needed a
-  # release to exist. So the one case is caught and retried without the
-  # changelogs, and the run says so rather than quietly dropping them.
+  # The one failure worth explaining rather than just reporting.
   #
-  # Matching on the message is brittle by nature. If fastlane rewords it, this
-  # lane fails exactly as it does today, which is the safe direction to break
-  # in: a listing that did not push is visible, and a changelog silently
-  # skipped forever is not.
-  lane :listing do |options|
-    skip_changelogs = options[:skip_changelogs] == true
-
+  # supply scopes its entire metadata upload to a release on the track, not
+  # just the changelogs. From its own uploader:
+  #
+  #   UI.user_error!("Could not find release for version code '...' to update
+  #                   changelog") unless release
+  #
+  # That check runs whenever metadata, images or screenshots are being
+  # uploaded, and skip_upload_changelogs does not guard it. So on an app with
+  # no release anywhere, the entire listing push fails and there is no
+  # combination of options that gets round it. An earlier version of this lane
+  # retried without changelogs; it failed identically, because the changelogs
+  # were never the problem.
+  #
+  # The fix is ordering, not options, and it is not something a lane can do for
+  # you, so the lane says what to do instead of failing with fastlane's wording.
+  lane :listing do
     begin
-      upload_to_play_store(play_listing_options(skip_changelogs))
+      upload_to_play_store(play_listing_options)
     rescue StandardError => error
-      raise if skip_changelogs
       raise unless error.message.to_s.include?("Could not find release for version code")
 
-      UI.important("The production track has no release yet, so there is no version a changelog could describe.")
-      UI.important("Pushing the rest of the listing without them. Run this again once a build has landed to add them.")
-      upload_to_play_store(play_listing_options(true))
+      UI.error("The Play listing cannot be pushed yet: the production track has no release.")
+      UI.error("")
+      UI.error("supply attaches the whole listing to a release, so a build has to land on the")
+      UI.error("track before any of it can go up. Skipping changelogs does not help.")
+      UI.error("")
+      UI.error("On an app that has never been published, Google accepts only draft releases,")
+      UI.error("so the first build goes up with the 'production-draft' submit profile in")
+      UI.error("eas.json. Once it is on the track, run this lane again.")
+      raise
     end
   end
 end

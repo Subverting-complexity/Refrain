@@ -53,6 +53,37 @@ An unrecognised `REFRAIN_BUMP_LEVEL` stops the run. Falling back to minor would
 ship a different version from the one the setting claims, which is the kind of
 quiet disagreement this tooling refuses elsewhere.
 
+## The first Android release
+
+Google will not accept a normal release on an app it has never published:
+
+```
+Only releases with status draft may be created on draft app.
+```
+
+And the listing cannot go up first, because supply attaches the whole listing to
+a release on the track, so with no release there is nothing to attach it to. The
+two block each other until the binary goes first, as a draft.
+
+`eas.json` carries a `production-draft` submit profile for exactly that. It is
+the production profile with `releaseStatus: draft` added, kept as a separate
+profile rather than a temporary edit to the real one, because a `draft` left
+behind in the production profile would silently stop every later release from
+going live.
+
+The order, once per app:
+
+1. Submit a build with the draft profile. An existing build needs no rebuild:
+   `eas submit --platform android --profile production-draft --id <build-id>`.
+2. Push the listing: `.	ools\Deploy.cmd -ListingOnly -Platform android`. It
+   works now that the track has a release.
+3. Finish Play Console: countries and regions, and turn on Managed publishing.
+4. Publish the app for the first time in Play Console. That is what takes it out
+   of draft-app state, and only a person can do it.
+
+After that the ordinary `production` profile applies and nothing here is needed
+again.
+
 ## Pushing a listing on its own
 
 `-ListingOnly` runs the fastlane listing lane for the selected stores and

@@ -45,6 +45,17 @@
         "track": "production"
       }
     },
+    "production-draft": {
+      "ios": {
+        "ascAppId": "6780801245",
+        "appleTeamId": "JTUZQBUGVY"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./pc-api-key.json",
+        "track": "production",
+        "releaseStatus": "draft"
+      }
+    },
     "internal": {
       "ios": {
         "ascAppId": "6780801245",

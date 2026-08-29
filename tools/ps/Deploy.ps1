@@ -403,7 +403,12 @@ if (-not $IsRelease) {
 }
 
 # iOS first: see the script header.
-$Targets = if ($Platform -eq 'both') { @('ios', 'android') } else { @($Platform) }
+#
+# Wrapped in @() a second time on purpose. A single-element array coming out of
+# an if is unwrapped to the scalar inside it, so a one-platform run left
+# $Targets holding a plain string, and $Targets.Count threw under strict mode --
+# on the failure path, which is where it was least welcome and last noticed.
+$Targets = @(if ($Platform -eq 'both') { 'ios', 'android' } else { $Platform })
 
 # The lane picks the submit configuration rather than being hardcoded. On
 # Android these are genuinely different destinations (the 'production' and
