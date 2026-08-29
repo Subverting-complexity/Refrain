@@ -12,7 +12,7 @@
 
     For anything audio-related (loop import, playback, A/B markers against a
     real clip), build to a device with Deploy.ps1 -Profile development
-    -Platform ios or BuildAndDeployAndroid.ps1.
+    -Platform ios or LaunchAndroid.ps1.
 
     The window pauses for a keypress on every exit path -- including
     errors and Ctrl+C -- so you can read the output before it closes.

@@ -10,19 +10,51 @@ happened.
 .\tools\Deploy.cmd
 ```
 
-That is a public release of both platforms. Everything below is either an
-option on that command or an explanation of what it does.
+Run with no arguments it opens a menu: what to run, for which store, and for a
+store release how far to move the version, then the equivalent command and a `y`
+before anything happens. It comes back to the menu afterwards, so one session
+can ship Android, then iOS, then push a listing.
+
+The bump question shows the result rather than the rule (`1.3.0 -> 1.4.0`) and
+defaults to minor, which is the same default a bare `Deploy.cmd -Lane store`
+carries.
+
+Every argument below skips the menu and runs that release directly, which is
+what a script or a repeat run wants.
 
 | What you want                        | Command                                                 |
 | ------------------------------------ | ------------------------------------------------------- |
-| Public release, both stores          | `.\tools\Deploy.cmd`                                    |
+| Choose from a menu                   | `.\tools\Deploy.cmd`                                    |
+| Public release, both stores          | `.\tools\Deploy.cmd -Platform both -Lane store`         |
 | Public release, one store            | `.\tools\Deploy.cmd -Platform ios`                      |
 | A build for internal testers         | `.\tools\Deploy.cmd -Lane fast`                         |
 | Retry the platform that just failed  | `.\tools\Deploy.cmd -Platform android`                  |
+| Push the listing and nothing else    | `.\tools\Deploy.cmd -ListingOnly -Platform android`     |
 | Push the listing even if unchanged   | `.\tools\Deploy.cmd -Listing on`                        |
 | Ship the binary and skip the listing | `.\tools\Deploy.cmd -Listing off`                       |
 | A patch or major version instead     | `.\tools\Deploy.cmd -Patch` / `-Major`                  |
 | A dev-client build for a device      | `.\tools\Deploy.cmd -Profile development -Platform ios` |
+
+Note the second row. A bare `Deploy.cmd` used to mean a public release of both
+stores, and now means the menu. The full release is still one line, it just has
+to say so.
+
+## Pushing a listing on its own
+
+`-ListingOnly` runs the fastlane listing lane for the selected stores and
+nothing else: no build, no submit, no version bump, no release branch. Use it
+for a listing that needs correcting when the binary does not, and for the first
+listing push on a store where the binary is already up.
+
+It refuses the flags that would leave it doing nothing (`-Lane fast`,
+`-Listing off`, `-NoSubmit`, `-Patch`, `-Major`) and defaults `-Listing` to
+`on`, because `auto` compares against the last successful store release and can
+decide a run whose only job is the listing has no listing to push.
+
+It records nothing on the release branch, because it is not a release. The
+consequence is that a later `-Listing auto` cannot see the push and may repeat
+it. That is idempotent, and the opposite mistake would leave the store page
+stale, so it errs that way on purpose.
 
 There is one entry point rather than one per platform. Shared setup runs
 exactly once per release however many platforms are selected: `.env`

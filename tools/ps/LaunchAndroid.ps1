@@ -1,7 +1,14 @@
 <#
 .SYNOPSIS
-    Build and deploy Refrain to a connected Android device.
+    Build Refrain and install it on a USB-connected Android device.
     Metro bundler stays running after launch. Window never closes automatically.
+
+.DESCRIPTION
+    The local development loop: prebuild, Gradle, install over adb, Metro. It
+    touches neither store. Deploy.ps1 is the store release, and the two share
+    nothing beyond the word "build"; this script was called
+    BuildAndDeployAndroid until that name kept reading as "the Android half of
+    Deploy".
 
 .PARAMETER SkipChecks
     Skip prerequisite verification (faster for repeat builds).
@@ -13,10 +20,10 @@
     Target a specific device serial (from adb devices).
 
 .EXAMPLE
-    .\tools\BuildAndDeployAndroid.ps1
-    .\tools\BuildAndDeployAndroid.ps1 -SkipClean
-    .\tools\BuildAndDeployAndroid.ps1 -SkipChecks
-    .\tools\BuildAndDeployAndroid.ps1 -Device "RFXXXXXXX"
+    .\tools\LaunchAndroid.cmd
+    .\tools\LaunchAndroid.cmd -SkipClean
+    .\tools\LaunchAndroid.cmd -SkipChecks
+    .\tools\LaunchAndroid.cmd -Device "RFXXXXXXX"
 #>
 param(
     [switch]$SkipChecks,
