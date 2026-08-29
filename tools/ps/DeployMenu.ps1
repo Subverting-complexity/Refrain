@@ -11,14 +11,14 @@
     asking about rather than the one that needs to be quickest.
 
     Nothing is reachable here that is not reachable by typing it. Every choice
-    maps to a Deploy.ps1 command, and the confirmation prints that command
-    before running it, so the menu teaches the command line rather than
-    replacing it.
+    maps to a Deploy.ps1 command, and that command is printed as the run starts,
+    so the menu teaches the command line rather than replacing it.
 
-    The menu is deliberately bare. Each line is a name and nothing else: the
-    confirmation step prints the exact command and waits for a y, so it is the
-    confirmation that carries the meaning, and explaining every option twice
-    only buries the one line that matters.
+    The menu is deliberately bare, and it does not ask twice. There is no "are
+    you sure": the store question is the last point of no return and its Back
+    option is the way out. That trades a safety net for a menu that does not
+    argue with someone using it several times a day, which is the trade the
+    person using it asked for.
 
     HOW THE RELEASE IS RUN, and why it is not a pipe. Start-Process
     -NoNewWindow hands the child THIS console rather than a pipe, which three
@@ -152,8 +152,9 @@ function Read-Choice {
     while ($true) {
         Write-Host ""
         Write-Host "  $Title" -ForegroundColor White
-        for ($i = 0; $i -lt $Options.Count; $i++) {
-            Write-Host ("   {0}) {1}" -f ($i + 1), $Options[$i]) -ForegroundColor Gray
+        Write-Host "  $('-' * $Title.Length)" -ForegroundColor DarkGray
+        foreach ($index in 0..($Options.Count - 1)) {
+            Write-Host ("   {0}) {1}" -f ($index + 1), $Options[$index]) -ForegroundColor Gray
         }
         Write-Host ""
 
@@ -164,17 +165,6 @@ function Read-Choice {
         }
         Write-Warn "Type a number between 1 and $($Options.Count)."
     }
-}
-
-function Confirm-Run {
-    param([Parameter(Mandatory = $true)][string[]]$DeployArgs)
-
-    Write-Host ""
-    Write-Host "  This runs:" -ForegroundColor White
-    Write-Host "    .\tools\Deploy.cmd $($DeployArgs -join ' ')" -ForegroundColor Cyan
-    Write-Host ""
-    $answer = ("$(Read-Host '  Go ahead? [y/N]')").Trim().ToLowerInvariant()
-    return ($answer -eq 'y' -or $answer -eq 'yes')
 }
 
 <#
@@ -267,12 +257,12 @@ while ($true) {
         3 { @('-Platform', $platform, '-ListingOnly') }
     }
 
-    if (Confirm-Run -DeployArgs $deployArgs) {
-        $null = Invoke-Deploy -DeployArgs $deployArgs
-    } else {
-        Write-Host ""
-        Write-Host "  Cancelled. Nothing was run." -ForegroundColor DarkGray
-    }
+    Write-Host ""
+    Write-Host "  Running" -ForegroundColor White
+    Write-Host "  -------" -ForegroundColor DarkGray
+    Write-Host "    .\tools\Deploy.cmd $($deployArgs -join ' ')" -ForegroundColor Cyan
+    Write-Host ""
+    $null = Invoke-Deploy -DeployArgs $deployArgs
 
     Wait-ForMenu
     Show-Header
