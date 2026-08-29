@@ -99,20 +99,24 @@ function rowToTrack(row: TrackRow): Track {
  * fragment, already carrying its leading space, and the parameters it binds.
  * The column list and the order are shared, which is the whole point of
  * deriving the filter rather than writing out a query per scope.
+ *
+ * Every scope is named and there is no `default`, so adding one to
+ * {@link LoadTracksOptions} without deciding how it filters is a type error
+ * rather than a silent read of the whole library.
  */
 function scopeFilter(options: LoadTracksOptions): {
   where: string;
   params: string[];
 } {
   switch (options.scope) {
+    case 'all':
+      return { where: '', params: [] };
     case 'favorites':
       return { where: ' WHERE isFavorite = 1', params: [] };
     case 'unfiled':
       return { where: ' WHERE folderId IS NULL', params: [] };
     case 'folder':
       return { where: ' WHERE folderId = ?', params: [options.folderId] };
-    default:
-      return { where: '', params: [] };
   }
 }
 
