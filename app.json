@@ -51,16 +51,31 @@
               "mimeType": "audio/mpeg"
             },
             {
+              "mimeType": "audio/mp3"
+            },
+            {
               "mimeType": "audio/wav"
             },
             {
+              "mimeType": "audio/x-wav"
+            },
+            {
+              "mimeType": "audio/vnd.wave"
+            },
+            {
               "mimeType": "audio/aac"
+            },
+            {
+              "mimeType": "audio/x-aac"
             },
             {
               "mimeType": "audio/mp4"
             },
             {
               "mimeType": "audio/x-m4a"
+            },
+            {
+              "mimeType": "audio/m4a"
             }
           ]
         }
@@ -103,14 +118,30 @@
       [
         "expo-share-intent",
         {
-          "iosActivationRules": "SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO \"public.audio\").@count == 1).@count == 1",
+          "iosActivationRules": "SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO \"public.audio\").@count >= 1).@count >= 1",
           "androidIntentFilters": [
             "audio/mpeg",
-            "audio/mp4",
-            "audio/x-m4a",
+            "audio/mp3",
             "audio/wav",
             "audio/x-wav",
-            "audio/aac"
+            "audio/vnd.wave",
+            "audio/aac",
+            "audio/x-aac",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/m4a"
+          ],
+          "androidMultiIntentFilters": [
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/vnd.wave",
+            "audio/aac",
+            "audio/x-aac",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/m4a"
           ]
         }
       ]
