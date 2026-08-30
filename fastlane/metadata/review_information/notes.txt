@@ -1,5 +1,22 @@
-No account or login is required.
+Refrain is an offline audio looper: import an audio file, set A and B
+markers on the waveform, loop that section on repeat, save it as a
+segment to reload later. For musicians, language learners, dancers and
+transcribers who learn by repetition.
 
-To exercise every feature, import any local audio file (MP3, WAV, AAC, or M4A) from the device using the "Import Audio" button on the Library screen, open it, and set A/B markers on the waveform.
+No account, login, credentials or purchase required. Nothing is gated.
 
-All processing is on-device. The app makes no network requests and collects no data.
+To test: launch, tap "Import Audio" and choose an MP3, WAV, AAC or M4A
+file, open the track, drag the A/B markers, press play. Also has skip
+intervals, a count-in timer, bookmarks, volume control and folders.
+
+No permission prompts of any kind (no location, contacts, camera,
+microphone, photos, or App Tracking Transparency). File access is only
+through the system file picker on Import.
+
+No external services: no network requests, no backend, no analytics, no
+ads, no third-party SDKs. Everything is stored locally (SQLite and the
+file system). Privacy label is Data Not Collected.
+
+One language (English), no server, identical behaviour in every region.
+Not a regulated industry. The only bundled audio is a short click tone
+for the metronome count-in; all other audio is user-imported.
