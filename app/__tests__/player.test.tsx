@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, Modal } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import PlayerScreen from '../player';
@@ -248,7 +248,10 @@ jest.mock('@/src/components/TransportControls', () => ({
 }));
 
 // Capture the sheet's props so a test can drive its onLoadProfile callback and
-// confirm the player applies a loaded profile to the engine setters.
+// confirm the player applies a loaded profile to the engine setters. The stub
+// renders the `dialog` it is handed, because that is the sheet's whole job for
+// it — the real component only chooses where to mount it, which is covered in
+// the sheet's own suite.
 let mockSheetProps:
   | import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps
   | null = null;
@@ -257,7 +260,7 @@ jest.mock('@/src/components/SegmentProfileSheet', () => ({
     props: import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps,
   ) => {
     mockSheetProps = props;
-    return null;
+    return <>{props.dialog}</>;
   },
 }));
 
@@ -622,6 +625,20 @@ function getSegmentsButton(tree: ReactTestRenderer) {
   )[0];
 }
 
+/**
+ * The first node carrying `label` that can be pressed or typed into. Dialog
+ * fields and buttons are both addressed by their accessibility label, which is
+ * what a screen reader and a user driving the UI both see.
+ */
+function byLabel(tree: ReactTestRenderer, label: string) {
+  return tree.root.findAll(
+    (node) =>
+      node.props.accessibilityLabel === label &&
+      (typeof node.props.onPress === 'function' ||
+        typeof node.props.onChangeText === 'function'),
+  )[0];
+}
+
 describe('PlayerScreen segment profiles', () => {
   it('mounts the sheet only after the Segments button is pressed', () => {
     let tree!: ReactTestRenderer;
@@ -638,6 +655,118 @@ describe('PlayerScreen segment profiles', () => {
     expect(mockSheetProps).not.toBeNull();
     expect(mockSheetProps?.profiles).toEqual([]);
     expect(typeof mockSheetProps?.onLoadProfile).toBe('function');
+  });
+
+  /**
+   * The rename and delete dialogs used to be rendered inside the segments
+   * sheet, which is itself a Modal — on Android a dialog window nested in the
+   * sheet's own window, with mismatched bounds and two competing hardware-back
+   * handlers (#316). The player owns them now and renders them beside the
+   * sheet. The sheet is stubbed out in this suite, so any Modal found here is
+   * a dialog the player rendered itself.
+   */
+  describe('rename and delete dialogs', () => {
+    function openSheet(): ReactTestRenderer {
+      mockProfiles = [
+        loadedProfile('p1', 'Verse'),
+        loadedProfile('p2', 'Chorus'),
+      ];
+      let tree!: ReactTestRenderer;
+      act(() => {
+        tree = create(<PlayerScreen />);
+      });
+      act(() => {
+        getSegmentsButton(tree).props.onPress();
+      });
+      return tree;
+    }
+
+    it('renders no dialog until the sheet asks for one', () => {
+      const tree = openSheet();
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
+    });
+
+    it('renames through a dialog it owns, not one inside the sheet', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestRename(loadedProfile('p2', 'Chorus'));
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
+
+      act(() => {
+        byLabel(tree, 'Segment name').props.onChangeText('Chorus 2');
+      });
+      act(() => {
+        byLabel(tree, 'Confirm rename').props.onPress();
+      });
+
+      expect(mockRename).toHaveBeenCalledWith('p2', 'Chorus 2');
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
+    });
+
+    it('deletes through a dialog it owns, not one inside the sheet', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestDelete(loadedProfile('p1', 'Verse'));
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
+
+      act(() => {
+        byLabel(tree, 'Confirm delete Verse').props.onPress();
+      });
+
+      expect(mockRemove).toHaveBeenCalledWith('p1');
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
+    });
+
+    it('never has both dialogs open at once', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestDelete(loadedProfile('p1', 'Verse'));
+      });
+      act(() => {
+        mockSheetProps?.onRequestRename(loadedProfile('p2', 'Chorus'));
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
+      expect(byLabel(tree, 'Confirm delete Verse')).toBeUndefined();
+      expect(byLabel(tree, 'Confirm rename')).toBeDefined();
+    });
+
+    it('drops a pending dialog when the sheet is closed', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestRename(loadedProfile('p2', 'Chorus'));
+      });
+      act(() => {
+        mockSheetProps?.onClose();
+      });
+      act(() => {
+        getSegmentsButton(tree).props.onPress();
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
+    });
+
+    it('dismisses the dialog on the hardware back request', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestDelete(loadedProfile('p1', 'Verse'));
+      });
+      act(() => {
+        tree.root.findByType(Modal).props.onRequestClose();
+      });
+
+      expect(mockRemove).not.toHaveBeenCalled();
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
+    });
   });
 
   it('applies a loaded profile to the engine setters (A before B, then loop)', () => {

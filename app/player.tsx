@@ -10,12 +10,14 @@ import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ConfirmDestructiveDialog } from '@/src/components/ConfirmDestructiveDialog';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { PlayerErrorBanner } from '@/src/components/PlayerErrorBanner';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
+import { SegmentRenameDialog } from '@/src/components/SegmentRenameDialog';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
 import { ToastHost } from '@/src/components/ToastHost';
 import { TransportControls } from '@/src/components/TransportControls';
@@ -312,6 +314,37 @@ export default function PlayerScreen() {
     }
   };
 
+  // The segment rename and delete dialogs. The sheet decides where to mount
+  // this — inside its own Modal or beside it — because the answer differs by
+  // platform; see SegmentProfileSheet. The workflow hook keeps the two
+  // mutually exclusive, so this is never more than one dialog.
+  const segmentDialog = segments.renamingProfile ? (
+    <SegmentRenameDialog
+      currentName={segments.renamingProfile.name}
+      onSave={segments.confirmRename}
+      onCancel={segments.cancelRename}
+    />
+  ) : segments.deletingProfile ? (
+    <ConfirmDestructiveDialog
+      title="Delete segment?"
+      message={`Remove “${segments.deletingProfile.name}” from this track?`}
+      confirmLabel="Delete"
+      confirmAccessibilityLabel={`Confirm delete ${segments.deletingProfile.name}`}
+      cancelAccessibilityLabel="Cancel delete"
+      onConfirm={segments.confirmDelete}
+      onDismiss={segments.cancelDelete}
+    />
+  ) : null;
+
+  // Closing the sheet drops any dialog pending over it, so reopening the sheet
+  // does not bring back a dialog the user had moved on from.
+  const { cancelRename, cancelDelete } = segments;
+  const closeProfiles = useCallback(() => {
+    setProfilesVisible(false);
+    cancelRename();
+    cancelDelete();
+  }, [cancelRename, cancelDelete]);
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
@@ -460,11 +493,12 @@ export default function PlayerScreen() {
         <SegmentProfileSheet
           profiles={segments.profiles}
           onLoadProfile={segments.requestLoad}
-          onRename={segments.rename}
-          onRemove={segments.remove}
+          onRequestRename={segments.requestRename}
+          onRequestDelete={segments.requestDelete}
+          dialog={segmentDialog}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
-          onClose={() => setProfilesVisible(false)}
+          onClose={closeProfiles}
         />
       ) : null}
 

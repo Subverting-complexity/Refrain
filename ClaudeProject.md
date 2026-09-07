@@ -83,6 +83,49 @@ and managed by the code-review skill.
 | claude-authored | `claude:authored` | finish-story |
 | claude-blocked  | `claude:blocked`  | block-story  |
 
+## Issue Types & Fields
+
+**Required.** Not because every org has native issue types — many do not — but because "this org has none" and "nobody wrote this section" look identical at runtime, and the second one silently produced a whole backlog of unclassified issues. So the section is always present and always says which of the two it is. `wf config-audit` reports a missing one as **CRITICAL**.
+
+`/github-workflow:setup` writes this section from `wf org-capabilities`, which resolves what the owner actually has. Re-run it after enabling issue types or adding a field.
+
+### Capability
+
+| Setting      | Value |
+| ------------ | ----- |
+| type-capable | `yes` |
+
+`Subverting-complexity` is an organization with **native GitHub issue types** enabled: Bug, Feature, User Story, Epic and Chore. The native type is the first-class classification, and the `type-*` label is dropped from an issue once the type is set.
+
+### Field names
+
+Every purpose key the workflow writes, mapped to the field name **this** owner uses.
+
+| Purpose key         | Field name       |
+| ------------------- | ---------------- |
+| field-priority      | `Priority`       |
+| field-effort        | `Effort`         |
+| field-type          | `Classification` |
+| field-origin        | `Origin`         |
+| field-start         | `Start date`     |
+| field-target        | `Target date`    |
+| field-parent        | `Parent`         |
+| field-status-reason | `Status reason`  |
+
+Four of these are **mandatory** on every issue the workflow creates — `field-priority`, `field-effort`, `field-type` and `field-origin`. `wf issue-apply` refuses a spec that leaves one blank rather than creating an issue with empty metadata. The other four are set where they apply.
+
+### Missing
+
+Fields the owner does not define, and what the workflow does instead:
+
+| Field    | Consequence |
+| -------- | ----------- |
+| _(none)_ | —           |
+
+Every purpose key resolves against this org, so nothing is skipped at runtime.
+
+The purpose→value maps — which native type each kind of work becomes, and the Priority, Effort and Origin option names — are Python data in `github-workflow/scripts/wf_core.py`, not prose here. Run `wf org-capabilities` for the live option ids rather than copying them into this file, where they would go stale.
+
 ## Workflow Settings
 
 | Setting          | Value               |
