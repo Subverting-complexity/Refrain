@@ -54,6 +54,11 @@ interface BottomSheetProps {
  * Extending the window under the navigation bar puts the sheet's own bottom
  * edge beneath it, so the body reserves the bottom inset. Only on Android:
  * that is the only platform whose window bounds this changes.
+ *
+ * That same edge-to-edge layout is why the keyboard-avoidance behaviour is
+ * `height` on Android rather than nothing — see the comment on the
+ * `KeyboardAvoidingView` below. No sheet body takes text input today, so this
+ * is a latent case rather than a live one.
  */
 export function BottomSheet({
   title,
@@ -78,11 +83,15 @@ export function BottomSheet({
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      {/* iOS lifts the sheet above the on-screen keyboard when a sheet body
-          holds a text field; Android resizes the window itself. */}
+      {/* Keeps a sheet body holding a text field above the on-screen keyboard.
+          iOS pads the container; Android needs `height` rather than nothing at
+          all, because under the edge-to-edge layout that is the default from
+          Expo SDK 54 the window is no longer resized for the IME, so a sheet
+          left to the platform would sit underneath it. Same reasoning, and the
+          same behaviour, as CenteredDialog. */}
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <AccessiblePressable
           style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}

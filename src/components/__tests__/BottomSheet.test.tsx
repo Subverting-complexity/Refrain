@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -170,6 +171,34 @@ describe('BottomSheet', () => {
     it('renders without a safe-area provider', () => {
       onPlatform('android');
       expect(bodyPadding(renderSheet())).toBe(32);
+    });
+  });
+
+  /**
+   * `undefined` on Android relied on the window being resized for the IME,
+   * which the edge-to-edge layout no longer does, so a sheet with a text field
+   * would open the keyboard straight over it (#317). CenteredDialog already
+   * documented and used the correct behaviour; this matches it.
+   */
+  describe('keyboard avoidance', () => {
+    let replacedPlatform: ReturnType<typeof jest.replaceProperty> | undefined;
+
+    afterEach(() => {
+      replacedPlatform?.restore();
+      replacedPlatform = undefined;
+    });
+
+    function behaviorOn(os: 'ios' | 'android' | 'web'): unknown {
+      replacedPlatform = jest.replaceProperty(Platform, 'OS', os);
+      return renderSheet().root.findByType(KeyboardAvoidingView).props.behavior;
+    }
+
+    it('pads the container on iOS', () => {
+      expect(behaviorOn('ios')).toBe('padding');
+    });
+
+    it('resizes the container on Android rather than leaving it to the window', () => {
+      expect(behaviorOn('android')).toBe('height');
     });
   });
 
