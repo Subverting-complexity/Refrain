@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -64,8 +64,11 @@ const PANEL_LAUNCHERS: {
  * bottom sheet carrying their settings body; Segments defers to the player's
  * segment-profile sheet. Keeping every launcher a pure sheet trigger lets the
  * row stay compact and sit in the footer above the transport.
+ *
+ * Memoised. None of the launchers or the sheet they open depends on the
+ * playhead, so a playback tick must not reach them.
  */
-export function ControlsDrawer({
+export const ControlsDrawer = React.memo(function ControlsDrawer({
   countdownConfig,
   onCountdownConfigChange,
   volume,
@@ -122,7 +125,7 @@ export function ControlsDrawer({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   row: {

@@ -1,3 +1,4 @@
+import React from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -15,7 +16,10 @@ interface CountdownOverlayProps {
   style?: ViewStyle;
 }
 
-export function CountdownOverlay({
+/**
+ * Memoised. The count-in runs on its own clock, not the playhead's.
+ */
+export const CountdownOverlay = React.memo(function CountdownOverlay({
   countdownState,
   onCancel,
   style,
@@ -67,7 +71,7 @@ export function CountdownOverlay({
   }
 
   return <View style={[styles.container, style]}>{content}</View>;
-}
+});
 
 const styles = StyleSheet.create({
   container: {

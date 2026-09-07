@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -45,7 +45,11 @@ interface MarkerControlsProps {
   style?: ViewStyle;
 }
 
-export function MarkerControls({
+/**
+ * Memoised. The player subscribes to the playhead, so this re-rendered ten
+ * times a second for a marker row that only changes when a marker does.
+ */
+export const MarkerControls = React.memo(function MarkerControls({
   status,
   markerA,
   markerB,
@@ -230,7 +234,7 @@ export function MarkerControls({
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

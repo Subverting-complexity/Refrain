@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   ActivityIndicator,
@@ -44,8 +44,14 @@ export default function PlayerScreen() {
   const { height: windowHeight } = useWindowDimensions();
   // Scale the waveform to the viewport so it fills the space instead of sitting
   // small and boxed-in — taller on bigger screens, with sane phone bounds.
-  const waveformHeight = Math.round(
-    Math.min(340, Math.max(180, windowHeight * 0.28)),
+  //
+  // Clamped and rounded, so the metric changes Android reports for insets and
+  // the soft keyboard nearly always resolve to the height already in use. This
+  // screen still re-runs on one of those, but with a value the memoised
+  // children compare equal and stop at.
+  const waveformHeight = useMemo(
+    () => Math.round(Math.min(340, Math.max(180, windowHeight * 0.28))),
+    [windowHeight],
   );
   const {
     uri: rawUri,
@@ -304,13 +310,22 @@ export default function PlayerScreen() {
   // the peak analysis — as opposed to having finished with nothing to show.
   const waveformPending = isResolvingSource || isWaveformLoading;
 
-  const handlePlay = () => {
+  // Every handler the memoised controls receive is stable, so a playback tick
+  // reaches only the components that display the playhead. An inline arrow
+  // here would be a fresh prop on each tick and would undo the memoisation of
+  // whichever control it was passed to.
+  const handlePlay = useCallback(() => {
     if (isCounting) {
       cancelCountdown();
     } else {
       void playWithCountdown();
     }
-  };
+  }, [isCounting, cancelCountdown, playWithCountdown]);
+
+  const handleOpenSegments = useCallback(() => setProfilesVisible(true), []);
+  const handleCloseSegments = useCallback(() => setProfilesVisible(false), []);
+  const handleSave = trackId ? segments.openSave : undefined;
+  const handlePause = isCounting ? cancelCountdown : pause;
 
   return (
     <SafeAreaView
@@ -412,7 +427,7 @@ export default function PlayerScreen() {
             onRemoveA={handleClear}
             onRemoveB={handleRemoveB}
             onToggleLoop={setLoopEnabled}
-            onSave={trackId ? segments.openSave : undefined}
+            onSave={handleSave}
             onClear={handleClear}
             style={styles.markers}
           />
@@ -434,16 +449,14 @@ export default function PlayerScreen() {
               onVolumeChange={setVolume}
               skipPreference={skipPreference}
               onSkipPreferenceChange={setSkipPreference}
-              onOpenSegments={
-                trackId ? () => setProfilesVisible(true) : undefined
-              }
+              onOpenSegments={trackId ? handleOpenSegments : undefined}
               style={styles.drawer}
             />
 
             <TransportControls
               status={isCounting ? 'playing' : status}
               onPlay={handlePlay}
-              onPause={isCounting ? cancelCountdown : pause}
+              onPause={handlePause}
               onSkipBack={skipBack}
               onSkipForward={skipForward}
               skipBackLabel={skipBackLabel}
@@ -464,7 +477,7 @@ export default function PlayerScreen() {
           onRemove={segments.remove}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
-          onClose={() => setProfilesVisible(false)}
+          onClose={handleCloseSegments}
         />
       ) : null}
 
