@@ -19,6 +19,15 @@
 .PARAMETER Device
     Target a specific device serial (from adb devices).
 
+.NOTES
+    Every run is transcribed to logs/launch-android_<timestamp>.log. A Gradle
+    failure runs to hundreds of lines and scrolls out of the console buffer;
+    the transcript is what makes it readable afterwards.
+
+    The script reports a release-signed install that would block the dev
+    client, but it does not uninstall anything. Removing an app the reader
+    installed themselves, and its imported tracks with it, is their call.
+
 .EXAMPLE
     .\tools\LaunchAndroid.cmd
     .\tools\LaunchAndroid.cmd -SkipClean
@@ -38,14 +47,31 @@ function Write-Ok    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundC
 function Write-Warn  { param([string]$msg) Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 
+# Set once the run log is open. Declared here so that Wait-AndExit can be
+# called before that point without tripping Set-StrictMode.
+$LogFile = $null
+
 function Wait-AndExit {
     param([int]$Code = 1)
+    if ($LogFile) {
+        try { Stop-Transcript | Out-Null } catch { }
+        Write-Host ""
+        Write-Host "  Log saved to: $LogFile" -ForegroundColor DarkGray
+    }
     Write-Host ""
     Write-Host "Press any key to close this window..." -ForegroundColor DarkGray
     try {
         $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     } catch {
-        Start-Sleep -Seconds 5
+        # No raw console (piped or redirected). Read-Host still blocks when a
+        # keyboard is attached, rather than closing the window on the way past.
+        # It throws outright on a non-interactive host, where a short pause is
+        # all that is left.
+        try {
+            Read-Host "Press Enter to close this window" | Out-Null
+        } catch {
+            Start-Sleep -Seconds 5
+        }
     }
     exit $Code
 }
@@ -68,6 +94,21 @@ if (-not (Test-Path (Join-Path $AppDir 'package.json'))) {
 Push-Location $AppDir
 
 $AndroidDir = Join-Path $AppDir 'android'
+
+# -- Run log ------------------------------------------------------------------
+
+$LogDir = Join-Path $AppDir 'logs'
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
+$LogFile = Join-Path $LogDir "launch-android_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+try {
+    Start-Transcript -Path $LogFile -Force | Out-Null
+    Write-Ok "Logging this run to $LogFile"
+} catch {
+    Write-Warn "Could not open a run log: $($_.Exception.Message)"
+    $LogFile = $null
+}
 
 # -- Prerequisite checks ------------------------------------------------------
 
@@ -145,6 +186,46 @@ if ($deviceModel) {
     Write-Ok "Target: $TargetDevice"
 }
 
+# -- Installed build check ----------------------------------------------------
+
+# A dev client is signed with the local debug keystore; a Play or EAS build is
+# signed with a release key. Android will not replace one with the other, and
+# only says so as INSTALL_FAILED_UPDATE_INCOMPATIBLE at the very end of a full
+# Gradle run. Say it here instead, where it costs the reader nothing.
+#
+# Reporting only, on purpose: an uninstall takes the app's imported tracks with
+# it, and this script did not put that build on the device.
+
+$PackageId = $null
+try {
+    $appConfig = Get-Content (Join-Path $AppDir 'app.json') -Raw | ConvertFrom-Json
+    $PackageId = $appConfig.expo.android.package
+} catch {
+    Write-Warn "Could not read the Android package id from app.json."
+}
+
+$ReleaseBuildInstalled = $false
+if ($PackageId) {
+    $packageInfo = (adb -s $TargetDevice shell dumpsys package $PackageId 2>&1 | Out-String)
+    if ($packageInfo -match 'versionName=(\S+)') {
+        $installedVersion = $Matches[1]
+        $installer = if ($packageInfo -match 'installerPackageName=(\S+)') { $Matches[1] } else { 'a sideload' }
+        # Debug keystore builds carry DEBUGGABLE in flags= / pkgFlags=.
+        if ($packageInfo -match 'lags=\[[^\]]*\bDEBUGGABLE\b') {
+            Write-Ok "Installed: $PackageId $installedVersion (debuggable, safe to replace)"
+        } else {
+            $ReleaseBuildInstalled = $true
+            Write-Warn "Installed: $PackageId $installedVersion from $installer, not debuggable."
+            Write-Warn "  It is signed with a release key, so installing the dev client over it"
+            Write-Warn "  will fail with INSTALL_FAILED_UPDATE_INCOMPATIBLE. To clear it:"
+            Write-Warn "    adb -s $TargetDevice uninstall $PackageId"
+            Write-Warn "  That deletes the app's imported tracks, so it is left to you."
+        }
+    } else {
+        Write-Ok "$PackageId is not installed on this device"
+    }
+}
+
 # -- Auto-setup ---------------------------------------------------------------
 
 if (-not (Test-Path (Join-Path $AppDir 'node_modules'))) {
@@ -176,6 +257,39 @@ if (-not $SkipClean) {
         Remove-Item $NodeModulesCache -Recurse -Force -ErrorAction SilentlyContinue
     }
     Write-Ok "Metro, Expo, and module caches cleared"
+
+    # Each native module keeps its own CMake/Ninja cache at
+    # node_modules/<pkg>/android/.cxx. Neither `expo prebuild --clean` nor
+    # `gradlew clean` reaches outside android/, so those survived every clean
+    # this script used to do. A stale one is what produces
+    #   ninja: error: manifest 'build.ninja' still dirty after 100 tries
+    # where CMake's CONFIGURE_DEPENDS glob check rewrites the manifest on every
+    # pass and never settles. They are pure build output, so clearing them is
+    # cheap next to diagnosing that.
+    $ModuleRoots = @(
+        Get-ChildItem -Path (Join-Path $AppDir 'node_modules') -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if ($_.Name -like '@*') {
+                    # Scoped package: the real packages sit one level deeper.
+                    Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue
+                } else {
+                    $_
+                }
+            }
+    )
+    $CxxDirs = @(
+        $ModuleRoots |
+            ForEach-Object { Join-Path $_.FullName 'android\.cxx' } |
+            Where-Object { Test-Path $_ }
+    )
+    foreach ($cxx in $CxxDirs) {
+        Remove-Item $cxx -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($CxxDirs.Count -gt 0) {
+        Write-Ok "Cleared $($CxxDirs.Count) native module CMake cache(s)"
+    } else {
+        Write-Ok "No native module CMake caches to clear"
+    }
 
     # Stop Gradle daemon and any Metro processes that may lock the android/ directory
     if (Test-Path $AndroidDir) {
@@ -260,6 +374,11 @@ Pop-Location
 if ($LASTEXITCODE -ne 0) {
     Write-Err "expo run:android exited with code $LASTEXITCODE"
     Write-Err "Common fixes:"
+    if ($ReleaseBuildInstalled) {
+        Write-Err "  - INSTALL_FAILED_UPDATE_INCOMPATIBLE: the release-signed build flagged"
+        Write-Err "    above is still installed. Uninstall it, then run this again:"
+        Write-Err "      adb -s $TargetDevice uninstall $PackageId"
+    }
     Write-Err "  - Verify JAVA_HOME is set correctly"
     Write-Err "  - Check device is still connected (adb devices)"
     Write-Err "  - If already running a clean build, check Gradle logs above"

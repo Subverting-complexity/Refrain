@@ -17,23 +17,34 @@ Audio looper app built with Expo (SDK 56) + TypeScript + expo-router.
 
 ### Running on a device
 
-`ios` and `android` compile rather than just starting Metro, because
-Expo Go cannot run this app: `expo-share-intent` ships native code and a
-config plugin, so a dev client has to be built. `expo start --android`
-on its own only opens whatever is already installed, which on a phone
-carrying the store build means launching production and wondering why
-your change is not there.
+On Android, prefer `tools\LaunchAndroid.cmd`. It checks the
+prerequisites, picks the device, clears the caches that wedge a rebuild,
+prebuilds, installs, and leaves Metro running, and it transcribes the
+whole run to `logs/launch-android_<timestamp>.log` so a Gradle failure
+is still readable after it scrolls past. `npm run android` is the same
+build without any of that.
+
+Either way it compiles rather than just starting Metro, because Expo Go
+cannot run this app: `expo-share-intent` ships native code and a config
+plugin, so a dev client has to be built. `expo start --android` on its
+own only opens whatever is already installed, which on a phone carrying
+the store build means launching production and wondering why your change
+is not there.
 
 Two things that bite on Android:
 
 - **A store build blocks the install.** The dev client is signed with
   the debug keystore and Play builds are not, so installing over one
-  fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall the store
-  copy first: `adb uninstall com.subvertingcomplexity.refrain`.
-- **A wedged NDK cache survives a rebuild.** If Gradle dies on
-  `ninja: error: manifest 'build.ninja' still dirty after 100 tries`,
-  delete every `.cxx` directory under `android/` and `node_modules/`
-  and run again. They are build caches and CMake regenerates them.
+  fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. The launch script
+  detects this before it builds and tells you, but will not act on it:
+  uninstalling takes the app's imported tracks with it. Clear it
+  yourself with `adb uninstall com.subvertingcomplexity.refrain`.
+- **A wedged NDK cache survives a rebuild.** Gradle dies on
+  `ninja: error: manifest 'build.ninja' still dirty after 100 tries`
+  when a native module's CMake cache goes stale. The launch script now
+  deletes every `node_modules/*/android/.cxx` on each clean run, which
+  `expo prebuild --clean` and `gradlew clean` never reached. Running
+  `npm run android` directly still needs them deleted by hand.
 
 The dev client loads its JavaScript from Metro, so the app only runs
 while the dev server is up. Use EAS (`docs/RELEASING.md`) for a

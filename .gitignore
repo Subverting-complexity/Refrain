@@ -27,6 +27,9 @@ fastlane/README.md
 tools/ps/ios-build-log.json
 tools/ps/android-build-log.json
 
+# Local dev-loop run transcripts (tools/ps/LaunchAndroid.ps1)
+/logs/
+
 # release-branch.mjs's own bookkeeping for a run in flight. Tracked would make
 # the next release's clean-tree check fail on the previous release's own state.
 tools/release-state.json
