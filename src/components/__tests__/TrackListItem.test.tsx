@@ -438,3 +438,65 @@ describe('TrackListItem', () => {
     });
   });
 });
+
+describe('TrackListItem memoisation', () => {
+  /**
+   * Favouriting one track used to re-render every visible row. The row is not
+   * cheap — icons, a swipe affordance and several pressables — so the bailout
+   * is what keeps a list-wide state change proportional to what changed.
+   * Reference equality is what can see it: a memoised component that skipped
+   * its render leaves the identical props object behind, not an equal one.
+   */
+  it('does not re-render when its props have not changed', () => {
+    const props = {
+      track: baseTrack,
+      onPress: jest.fn(),
+      onDelete: jest.fn(),
+      onToggleFavorite: jest.fn(),
+      onOpenActions: jest.fn(),
+    };
+    const styles = (renderer: ReactTestRenderer) =>
+      renderer.root
+        .findAll((node) => node.type === 'View')
+        .map((node) => node.props.style);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TrackListItem {...props} />);
+    });
+    const before = styles(tree);
+
+    act(() => {
+      tree.update(<TrackListItem {...props} />);
+    });
+
+    const after = styles(tree);
+    expect(after).toHaveLength(before.length);
+    before.forEach((style, index) => {
+      expect(after[index]).toBe(style);
+    });
+  });
+
+  it('re-renders the row whose track actually changed', () => {
+    const props = { track: baseTrack, onPress: jest.fn() };
+    const styles = (renderer: ReactTestRenderer) =>
+      renderer.root
+        .findAll((node) => node.type === 'View')
+        .map((node) => node.props.style);
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TrackListItem {...props} />);
+    });
+    const before = styles(tree);
+
+    act(() => {
+      tree.update(
+        <TrackListItem {...props} track={{ ...baseTrack, isFavorite: true }} />,
+      );
+    });
+
+    const after = styles(tree);
+    expect(after.some((style, index) => style !== before[index])).toBe(true);
+  });
+});

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -47,8 +47,12 @@ function formatFileSize(bytes: number): string {
  * it is rare, and it does not deserve a prime gesture slot — it lives in the
  * long-press sheet, which is also the only place the rename dialog is
  * mounted, so there is one rename path rather than two.
+ *
+ * Memoised, and the reason the list screen hands it stable callbacks. Rows
+ * are not cheap — icons, a swipe affordance and several pressables each — so
+ * without this, favouriting one track re-rendered every visible row.
  */
-export function TrackListItem({
+export const TrackListItem = React.memo(function TrackListItem({
   track,
   onPress,
   onDelete,
@@ -271,7 +275,7 @@ export function TrackListItem({
       ) : null}
     </>
   );
-}
+});
 
 // Row chrome (border, main pressable, icon square, info column) is shared
 // with FolderListItem — see listRowStyles.

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -87,6 +93,26 @@ function emptyMessage(scope: ScopeKind): string {
       return 'No tracks yet.';
   }
 }
+
+/**
+ * Marks where the never-played tracks begin under the Played sort. Its own
+ * memoised component so that it is not rebuilt for every row on every list
+ * render, and so `renderItem` no longer depends on the whole theme object.
+ */
+const UnplayedDivider = React.memo(function UnplayedDivider() {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.divider}>
+      <View
+        style={[styles.dividerLine, { backgroundColor: theme.colors.track }]}
+      />
+      <Text style={theme.typography.caption}>Not played yet</Text>
+      <View
+        style={[styles.dividerLine, { backgroundColor: theme.colors.track }]}
+      />
+    </View>
+  );
+});
 
 export default function TracksScreen() {
   const { theme } = useTheme();
@@ -412,31 +438,32 @@ export default function TracksScreen() {
     [visibleTracks, sortOption],
   );
 
+  // Both of these were inline arrows in `renderItem`, so every row received a
+  // freshly allocated callback on every list render and `TrackListItem`'s
+  // memoisation could never hold.
+  const handleDeleteRow = useCallback(
+    (id: string) => {
+      void handleDelete(id);
+    },
+    [handleDelete],
+  );
+
+  const handleToggleFavoriteRow = useCallback(
+    (track: Track) => {
+      void handleToggleFavorite(track);
+    },
+    [handleToggleFavorite],
+  );
+
   const renderItem = useCallback(
     ({ item, index }: { item: Track; index: number }) => (
       <>
-        {index === unplayedAt ? (
-          <View style={styles.divider}>
-            <View
-              style={[
-                styles.dividerLine,
-                { backgroundColor: theme.colors.track },
-              ]}
-            />
-            <Text style={theme.typography.caption}>Not played yet</Text>
-            <View
-              style={[
-                styles.dividerLine,
-                { backgroundColor: theme.colors.track },
-              ]}
-            />
-          </View>
-        ) : null}
+        {index === unplayedAt ? <UnplayedDivider /> : null}
         <TrackListItem
           track={item}
           onPress={handleTrackPress}
-          onDelete={(id) => void handleDelete(id)}
-          onToggleFavorite={(track) => void handleToggleFavorite(track)}
+          onDelete={handleDeleteRow}
+          onToggleFavorite={handleToggleFavoriteRow}
           onOpenActions={handleOpenTrackActions}
           style={styles.listItem}
         />
@@ -444,11 +471,10 @@ export default function TracksScreen() {
     ),
     [
       handleTrackPress,
-      handleDelete,
-      handleToggleFavorite,
+      handleDeleteRow,
+      handleToggleFavoriteRow,
       handleOpenTrackActions,
       unplayedAt,
-      theme,
     ],
   );
 

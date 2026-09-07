@@ -319,3 +319,40 @@ describe('FolderListItem as a built-in entry', () => {
     act(() => renderer.unmount());
   });
 });
+
+describe('FolderListItem memoisation', () => {
+  /**
+   * The row is not cheap — icons, a swipe affordance and several pressables —
+   * and a list screen re-renders for anything that changes anywhere on it.
+   * Reference equality is what can see the bailout: a memoised component that
+   * skipped its render leaves the identical props object behind rather than an
+   * equal one.
+   */
+  it('does not re-render when its props have not changed', () => {
+    const props = {
+      name: 'Warmups',
+      trackCount: 3,
+      onPress: jest.fn(),
+      onDelete: jest.fn(),
+      onRename: jest.fn(),
+      onOpenActions: jest.fn(),
+    };
+    const styles = (renderer: ReactTestRenderer) =>
+      renderer.root
+        .findAll((node) => node.type === 'View')
+        .map((node) => node.props.style);
+
+    const renderer = render(<FolderListItem {...props} />);
+    const before = styles(renderer);
+
+    act(() => {
+      renderer.update(<FolderListItem {...props} />);
+    });
+
+    const after = styles(renderer);
+    expect(after).toHaveLength(before.length);
+    before.forEach((style, index) => {
+      expect(after[index]).toBe(style);
+    });
+  });
+});
