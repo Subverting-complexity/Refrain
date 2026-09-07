@@ -404,6 +404,26 @@ describe('pickAndImportFile with Android SAF document URIs', () => {
     }
   });
 
+  it('cleans up the staged copy when the move into place fails', async () => {
+    mockHeadBytes = MP3_FRAME;
+    mockMove.mockRejectedValueOnce(new Error('disk full'));
+    File.pickFileAsync.mockResolvedValue(
+      pickedFile({
+        uri: 'content://com.example.cloud/document/9f2c1b',
+        name: '9f2c1b',
+        type: 'application/octet-stream',
+      }),
+    );
+
+    const result = await pickAndImportFile();
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe('copy_failed');
+    }
+    expect(mockDelete).toHaveBeenCalled();
+  });
+
   it('prefers the declared type over a name that disagrees', async () => {
     File.pickFileAsync.mockResolvedValue(
       pickedFile({

@@ -150,6 +150,11 @@ async function importFromFile(
   // import and the segment-profile store already go through this helper.
   const id = generateId();
 
+  // Held outside the try so a failure part-way through identifying the file
+  // does not leave the copy behind. `cleanupOrphanFiles` would sweep it up
+  // eventually, but only on a later launch.
+  let staged: File | undefined;
+
   try {
     const tracksDir = ensureTracksDir();
 
@@ -162,7 +167,7 @@ async function importFromFile(
     } else {
       // Nothing named the format, so the bytes have to. Copy first: the
       // source may be a content:// document, which cannot be read by handle.
-      const staged = new File(tracksDir, `${id}.${STAGING_EXTENSION}`);
+      staged = new File(tracksDir, `${id}.${STAGING_EXTENSION}`);
       await sourceFile.copy(staged);
 
       format = sniffFile(staged);
@@ -176,6 +181,7 @@ async function importFromFile(
 
       destFile = new File(tracksDir, `${id}.${format}`);
       await staged.move(destFile);
+      staged = undefined;
     }
 
     const fileSizeBytes = destFile.size;
@@ -196,6 +202,7 @@ async function importFromFile(
 
     return { success: true, track };
   } catch {
+    if (staged) discard(staged);
     return makeError('copy_failed', 'Failed to copy file to app storage');
   }
 }
