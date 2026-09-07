@@ -67,3 +67,12 @@ expo-env.d.ts
 # github-workflow plugin per-session scratch (preflight marker, config projection)
 .claude/preflight-passed.txt
 .claude/projected-config.md
+
+# expo prebuild output. Both directories are generated from app.json and the
+# config plugins, so tracking them would let a stale checked-in Gradle or
+# Xcode project silently outrank the config that is meant to produce it.
+# Store builds go through EAS, which prebuilds remotely; these appear only
+# when someone runs `expo run:android` / `expo run:ios` locally, and they are
+# safe to delete when a native build wedges.
+/android/
+/ios/
