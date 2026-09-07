@@ -442,15 +442,104 @@ describe('useSegmentWorkflow', () => {
       expect(lastResult.loadedProfile).toBeNull();
       expect(lastResult.isDirty).toBe(false);
     });
+  });
 
-    it('passes the store CRUD straight through', () => {
+  /**
+   * The rename and delete dialogs used to live inside the segments sheet,
+   * nested in its Modal — on Android a window inside a window (#316). They are
+   * siblings of the sheet now, and this hook owns which one is open so at most
+   * one is ever mounted next to it.
+   */
+  describe('rename and delete dialogs', () => {
+    const verse = profile({ id: 'p1', name: 'Verse' });
+    const chorus = profile({ id: 'p2', name: 'Chorus' });
+
+    beforeEach(() => {
+      mockProfiles = [verse, chorus];
+    });
+
+    it('opens no dialog until one is asked for', () => {
       render({ markerA: 1000, markerB: 5000 });
 
-      act(() => lastResult.rename('p1', 'Bridge'));
-      act(() => lastResult.remove('p1'));
+      expect(lastResult.renamingProfile).toBeNull();
+      expect(lastResult.deletingProfile).toBeNull();
+    });
 
-      expect(mockRename).toHaveBeenCalledWith('p1', 'Bridge');
+    it('renames the segment the dialog was opened for', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestRename(chorus));
+      expect(lastResult.renamingProfile).toEqual(chorus);
+
+      act(() => lastResult.confirmRename('Chorus 2'));
+
+      expect(mockRename).toHaveBeenCalledWith('p2', 'Chorus 2');
+      expect(lastResult.renamingProfile).toBeNull();
+    });
+
+    it('cancelling a rename closes the dialog and renames nothing', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestRename(chorus));
+      act(() => lastResult.cancelRename());
+
+      expect(mockRename).not.toHaveBeenCalled();
+      expect(lastResult.renamingProfile).toBeNull();
+    });
+
+    it('deletes the segment the confirmation was opened for', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestDelete(verse));
+      expect(lastResult.deletingProfile).toEqual(verse);
+
+      act(() => lastResult.confirmDelete());
+
       expect(mockRemove).toHaveBeenCalledWith('p1');
+      expect(lastResult.deletingProfile).toBeNull();
+    });
+
+    it('cancelling a delete closes the confirmation and removes nothing', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestDelete(verse));
+      act(() => lastResult.cancelDelete());
+
+      expect(mockRemove).not.toHaveBeenCalled();
+      expect(lastResult.deletingProfile).toBeNull();
+    });
+
+    it('opening rename closes an open delete confirmation', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestDelete(verse));
+      act(() => lastResult.requestRename(chorus));
+
+      expect(lastResult.deletingProfile).toBeNull();
+      expect(lastResult.renamingProfile).toEqual(chorus);
+    });
+
+    it('opening delete closes an open rename dialog', () => {
+      render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestRename(chorus));
+      act(() => lastResult.requestDelete(verse));
+
+      expect(lastResult.renamingProfile).toBeNull();
+      expect(lastResult.deletingProfile).toEqual(verse);
+    });
+
+    // The pending target is an id resolved against the live list, so a segment
+    // that leaves the store while its dialog is open takes the dialog with it
+    // rather than leaving a card naming something that no longer exists.
+    it('drops a pending dialog when its segment leaves the store', () => {
+      const api = render({ markerA: 1000, markerB: 5000 });
+
+      act(() => lastResult.requestDelete(verse));
+      mockProfiles = [chorus];
+      api.update({ markerA: 1000, markerB: 5000 });
+
+      expect(lastResult.deletingProfile).toBeNull();
     });
   });
 });

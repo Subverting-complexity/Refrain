@@ -1,4 +1,5 @@
 import React from 'react';
+import { Modal } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { SegmentProfile } from '../../types';
@@ -56,8 +57,8 @@ function render(overrides: Partial<SegmentProfileSheetProps> = {}) {
       <SegmentProfileSheet
         profiles={PROFILES}
         onLoadProfile={jest.fn()}
-        onRename={jest.fn()}
-        onRemove={jest.fn()}
+        onRequestRename={jest.fn()}
+        onRequestDelete={jest.fn()}
         snippetPreviewEnabled={false}
         onSnippetPreviewChange={jest.fn()}
         onClose={jest.fn()}
@@ -134,34 +135,60 @@ describe('SegmentProfileSheet', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('renames a profile', () => {
-    const onRename = jest.fn();
-    const tree = render({ onRename });
+  it('asks the player to rename a profile', () => {
+    const onRequestRename = jest.fn();
+    const tree = render({ onRequestRename });
 
     act(() => {
       byLabel(tree, 'Rename Chorus').props.onPress();
     });
-    act(() => {
-      inputByLabel(tree, 'Segment name').props.onChangeText('Chorus 2');
-    });
-    act(() => {
-      byLabel(tree, 'Confirm rename').props.onPress();
-    });
 
-    expect(onRename).toHaveBeenCalledWith('p2', 'Chorus 2');
+    expect(onRequestRename).toHaveBeenCalledWith(profile('p2', 'Chorus'));
   });
 
-  it('deletes a profile after confirmation', () => {
-    const onRemove = jest.fn();
-    const tree = render({ onRemove });
+  it('asks the player to delete a profile', () => {
+    const onRequestDelete = jest.fn();
+    const tree = render({ onRequestDelete });
 
     act(() => {
       byLabel(tree, 'Delete Segment 1').props.onPress();
     });
-    act(() => {
-      byLabel(tree, 'Confirm delete Segment 1').props.onPress();
+
+    expect(onRequestDelete).toHaveBeenCalledWith(profile('p1', 'Segment 1'));
+  });
+
+  /**
+   * The sheet is a Modal, and on Android every Modal is its own window, so a
+   * dialog rendered inside it nested one window in another: mismatched bounds
+   * and two competing hardware-back handlers (#316). The dialogs belong to the
+   * player now, as siblings of this sheet.
+   */
+  describe('nested modals', () => {
+    it('renders exactly one modal — its own', () => {
+      const tree = render();
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
     });
 
-    expect(onRemove).toHaveBeenCalledWith('p1');
+    it('opens no dialog of its own when rename is tapped', () => {
+      const tree = render();
+
+      act(() => {
+        byLabel(tree, 'Rename Chorus').props.onPress();
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
+      expect(inputByLabel(tree, 'Segment name')).toBeUndefined();
+    });
+
+    it('opens no dialog of its own when delete is tapped', () => {
+      const tree = render();
+
+      act(() => {
+        byLabel(tree, 'Delete Segment 1').props.onPress();
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(1);
+      expect(byLabel(tree, 'Confirm delete Segment 1')).toBeUndefined();
+    });
   });
 });

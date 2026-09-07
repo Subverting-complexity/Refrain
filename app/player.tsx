@@ -10,12 +10,14 @@ import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ConfirmDestructiveDialog } from '@/src/components/ConfirmDestructiveDialog';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { PlayerErrorBanner } from '@/src/components/PlayerErrorBanner';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
+import { SegmentRenameDialog } from '@/src/components/SegmentRenameDialog';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
 import { ToastHost } from '@/src/components/ToastHost';
 import { TransportControls } from '@/src/components/TransportControls';
@@ -460,11 +462,38 @@ export default function PlayerScreen() {
         <SegmentProfileSheet
           profiles={segments.profiles}
           onLoadProfile={segments.requestLoad}
-          onRename={segments.rename}
-          onRemove={segments.remove}
+          onRequestRename={segments.requestRename}
+          onRequestDelete={segments.requestDelete}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
           onClose={() => setProfilesVisible(false)}
+        />
+      ) : null}
+
+      {/* The segment rename and delete dialogs are siblings of the sheet, not
+          children of it. Each is a Modal, and on Android a Modal is its own
+          window, so rendering them inside the sheet nested one window in
+          another: the card was centred against different bounds and the
+          hardware back button had two handlers competing for it (#316). The
+          workflow hook keeps the two mutually exclusive, so at most one is
+          ever mounted alongside the sheet. */}
+      {segments.renamingProfile ? (
+        <SegmentRenameDialog
+          currentName={segments.renamingProfile.name}
+          onSave={segments.confirmRename}
+          onCancel={segments.cancelRename}
+        />
+      ) : null}
+
+      {segments.deletingProfile ? (
+        <ConfirmDestructiveDialog
+          title="Delete segment?"
+          message={`Remove “${segments.deletingProfile.name}” from this track?`}
+          confirmLabel="Delete"
+          confirmAccessibilityLabel={`Confirm delete ${segments.deletingProfile.name}`}
+          cancelAccessibilityLabel="Cancel delete"
+          onConfirm={segments.confirmDelete}
+          onDismiss={segments.cancelDelete}
         />
       ) : null}
 

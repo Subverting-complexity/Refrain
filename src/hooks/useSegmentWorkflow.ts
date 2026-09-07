@@ -30,10 +30,8 @@ export interface UseSegmentWorkflowParams {
 }
 
 export interface UseSegmentWorkflow {
-  /** The track's saved segments, plus the CRUD the sheet drives directly. */
+  /** The track's saved segments, shown by the sheet. */
   profiles: SegmentProfile[];
-  rename: (profileId: string, name: string) => void;
-  remove: (profileId: string) => void;
   /** The loaded segment's record, or `null` when none is loaded. */
   loadedProfile: SegmentProfile | null;
   /** Whether the live region has moved away from the loaded segment. */
@@ -52,6 +50,24 @@ export interface UseSegmentWorkflow {
   /** Save dialog: store the live region as a new segment under `name`. */
   saveAsNew: (name: string) => void;
 
+  /** The segment the rename dialog is open for, or `null`. */
+  renamingProfile: SegmentProfile | null;
+  /** Open the rename dialog for a segment. */
+  requestRename: (profile: SegmentProfile) => void;
+  /** Rename the pending segment and close the dialog. */
+  confirmRename: (name: string) => void;
+  /** Close the rename dialog without renaming. */
+  cancelRename: () => void;
+
+  /** The segment the delete confirmation is open for, or `null`. */
+  deletingProfile: SegmentProfile | null;
+  /** Open the delete confirmation for a segment. */
+  requestDelete: (profile: SegmentProfile) => void;
+  /** Delete the pending segment and close the confirmation. */
+  confirmDelete: () => void;
+  /** Close the delete confirmation without deleting. */
+  cancelDelete: () => void;
+
   /** Load a segment, raising the unsaved-edit guard first if needed. */
   requestLoad: (profile: SegmentProfile) => void;
   /** Whether the unsaved-edit guard is asking the user to decide. */
@@ -66,8 +82,8 @@ export interface UseSegmentWorkflow {
  * The player's segment save/load workflow and the unsaved-edit guard that sits
  * in front of it.
  *
- * It owns the saved-segment list, which segment is loaded, both dialogs'
- * visibility, and the guard state machine — including the navigation intercept
+ * It owns the saved-segment list, which segment is loaded, every segment
+ * dialog's visibility (save, rename, delete), and the guard state machine — including the navigation intercept
  * that raises the guard when you leave the screen mid-edit. The live A/B region
  * stays with the audio player and is passed in, so there is exactly one source
  * of truth for the markers; everything here is about the *named* segment
@@ -89,7 +105,7 @@ export function useSegmentWorkflow({
 }: UseSegmentWorkflowParams): UseSegmentWorkflow {
   // Named-segment list + CRUD for this track. The player shows the loaded
   // segment's name and suggests the next one from it; the sheet receives the
-  // list and the rename/remove actions as props.
+  // list, and rename/remove are driven from the dialogs owned below.
   const { profiles, save, update, rename, remove } =
     useSegmentProfiles(trackId);
   // Tracks which segment is loaded and whether its A/B region has been edited.
@@ -107,9 +123,57 @@ export function useSegmentWorkflow({
   const [saveVisible, setSaveVisible] = useState(false);
   // A load/leave action deferred behind the unsaved-edit guard, or null.
   const [guard, setGuard] = useState<SegmentGuard | null>(null);
+  // Which segment the rename dialog and the delete confirmation are open for.
+  // Ids rather than records, resolved against the live list below, so a
+  // dialog cannot go on showing a segment the store no longer holds.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const openSave = useCallback(() => setSaveVisible(true), []);
   const closeSave = useCallback(() => setSaveVisible(false), []);
+
+  const renamingProfile = renamingId
+    ? (profiles.find((p) => p.id === renamingId) ?? null)
+    : null;
+  const deletingProfile = deletingId
+    ? (profiles.find((p) => p.id === deletingId) ?? null)
+    : null;
+
+  // Rename and delete are mutually exclusive: opening one closes the other, so
+  // the player never has two segment dialogs mounted at once. That used to be
+  // enforced inside the sheet, where both dialogs were also nested in the
+  // sheet's own Modal — two Android windows deep, with two competing back
+  // handlers (#316). They are siblings of the sheet now, and this is the state
+  // that keeps them one at a time.
+  const requestRename = useCallback((profile: SegmentProfile) => {
+    setDeletingId(null);
+    setRenamingId(profile.id);
+  }, []);
+
+  const requestDelete = useCallback((profile: SegmentProfile) => {
+    setRenamingId(null);
+    setDeletingId(profile.id);
+  }, []);
+
+  const confirmRename = useCallback(
+    (name: string) => {
+      if (renamingId) rename(renamingId, name);
+      setRenamingId(null);
+    },
+    [renamingId, rename],
+  );
+
+  const cancelRename = useCallback(() => setRenamingId(null), []);
+
+  // Clears the pending target as well as removing, so the confirmation closes
+  // whether or not the dialog dismissed itself first. `remove` reads the id
+  // captured when the dialog rendered, which is the segment the user saw.
+  const confirmDelete = useCallback(() => {
+    if (deletingId) remove(deletingId);
+    setDeletingId(null);
+  }, [deletingId, remove]);
+
+  const cancelDelete = useCallback(() => setDeletingId(null), []);
 
   // Arm a saved profile on the engine: set A before B so the A < B invariant
   // holds (saved profiles always carry a valid region), then the loop flag, and
@@ -242,8 +306,6 @@ export function useSegmentWorkflow({
 
   return {
     profiles,
-    rename,
-    remove,
     loadedProfile,
     isDirty,
     clearLoaded,
@@ -253,6 +315,14 @@ export function useSegmentWorkflow({
     closeSave,
     saveOverLoaded,
     saveAsNew,
+    renamingProfile,
+    requestRename,
+    confirmRename,
+    cancelRename,
+    deletingProfile,
+    requestDelete,
+    confirmDelete,
+    cancelDelete,
     requestLoad,
     guardVisible: guard != null,
     guardSave,

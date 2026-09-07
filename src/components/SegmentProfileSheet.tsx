@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -8,9 +7,6 @@ import { SegmentProfile } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { AccessiblePressable } from './AccessiblePressable';
 import { BottomSheet } from './BottomSheet';
-import { CenteredDialog } from './CenteredDialog';
-import { DialogButton } from './DialogButton';
-import { SegmentRenameDialog } from './SegmentRenameDialog';
 import { SnippetPreviewSettings } from './SnippetPreviewSettings';
 
 export interface SegmentProfileSheetProps {
@@ -18,10 +14,10 @@ export interface SegmentProfileSheetProps {
   profiles: SegmentProfile[];
   /** Apply a saved profile to the player (sets markers + loop). */
   onLoadProfile: (profile: SegmentProfile) => void;
-  /** Rename a profile by id. */
-  onRename: (profileId: string, name: string) => void;
-  /** Delete a profile by id. */
-  onRemove: (profileId: string) => void;
+  /** Ask the player to open the rename dialog for a profile. */
+  onRequestRename: (profile: SegmentProfile) => void;
+  /** Ask the player to open the delete confirmation for a profile. */
+  onRequestDelete: (profile: SegmentProfile) => void;
   /** Whether marker-drag snippet preview is enabled. */
   snippetPreviewEnabled: boolean;
   /** Toggle marker-drag snippet preview. */
@@ -33,45 +29,27 @@ export interface SegmentProfileSheetProps {
 /**
  * Bottom-sheet surface for managing a track's named A/B segment profiles:
  * load a saved one (which arms its markers via the player and auto-persists),
- * rename, and delete. Saving is now done from the player, where markers are
- * edited; this sheet is load + rename + delete only.
+ * or ask for one to be renamed or deleted. Saving is done from the player,
+ * where markers are edited.
+ *
+ * The rename and delete dialogs are deliberately *not* rendered here. This
+ * sheet is a `Modal`, and on Android every `Modal` is its own window, so a
+ * dialog rendered inside it opened a window nested in the sheet's own: the
+ * card was laid out against different bounds and the hardware back button had
+ * two `onRequestClose` handlers to choose between (#316). The player owns both
+ * dialogs and renders them as siblings of this sheet; the sheet only reports
+ * which profile the user pointed at.
  */
 export function SegmentProfileSheet({
   profiles,
   onLoadProfile,
-  onRename,
-  onRemove,
+  onRequestRename,
+  onRequestDelete,
   snippetPreviewEnabled,
   onSnippetPreviewChange,
   onClose,
 }: SegmentProfileSheetProps) {
   const { theme } = useTheme();
-
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-
-  const renamingProfile = profiles.find((p) => p.id === renamingId) ?? null;
-  const confirmingProfile = profiles.find((p) => p.id === confirmingId) ?? null;
-
-  const startRename = (profile: SegmentProfile) => {
-    setConfirmingId(null);
-    setRenamingId(profile.id);
-  };
-
-  const confirmRename = (name: string) => {
-    if (renamingId) onRename(renamingId, name);
-    setRenamingId(null);
-  };
-
-  const startDelete = (profile: SegmentProfile) => {
-    setRenamingId(null);
-    setConfirmingId(profile.id);
-  };
-
-  const confirmDelete = () => {
-    if (confirmingId) onRemove(confirmingId);
-    setConfirmingId(null);
-  };
 
   const loadProfile = (profile: SegmentProfile) => {
     onLoadProfile(profile);
@@ -140,7 +118,7 @@ export function SegmentProfileSheet({
                 <AccessiblePressable
                   accessibilityRole="button"
                   accessibilityLabel={`Rename ${profile.name}`}
-                  onPress={() => startRename(profile)}
+                  onPress={() => onRequestRename(profile)}
                 >
                   <Ionicons
                     name="pencil"
@@ -151,7 +129,7 @@ export function SegmentProfileSheet({
                 <AccessiblePressable
                   accessibilityRole="button"
                   accessibilityLabel={`Delete ${profile.name}`}
-                  onPress={() => startDelete(profile)}
+                  onPress={() => onRequestDelete(profile)}
                 >
                   <Ionicons
                     name="trash-outline"
@@ -164,36 +142,6 @@ export function SegmentProfileSheet({
           })}
         </View>
       )}
-      {renamingProfile ? (
-        <SegmentRenameDialog
-          currentName={renamingProfile.name}
-          onSave={confirmRename}
-          onCancel={() => setRenamingId(null)}
-        />
-      ) : null}
-      {/* Same confirm affordance as track deletion (TrackListItem): the
-          app-wide CenteredDialog, not an inline row swap, so destructive
-          confirmation looks and behaves identically everywhere. */}
-      {confirmingProfile ? (
-        <CenteredDialog
-          title="Delete segment?"
-          message={`Remove “${confirmingProfile.name}” from this track?`}
-          onDismiss={() => setConfirmingId(null)}
-        >
-          <DialogButton
-            label="Delete"
-            accessibilityLabel={`Confirm delete ${confirmingProfile.name}`}
-            variant="danger"
-            onPress={confirmDelete}
-          />
-          <DialogButton
-            label="Cancel"
-            accessibilityLabel="Cancel delete"
-            variant="default"
-            onPress={() => setConfirmingId(null)}
-          />
-        </CenteredDialog>
-      ) : null}
     </BottomSheet>
   );
 }
