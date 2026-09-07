@@ -76,3 +76,10 @@ expo-env.d.ts
 # safe to delete when a native build wedges.
 /android/
 /ios/
+
+# github-workflow plugin scratch files (per-session, never commit)
+.claude/bulk-set.json
+.claude/label-cache.json
+.claude/candidates.json
+.claude/wf-config.json
+.claude/*.flag
