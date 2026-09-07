@@ -5,14 +5,39 @@ Audio looper app built with Expo (SDK 56) + TypeScript + expo-router.
 ## Commands
 
 - `npm run web` — start Expo dev server for web
-- `npm run ios` — start on iOS
-- `npm run android` — start on Android
+- `npm run ios` — build a dev client, install it, and start Metro
+- `npm run android` — build a dev client, install it, and start Metro
+- `npm start` — start Metro only, against a dev client already installed
 - `npm run lint` — run ESLint
 - `npm run format` — run Prettier (write)
 - `npm run format:check` — check Prettier formatting (CI)
 - `npm test` — run Jest tests
 - `npm run test:coverage` — run tests with coverage report
 - `npm run typecheck` — run TypeScript type checking
+
+### Running on a device
+
+`ios` and `android` compile rather than just starting Metro, because
+Expo Go cannot run this app: `expo-share-intent` ships native code and a
+config plugin, so a dev client has to be built. `expo start --android`
+on its own only opens whatever is already installed, which on a phone
+carrying the store build means launching production and wondering why
+your change is not there.
+
+Two things that bite on Android:
+
+- **A store build blocks the install.** The dev client is signed with
+  the debug keystore and Play builds are not, so installing over one
+  fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall the store
+  copy first: `adb uninstall com.subvertingcomplexity.refrain`.
+- **A wedged NDK cache survives a rebuild.** If Gradle dies on
+  `ninja: error: manifest 'build.ninja' still dirty after 100 tries`,
+  delete every `.cxx` directory under `android/` and `node_modules/`
+  and run again. They are build caches and CMake regenerates them.
+
+The dev client loads its JavaScript from Metro, so the app only runs
+while the dev server is up. Use EAS (`docs/RELEASING.md`) for a
+standalone build.
 
 ## Project Structure
 
