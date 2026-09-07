@@ -573,6 +573,9 @@ describe('WaveformView', () => {
         markerA: 4500,
         markerB: 5500,
         durationMs: 10000,
+        // The y values below split a 180-tall surface. Pinned, because the
+        // surface otherwise scales itself to the viewport.
+        height: 180,
         onMarkerAChange,
         onMarkerBChange,
         onSeek,
@@ -596,6 +599,9 @@ describe('WaveformView', () => {
         markerA: 4500,
         markerB: 5500,
         durationMs: 10000,
+        // The y values below split a 180-tall surface. Pinned, because the
+        // surface otherwise scales itself to the viewport.
+        height: 180,
         onMarkerAChange,
         onMarkerBChange,
         onSeek,

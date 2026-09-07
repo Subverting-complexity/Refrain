@@ -3,6 +3,7 @@ import {
   AccessibilityActionEvent,
   AccessibilityInfo,
   StyleSheet,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
@@ -16,9 +17,9 @@ import { formatDuration } from '../utils/formatTime';
 import { WaveformBars } from './WaveformBars';
 import { MARKER_LINE_HALO, WaveformMarkers } from './WaveformMarkers';
 import {
-  DEFAULT_WAVEFORM_HEIGHT,
   HANDLE_ZONE,
   HORIZONTAL_PADDING,
+  waveformHeightForViewport,
 } from './waveformLayout';
 
 interface WaveformViewProps {
@@ -74,9 +75,16 @@ interface WaveformViewProps {
   onPreviewMove?: (centerMs: number) => void;
   onPreviewEnd?: () => void;
   /**
-   * Overall height of the waveform surface. Lets the player scale it to the
-   * screen so it fills the available space instead of sitting small and
-   * boxed-in. Defaults to {@link DEFAULT_WAVEFORM_HEIGHT}.
+   * Overall height of the waveform surface. Omit it — the player does — and
+   * the surface scales itself to the viewport, so it fills the available space
+   * instead of sitting small and boxed-in. See
+   * {@link waveformHeightForViewport}.
+   *
+   * Reading the viewport here rather than in the player is deliberate: on
+   * Android a metric change arrives for every inset and soft-keyboard event,
+   * and subscribing from the screen re-rendered the screen and everything
+   * under it for a height that had not changed. This component follows the
+   * playhead and so re-renders regardless.
    */
   height?: number;
   style?: ViewStyle;
@@ -141,10 +149,12 @@ export function WaveformView({
   onPreviewStart,
   onPreviewMove,
   onPreviewEnd,
-  height = DEFAULT_WAVEFORM_HEIGHT,
+  height: heightProp,
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
+  const { height: viewportHeight } = useWindowDimensions();
+  const height = heightProp ?? waveformHeightForViewport(viewportHeight);
 
   const { gesture, drag, onLayout } = useWaveformGesture({
     durationMs,

@@ -1,21 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ConfirmDestructiveDialog } from '@/src/components/ConfirmDestructiveDialog';
 import { ControlsDrawer } from '@/src/components/ControlsDrawer';
 import { CountdownOverlay } from '@/src/components/CountdownOverlay';
 import { MarkerControls, PlaceMode } from '@/src/components/MarkerControls';
 import { PlayerErrorBanner } from '@/src/components/PlayerErrorBanner';
 import { SeekBar } from '@/src/components/SeekBar';
 import { SegmentProfileSheet } from '@/src/components/SegmentProfileSheet';
+import { SegmentRenameDialog } from '@/src/components/SegmentRenameDialog';
 import { SegmentSaveDialog } from '@/src/components/SegmentSaveDialog';
 import { ToastHost } from '@/src/components/ToastHost';
 import { TransportControls } from '@/src/components/TransportControls';
@@ -41,18 +38,6 @@ const ARTWORK_PLACEHOLDER_SIZE = 240;
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
-  const { height: windowHeight } = useWindowDimensions();
-  // Scale the waveform to the viewport so it fills the space instead of sitting
-  // small and boxed-in — taller on bigger screens, with sane phone bounds.
-  //
-  // Clamped and rounded, so the metric changes Android reports for insets and
-  // the soft keyboard nearly always resolve to the height already in use. This
-  // screen still re-runs on one of those, but with a value the memoised
-  // children compare equal and stop at.
-  const waveformHeight = useMemo(
-    () => Math.round(Math.min(340, Math.max(180, windowHeight * 0.28))),
-    [windowHeight],
-  );
   const {
     uri: rawUri,
     filename: rawFilename,
@@ -310,10 +295,10 @@ export default function PlayerScreen() {
   // the peak analysis — as opposed to having finished with nothing to show.
   const waveformPending = isResolvingSource || isWaveformLoading;
 
-  // Every handler the memoised controls receive is stable, so a playback tick
-  // reaches only the components that display the playhead. An inline arrow
-  // here would be a fresh prop on each tick and would undo the memoisation of
-  // whichever control it was passed to.
+  // Every handler the memoised controls receive has to be stable, or a playback
+  // tick hands one of them a fresh prop and undoes its memoisation. The two
+  // ternaries below need no wrapping — they select between references that are
+  // already stable — but an inline arrow would.
   const handlePlay = useCallback(() => {
     if (isCounting) {
       cancelCountdown();
@@ -323,9 +308,39 @@ export default function PlayerScreen() {
   }, [isCounting, cancelCountdown, playWithCountdown]);
 
   const handleOpenSegments = useCallback(() => setProfilesVisible(true), []);
-  const handleCloseSegments = useCallback(() => setProfilesVisible(false), []);
   const handleSave = trackId ? segments.openSave : undefined;
   const handlePause = isCounting ? cancelCountdown : pause;
+
+  // The segment rename and delete dialogs. The sheet decides where to mount
+  // this — inside its own Modal or beside it — because the answer differs by
+  // platform; see SegmentProfileSheet. The workflow hook keeps the two
+  // mutually exclusive, so this is never more than one dialog.
+  const segmentDialog = segments.renamingProfile ? (
+    <SegmentRenameDialog
+      currentName={segments.renamingProfile.name}
+      onSave={segments.confirmRename}
+      onCancel={segments.cancelRename}
+    />
+  ) : segments.deletingProfile ? (
+    <ConfirmDestructiveDialog
+      title="Delete segment?"
+      message={`Remove “${segments.deletingProfile.name}” from this track?`}
+      confirmLabel="Delete"
+      confirmAccessibilityLabel={`Confirm delete ${segments.deletingProfile.name}`}
+      cancelAccessibilityLabel="Cancel delete"
+      onConfirm={segments.confirmDelete}
+      onDismiss={segments.cancelDelete}
+    />
+  ) : null;
+
+  // Closing the sheet drops any dialog pending over it, so reopening the sheet
+  // does not bring back a dialog the user had moved on from.
+  const { cancelRename, cancelDelete } = segments;
+  const closeProfiles = useCallback(() => {
+    setProfilesVisible(false);
+    cancelRename();
+    cancelDelete();
+  }, [cancelRename, cancelDelete]);
 
   return (
     <SafeAreaView
@@ -365,7 +380,6 @@ export default function PlayerScreen() {
               onPreviewEnd={
                 snippetPreviewEnabled ? handlePreviewEnd : undefined
               }
-              height={waveformHeight}
             />
           ) : (
             <View
@@ -473,11 +487,12 @@ export default function PlayerScreen() {
         <SegmentProfileSheet
           profiles={segments.profiles}
           onLoadProfile={segments.requestLoad}
-          onRename={segments.rename}
-          onRemove={segments.remove}
+          onRequestRename={segments.requestRename}
+          onRequestDelete={segments.requestDelete}
+          dialog={segmentDialog}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
-          onClose={handleCloseSegments}
+          onClose={closeProfiles}
         />
       ) : null}
 
