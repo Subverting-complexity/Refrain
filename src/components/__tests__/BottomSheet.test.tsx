@@ -1,5 +1,13 @@
 import React from 'react';
-import { Modal, ScrollView, StyleSheet, Text, ViewStyle } from 'react-native';
+import {
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  ViewStyle,
+} from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { BottomSheet } from '../BottomSheet';
@@ -15,16 +23,37 @@ jest.mock('../../hooks/useTheme');
 
 function renderSheet(
   props: Partial<React.ComponentProps<typeof BottomSheet>> = {},
+  bottomInset?: number,
 ): ReactTestRenderer {
+  const sheet = (
+    <BottomSheet title="Volume" onClose={jest.fn()} {...props}>
+      <Text>Sheet body</Text>
+    </BottomSheet>
+  );
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
-      <BottomSheet title="Volume" onClose={jest.fn()} {...props}>
-        <Text>Sheet body</Text>
-      </BottomSheet>,
+      bottomInset === undefined ? (
+        sheet
+      ) : (
+        <SafeAreaInsetsContext.Provider
+          value={{ top: 24, left: 0, right: 0, bottom: bottomInset }}
+        >
+          {sheet}
+        </SafeAreaInsetsContext.Provider>
+      ),
     );
   });
   return tree;
+}
+
+/** The scroll content's flattened style, where the bottom padding lives. */
+function bodyPadding(tree: ReactTestRenderer): number | undefined {
+  const scroll = tree.root.findByType(ScrollView);
+  const style = StyleSheet.flatten(
+    scroll.props.contentContainerStyle,
+  ) as ViewStyle;
+  return style.paddingBottom as number | undefined;
 }
 
 describe('BottomSheet', () => {
@@ -86,6 +115,62 @@ describe('BottomSheet', () => {
     expect(modal.props.transparent).toBe(true);
     expect(modal.props.animationType).toBe('slide');
     expect(modal.props.visible).toBe(true);
+  });
+
+  /**
+   * A Modal is its own window on Android and only draws under the system bars
+   * when told to, so a sheet that had not opted in left the backdrop undimmed
+   * behind both bars while the app itself ran edge-to-edge (#315).
+   */
+  describe('Android system bars', () => {
+    let replacedPlatform: ReturnType<typeof jest.replaceProperty> | undefined;
+
+    afterEach(() => {
+      replacedPlatform?.restore();
+      replacedPlatform = undefined;
+    });
+
+    function onPlatform(os: 'ios' | 'android' | 'web'): void {
+      replacedPlatform = jest.replaceProperty(Platform, 'OS', os);
+    }
+
+    it('extends the window under both system bars', () => {
+      const modal = renderSheet().root.findByType(Modal);
+      expect(modal.props.statusBarTranslucent).toBe(true);
+      // React Native ignores this one unless statusBarTranslucent is set too.
+      expect(modal.props.navigationBarTranslucent).toBe(true);
+    });
+
+    // The sheet is bottom-aligned, so once its window reaches the bottom of
+    // the screen the last row sits under the navigation bar unless the body
+    // reserves the inset. 32 alone is less than a 48dp three-button bar.
+    it('reserves the navigation-bar inset on Android', () => {
+      onPlatform('android');
+      expect(bodyPadding(renderSheet({}, 48))).toBe(80);
+    });
+
+    it('reserves nothing extra under gesture navigation beyond its inset', () => {
+      onPlatform('android');
+      expect(bodyPadding(renderSheet({}, 24))).toBe(56);
+    });
+
+    it('leaves iOS padding unchanged', () => {
+      onPlatform('ios');
+      expect(bodyPadding(renderSheet({}, 34))).toBe(32);
+    });
+
+    it('leaves web padding unchanged', () => {
+      onPlatform('web');
+      expect(bodyPadding(renderSheet({}, 0))).toBe(32);
+    });
+
+    // Every existing sheet suite renders without a SafeAreaProvider, and so
+    // does any screen that forgets one. `useSafeAreaInsets` throws in that
+    // case; reading the context directly degrades to no inset instead.
+    it('renders without a safe-area provider', () => {
+      onPlatform('android');
+      expect(bodyPadding(renderSheet())).toBe(32);
+    });
   });
 
   // Every sheet in the player shares this scaffold, so an unbounded body here

@@ -49,8 +49,18 @@ export interface CenteredDialogProps {
  *    first tap while the keyboard is open, instead of spending that tap on
  *    dismissing the keyboard.
  *
- * `statusBarTranslucent` keeps the backdrop covering the full screen on
- * Android, which the keyboard-driven resize would otherwise expose.
+ * ## Android system bars
+ *
+ * A `Modal` is its own window on Android, and a window only draws under the
+ * system bars when it is told to. `statusBarTranslucent` keeps the backdrop
+ * covering the full screen, which the keyboard-driven resize would otherwise
+ * expose; `navigationBarTranslucent` does the same at the bottom, where the
+ * backdrop previously stopped short of the navigation bar and left an undimmed
+ * strip. React Native ignores the second unless the first is set too.
+ *
+ * Unlike `BottomSheet`, the card is centred rather than bottom-aligned, so
+ * extending the window under the navigation bar does not put any content
+ * beneath it and no bottom inset is needed.
  */
 export function CenteredDialog({
   title,
@@ -66,6 +76,7 @@ export function CenteredDialog({
       transparent
       animationType="fade"
       statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={onDismiss}
     >
       <KeyboardAvoidingView

@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useContext } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../hooks/useTheme';
@@ -39,6 +40,20 @@ interface BottomSheetProps {
  * titled header with a close button. The count-in, volume, and skip settings,
  * the marker-time editor, and the segment list each render their body inside
  * one of these so every bottom sheet in the player behaves the same way.
+ *
+ * ## Android system bars
+ *
+ * A `Modal` is its own window on Android, and a window only draws under the
+ * system bars when it is told to. The app itself runs edge-to-edge — the
+ * default from Expo SDK 54, and not optional on recent Android versions — so a
+ * sheet that had not opted in stopped short of both bars and left the backdrop
+ * undimmed behind them. `statusBarTranslucent` and `navigationBarTranslucent`
+ * extend the window to the full screen; React Native ignores the second unless
+ * the first is set too.
+ *
+ * Extending the window under the navigation bar puts the sheet's own bottom
+ * edge beneath it, so the body reserves the bottom inset. Only on Android:
+ * that is the only platform whose window bounds this changes.
  */
 export function BottomSheet({
   title,
@@ -48,9 +63,21 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const { theme } = useTheme();
   const label = closeLabel ?? `Close ${title}`;
+  // Read straight off the context rather than through `useSafeAreaInsets`,
+  // which throws when no provider is mounted. A sheet must not take a screen
+  // down over a missing provider; without one there is no inset to reserve.
+  const insets = useContext(SafeAreaInsetsContext);
+  const bottomInset = Platform.OS === 'android' ? (insets?.bottom ?? 0) : 0;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       {/* iOS lifts the sheet above the on-screen keyboard when a sheet body
           holds a text field; Android resizes the window itself. */}
       <KeyboardAvoidingView
@@ -93,7 +120,10 @@ export function BottomSheet({
               rather than rubber-banding for no reason. */}
           <ScrollView
             style={styles.body}
-            contentContainerStyle={styles.bodyContent}
+            contentContainerStyle={[
+              styles.bodyContent,
+              { paddingBottom: spacing.xxl + bottomInset },
+            ]}
             alwaysBounceVertical={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -137,7 +167,10 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   // The bottom padding lives on the scroll content (not the sheet) so the last
-  // row can scroll clear of the bottom edge.
+  // row can scroll clear of the bottom edge. The component adds the Android
+  // navigation-bar inset on top of this: 32 alone is less than the 48dp a
+  // three-button navigation bar takes, which would leave the last row of a
+  // sheet under it and untappable.
   bodyContent: {
     paddingBottom: spacing.xxl,
     gap: spacing.md,

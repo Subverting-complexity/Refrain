@@ -122,5 +122,15 @@ describe('CenteredDialog', () => {
       const tree = renderDialog();
       expect(tree.root.findByType(Modal).props.statusBarTranslucent).toBe(true);
     });
+
+    // The app runs edge-to-edge, so the main window draws under the navigation
+    // bar but a modal window that has not opted in does not — which left an
+    // undimmed strip along the bottom of every dialog (#315).
+    it('keeps the backdrop covering the navigation bar area on Android', () => {
+      const tree = renderDialog();
+      expect(tree.root.findByType(Modal).props.navigationBarTranslucent).toBe(
+        true,
+      );
+    });
   });
 });
