@@ -1,113 +1,304 @@
-import React from 'react';
-import { create, act } from 'react-test-renderer';
+import { createElement } from 'react';
+import { act, create } from 'react-test-renderer';
 
-import { HORIZONTAL_PADDING } from '../../components/waveformLayout';
 import {
   useWaveformGesture,
   UseWaveformGestureParams,
+  UseWaveformGesture,
 } from '../useWaveformGesture';
 
+// Stub gesture-handler with a fluent recorder so the test can invoke the
+// begin/update/finalize callbacks directly with synthetic events — the same
+// surface the native handler drives on a device.
+const mockHandlers: Record<string, (e: unknown) => void> = {};
 jest.mock('react-native-gesture-handler', () => {
-  let last: { handlers: Record<string, (e: unknown) => void> } | null = null;
   const makePan = () => {
-    const handlers: Record<string, (e: unknown) => void> = {};
-    const api = {
-      runOnJS: () => api,
-      minDistance: () => api,
-      onBegin: (f: (e: unknown) => void) => {
-        handlers.begin = f;
-        return api;
-      },
-      onUpdate: (f: (e: unknown) => void) => {
-        handlers.update = f;
-        return api;
-      },
-      onFinalize: (f: (e: unknown) => void) => {
-        handlers.finalize = f;
-        return api;
-      },
+    const api: Record<string, unknown> = {};
+    ['runOnJS', 'minDistance', 'enabled'].forEach((m) => {
+      api[m] = () => api;
+    });
+    api.onBegin = (f: (e: unknown) => void) => {
+      mockHandlers.begin = f;
+      return api;
     };
-    last = { handlers };
+    api.onUpdate = (f: (e: unknown) => void) => {
+      mockHandlers.update = f;
+      return api;
+    };
+    api.onFinalize = (f: (e: unknown) => void) => {
+      mockHandlers.finalize = f;
+      return api;
+    };
     return api;
   };
-  return {
-    Gesture: { Pan: makePan },
-    __getHandlers: () => last?.handlers,
-  };
+  return { Gesture: { Pan: makePan } };
 });
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const RNGH = require('react-native-gesture-handler');
-const handlers = () => RNGH.__getHandlers();
+// Geometry the assertions rely on: the track is inset 12px each side, so a
+// 300px container gives a 276px track. At a 10s duration, x=12 is 0ms,
+// x=150 is 5000ms, and x=288 is 10000ms.
+const CONTAINER_WIDTH = 300;
+const DURATION_MS = 10000;
+const HEIGHT = 180;
+/** x of a marker handle at `ms`, in touch-area coordinates. */
+const xFor = (ms: number) => 12 + (ms / DURATION_MS) * 276;
 
-let hookResult: ReturnType<typeof useWaveformGesture>;
+let lastResult: UseWaveformGesture;
 
-function HookHost(params: UseWaveformGestureParams) {
-  hookResult = useWaveformGesture(params);
+function TestComponent(props: UseWaveformGestureParams) {
+  lastResult = useWaveformGesture(props);
   return null;
 }
 
-const TRACK_WIDTH = 300;
-
-function renderHook(overrides: Partial<UseWaveformGestureParams> = {}) {
+function render(overrides: Partial<UseWaveformGestureParams> = {}) {
+  const props: UseWaveformGestureParams = {
+    durationMs: DURATION_MS,
+    height: HEIGHT,
+    placeMode: 'none',
+    onSeek: jest.fn(),
+    ...overrides,
+  };
+  let tree!: ReturnType<typeof create>;
   act(() => {
-    create(
-      React.createElement(HookHost, {
-        durationMs: 10000,
-        height: 180,
-        placeMode: 'none',
-        onSeek: jest.fn(),
-        ...overrides,
-      }),
-    );
+    tree = create(createElement(TestComponent, props));
   });
+  const rerender = () =>
+    act(() => {
+      tree.update(createElement(TestComponent, props));
+    });
+  return { props, rerender };
+}
+
+function layout(width = CONTAINER_WIDTH) {
   act(() => {
-    hookResult.onLayout({
-      nativeEvent: { layout: { width: TRACK_WIDTH + 2 * HORIZONTAL_PADDING } },
-    } as never);
+    lastResult.onLayout({
+      nativeEvent: { layout: { width } },
+      // The hook only reads layout.width; the rest of the event is irrelevant.
+    } as Parameters<UseWaveformGesture['onLayout']>[0]);
   });
 }
 
-const begin = (x: number, y = 0) => act(() => handlers().begin({ x, y }));
-const move = (x: number) => act(() => handlers().update({ x }));
-const finalize = () => act(() => handlers().finalize({}));
+const begin = (x: number, y = 0) => act(() => mockHandlers.begin({ x, y }));
+const move = (x: number) => act(() => mockHandlers.update({ x }));
+const finalize = () => act(() => mockHandlers.finalize({}));
 
 describe('useWaveformGesture', () => {
-  /**
-   * The reason `moveDrag` compares before it sets. A pan reports every pointer
-   * event and positions round to whole milliseconds, so a held finger sends a
-   * run of moves that all resolve to the same place. Each one used to allocate
-   * a fresh drag object and re-render the whole waveform surface for a value
-   * that had not changed.
-   */
-  it('keeps the same drag object when a move resolves to the same position', () => {
-    renderHook();
-    begin(HORIZONTAL_PADDING + 150);
-    const afterBegin = hookResult.drag;
+  it('builds the Pan gesture once across re-renders', () => {
+    const { rerender } = render();
+    const first = lastResult.gesture;
 
-    move(HORIZONTAL_PADDING + 150);
+    rerender();
 
-    expect(hookResult.drag).toBe(afterBegin);
-    finalize();
+    expect(lastResult.gesture).toBe(first);
   });
 
-  it('allocates a new drag object when the position actually moves', () => {
-    renderHook();
-    begin(HORIZONTAL_PADDING + 150);
-    const afterBegin = hookResult.drag;
+  describe('routing a touch', () => {
+    it('seeks on a tap when no marker is under the finger', () => {
+      const { props } = render();
+      layout();
 
-    move(HORIZONTAL_PADDING + 200);
+      begin(xFor(5000));
 
-    expect(hookResult.drag).not.toBe(afterBegin);
-    expect(hookResult.drag?.ms).not.toBe(afterBegin?.ms);
-    finalize();
+      expect(props.onSeek).toHaveBeenCalledWith(5000);
+    });
+
+    it('ignores touches before the surface has been measured', () => {
+      const { props } = render();
+
+      begin(xFor(5000));
+
+      expect(props.onSeek).not.toHaveBeenCalled();
+    });
+
+    it('ignores touches on a track of unknown length', () => {
+      const { props } = render({ durationMs: 0 });
+      layout();
+
+      begin(150);
+
+      expect(props.onSeek).not.toHaveBeenCalled();
+    });
+
+    it('grabs an existing A handle instead of seeking', () => {
+      const onMarkerAChange = jest.fn();
+      const { props } = render({ markerA: 5000, onMarkerAChange });
+      layout();
+
+      begin(xFor(5000));
+
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+      expect(props.onSeek).not.toHaveBeenCalled();
+    });
+
+    it('leaves a marker ungrabbable without a change handler', () => {
+      const { props } = render({ markerA: 5000 });
+      layout();
+
+      begin(xFor(5000));
+
+      expect(props.onSeek).toHaveBeenCalledWith(5000);
+    });
+
+    // A lives at the top of the surface and B at the bottom, so markers sitting
+    // almost on top of each other stay individually selectable.
+    it('splits overlapping handles by the vertical half of the touch', () => {
+      const onMarkerAChange = jest.fn();
+      const onMarkerBChange = jest.fn();
+      render({
+        markerA: 5000,
+        markerB: 5100,
+        onMarkerAChange,
+        onMarkerBChange,
+      });
+      layout();
+
+      begin(xFor(5000), 10);
+      finalize();
+      expect(onMarkerAChange).toHaveBeenCalled();
+      expect(onMarkerBChange).not.toHaveBeenCalled();
+
+      begin(xFor(5000), HEIGHT - 10);
+      expect(onMarkerBChange).toHaveBeenCalled();
+    });
   });
 
-  it('drops the drag on release', () => {
-    renderHook();
-    begin(HORIZONTAL_PADDING + 150);
+  describe('tap-to-place', () => {
+    it('drops an armed A marker and reports the placement', () => {
+      const onMarkerAChange = jest.fn();
+      const onPlaceComplete = jest.fn();
+      render({ placeMode: 'A', onMarkerAChange, onPlaceComplete });
+      layout();
+
+      begin(xFor(5000));
+      expect(onMarkerAChange).toHaveBeenCalledWith(5000);
+
+      finalize();
+      expect(onPlaceComplete).toHaveBeenCalledWith('A');
+    });
+
+    it('does not report a placement for a fine-tune drag', () => {
+      const onMarkerAChange = jest.fn();
+      const onPlaceComplete = jest.fn();
+      render({ markerA: 5000, onMarkerAChange, onPlaceComplete });
+      layout();
+
+      begin(xFor(5000));
+      finalize();
+
+      expect(onPlaceComplete).not.toHaveBeenCalled();
+    });
+
+    it('only seeks when nothing is armed', () => {
+      const onMarkerAChange = jest.fn();
+      const { props } = render({ onMarkerAChange });
+      layout();
+
+      begin(xFor(5000));
+
+      expect(props.onSeek).toHaveBeenCalledWith(5000);
+      expect(onMarkerAChange).not.toHaveBeenCalled();
+    });
+  });
+
+  // The engine rejects a B at or before A, so the handle has to stop at the
+  // boundary rather than keep moving and have its write silently dropped.
+  it('clamps a dragged B handle to just past A', () => {
+    const onMarkerBChange = jest.fn();
+    render({ markerA: 5000, markerB: 8000, onMarkerBChange });
+    layout();
+
+    begin(xFor(8000), HEIGHT - 10);
+    move(xFor(1000));
     finalize();
 
-    expect(hookResult.drag).toBeNull();
+    expect(onMarkerBChange).toHaveBeenLastCalledWith(5001);
+    expect(lastResult.drag).toBeNull();
+  });
+
+  describe('drag state', () => {
+    it('tracks the live value and target, then clears on release', () => {
+      const { rerender } = render();
+      layout();
+
+      begin(xFor(2500));
+      rerender();
+      expect(lastResult.drag).toEqual({ ms: 2500, target: 'seek' });
+
+      finalize();
+      rerender();
+      expect(lastResult.drag).toBeNull();
+    });
+
+    /**
+     * The reason `moveDrag` compares before it sets. A pan reports every
+     * pointer event and positions round to whole milliseconds, so a held
+     * finger sends a run of moves that all resolve to the same place. Each one
+     * used to allocate a fresh drag object and re-render the whole waveform
+     * surface for a value that had not changed.
+     */
+    it('keeps the same drag object when a move resolves to the same position', () => {
+      render();
+      layout();
+
+      begin(xFor(2500));
+      const afterBegin = lastResult.drag;
+
+      move(xFor(2500));
+
+      expect(lastResult.drag).toBe(afterBegin);
+      finalize();
+    });
+
+    it('allocates a new drag object when the position actually moves', () => {
+      render();
+      layout();
+
+      begin(xFor(2500));
+      const afterBegin = lastResult.drag;
+
+      move(xFor(6000));
+
+      expect(lastResult.drag).not.toBe(afterBegin);
+      expect(lastResult.drag).toEqual({ ms: 6000, target: 'seek' });
+      finalize();
+    });
+  });
+
+  describe('snippet preview', () => {
+    it('starts, follows, and ends the preview for a marker drag', () => {
+      const onPreviewStart = jest.fn();
+      const onPreviewMove = jest.fn();
+      const onPreviewEnd = jest.fn();
+      render({
+        markerA: 5000,
+        onMarkerAChange: jest.fn(),
+        onPreviewStart,
+        onPreviewMove,
+        onPreviewEnd,
+      });
+      layout();
+
+      begin(xFor(5000));
+      expect(onPreviewStart).toHaveBeenCalledWith(5000);
+
+      move(xFor(6000));
+      finalize();
+
+      expect(onPreviewMove).toHaveBeenCalledWith(6000);
+      expect(onPreviewEnd).toHaveBeenCalled();
+    });
+
+    it('never previews a plain seek', () => {
+      const onPreviewStart = jest.fn();
+      const onPreviewEnd = jest.fn();
+      render({ onPreviewStart, onPreviewEnd });
+      layout();
+
+      begin(xFor(5000));
+      finalize();
+
+      expect(onPreviewStart).not.toHaveBeenCalled();
+      expect(onPreviewEnd).not.toHaveBeenCalled();
+    });
   });
 });
