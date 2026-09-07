@@ -53,8 +53,11 @@ interface MarkerProps {
  * labelled flag. A's flag sits at the top and B's at the bottom, so the two
  * grab targets never stack on top of each other even when the markers are
  * close together.
+ *
+ * Memoised on primitives. A marker sits still through everything the playhead
+ * does, so it must not pay for a playback tick.
  */
-function Marker({
+const Marker = React.memo(function Marker({
   label,
   ms,
   durationMs,
@@ -100,15 +103,18 @@ function Marker({
       </View>
     </>
   );
-}
+});
 
 /**
  * The A/B overlay: the tinted loop region plus each marker's line, dot, and
  * flag. Purely presentational — positions arrive as milliseconds and are
  * turned into percentages of the track, nothing here hit-tests or drags.
  * Absolutely positioned, so it expects a relative parent.
+ *
+ * Memoised, with the same reasoning as `Marker`: the overlay only changes when
+ * a marker moves, which is a gesture, not a tick.
  */
-export function WaveformMarkers({
+export const WaveformMarkers = React.memo(function WaveformMarkers({
   durationMs,
   markerA,
   markerB,
@@ -169,7 +175,7 @@ export function WaveformMarkers({
       ) : null}
     </>
   );
-}
+});
 
 const styles = StyleSheet.create({
   // These overlays must not swallow touches meant for the pan gesture. Carried

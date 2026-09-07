@@ -84,6 +84,40 @@ interface WaveformViewProps {
 
 const SEEK_STEP_MS = 5000;
 
+interface CursorProps {
+  /** Playhead as a percentage of the track, matching the bars' 0..1 space. */
+  leftPct: number;
+  color: string;
+  edgeColor: string;
+}
+
+/**
+ * The playhead line. Its own memoised component so that the renders which do
+ * not move it — a marker drag, an arm-state change, a parent re-render — leave
+ * it alone. When the playhead *does* move this is the one element that has to
+ * change, which is the point: it moves on its own rather than dragging the rest
+ * of the surface with it.
+ */
+const Cursor = React.memo(function Cursor({
+  leftPct,
+  color,
+  edgeColor,
+}: CursorProps) {
+  return (
+    <View
+      style={[
+        styles.noPointerEvents,
+        styles.cursor,
+        {
+          left: `${leftPct}%`,
+          backgroundColor: color,
+          borderColor: edgeColor,
+        },
+      ]}
+    />
+  );
+});
+
 /**
  * The waveform surface: a touch target wrapping the bars, the A/B overlay, and
  * the playhead. Touch behaviour lives in {@link useWaveformGesture} and the
@@ -183,6 +217,24 @@ export function WaveformView({
     ],
   );
 
+  // Rebuilt only when a marker handler appears or disappears. Inline, this
+  // array was a fresh one on every playback tick, so the container's props
+  // never compared equal and the accessibility surface was re-registered ten
+  // times a second for a set of actions that had not changed.
+  const a11yActions = useMemo(
+    () => [
+      { name: 'increment' },
+      { name: 'decrement' },
+      ...(onMarkerAChange
+        ? [{ name: 'placeA', label: 'Place A marker at current position' }]
+        : []),
+      ...(onMarkerBChange
+        ? [{ name: 'placeB', label: 'Place B marker at current position' }]
+        : []),
+    ],
+    [onMarkerAChange, onMarkerBChange],
+  );
+
   const a11yLabel = useMemo(() => {
     let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
     if (markerA != null && markerB != null) {
@@ -201,16 +253,7 @@ export function WaveformView({
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
       accessibilityHint="Swipe up or down to seek. Activate for more options including placing loop markers."
-      accessibilityActions={[
-        { name: 'increment' },
-        { name: 'decrement' },
-        ...(onMarkerAChange
-          ? [{ name: 'placeA', label: 'Place A marker at current position' }]
-          : []),
-        ...(onMarkerBChange
-          ? [{ name: 'placeB', label: 'Place B marker at current position' }]
-          : []),
-      ]}
+      accessibilityActions={a11yActions}
       onAccessibilityAction={handleAccessibilityAction}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
@@ -233,16 +276,10 @@ export function WaveformView({
               hasRegion={hasRegion}
             />
 
-            <View
-              style={[
-                styles.noPointerEvents,
-                styles.cursor,
-                {
-                  left: `${progress * 100}%`,
-                  backgroundColor: theme.colors.textPrimary,
-                  borderColor: theme.colors.surface,
-                },
-              ]}
+            <Cursor
+              leftPct={progress * 100}
+              color={theme.colors.textPrimary}
+              edgeColor={theme.colors.surface}
             />
           </View>
         </View>
