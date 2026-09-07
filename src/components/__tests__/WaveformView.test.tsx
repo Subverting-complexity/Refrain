@@ -1,9 +1,10 @@
 import React from 'react';
-import { AccessibilityInfo, StyleSheet } from 'react-native';
+import { AccessibilityInfo, Dimensions, StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { darkTheme } from '../../theme';
 import { MARKER_LINE_HALO } from '../WaveformMarkers';
+import { waveformHeightForViewport } from '../waveformLayout';
 import { WaveformView } from '../WaveformView';
 
 jest.mock('../../hooks/useTheme');
@@ -199,6 +200,33 @@ describe('WaveformView', () => {
     ).height;
 
     expect(height).not.toContain('NaN');
+  });
+
+  /**
+   * The mechanism #323's fourth criterion turns on: the surface reads the
+   * viewport itself, so an Android inset or soft-keyboard metric change stops
+   * at this component instead of re-rendering the player screen. Without a
+   * test here, putting a static default back would fail nothing.
+   */
+  it('sizes itself to the viewport when the caller gives no height', () => {
+    const spy = jest
+      .spyOn(Dimensions, 'get')
+      .mockReturnValue({ width: 400, height: 1000, scale: 2, fontScale: 1 });
+    try {
+      const tree = renderWaveform();
+      const height = StyleSheet.flatten(getTouchArea(tree).props.style).height;
+
+      expect(height).toBe(waveformHeightForViewport(1000));
+      expect(height).not.toBe(180);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('uses the height it is given over the viewport', () => {
+    const tree = renderWaveform({ height: 210 });
+
+    expect(StyleSheet.flatten(getTouchArea(tree).props.style).height).toBe(210);
   });
 
   it('renders a cursor element', () => {
