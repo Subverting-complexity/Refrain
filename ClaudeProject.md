@@ -146,7 +146,7 @@ Issues should include these sections at minimum:
 
 | Purpose         | Status      | Option ID  |
 | --------------- | ----------- | ---------- |
-| col-backlog     | Todo        | `ee4b8f56` |
+| col-backlog     | Backlog     | `ee4b8f56` |
 | col-ready       | Ready       | `38864860` |
 | col-in-progress | In Progress | `bc8d792a` |
 | col-in-review   | In Review   | `66276e02` |
