@@ -140,11 +140,13 @@ export function useSegmentWorkflow({
     : null;
 
   // Rename and delete are mutually exclusive: opening one closes the other, so
-  // the player never has two segment dialogs mounted at once. That used to be
-  // enforced inside the sheet, where both dialogs were also nested in the
-  // sheet's own Modal — two Android windows deep, with two competing back
-  // handlers (#316). They are siblings of the sheet now, and this is the state
-  // that keeps them one at a time.
+  // there is never more than one segment dialog over the sheet. The sheet used
+  // to own this state and render both dialogs inside its own Modal — on
+  // Android two windows deep, with two competing back handlers (#316). The
+  // player owns the dialog now and the sheet places it, which on Android means
+  // beside itself rather than within; see `nestDialogInSheet` in
+  // SegmentProfileSheet for why that differs by platform. This is the state
+  // that keeps it to one at a time.
   const requestRename = useCallback((profile: SegmentProfile) => {
     setDeletingId(null);
     setRenamingId(profile.id);

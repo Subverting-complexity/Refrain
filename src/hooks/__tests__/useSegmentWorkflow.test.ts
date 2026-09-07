@@ -445,10 +445,11 @@ describe('useSegmentWorkflow', () => {
   });
 
   /**
-   * The rename and delete dialogs used to live inside the segments sheet,
-   * nested in its Modal — on Android a window inside a window (#316). They are
-   * siblings of the sheet now, and this hook owns which one is open so at most
-   * one is ever mounted next to it.
+   * The rename and delete dialogs used to be owned by the segments sheet and
+   * rendered inside its Modal — on Android a window inside a window (#316).
+   * The player owns them now and this hook owns which one is open, so at most
+   * one is ever mounted over the sheet. Where the sheet then places it differs
+   * by platform; that decision lives in SegmentProfileSheet, not here.
    */
   describe('rename and delete dialogs', () => {
     const verse = profile({ id: 'p1', name: 'Verse' });
