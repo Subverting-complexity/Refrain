@@ -54,10 +54,22 @@
               "mimeType": "audio/mp3"
             },
             {
+              "mimeType": "audio/x-mpeg"
+            },
+            {
+              "mimeType": "audio/mpeg3"
+            },
+            {
+              "mimeType": "audio/x-mpeg-3"
+            },
+            {
               "mimeType": "audio/wav"
             },
             {
               "mimeType": "audio/x-wav"
+            },
+            {
+              "mimeType": "audio/wave"
             },
             {
               "mimeType": "audio/vnd.wave"
@@ -69,6 +81,9 @@
               "mimeType": "audio/x-aac"
             },
             {
+              "mimeType": "audio/aacp"
+            },
+            {
               "mimeType": "audio/mp4"
             },
             {
@@ -76,6 +91,9 @@
             },
             {
               "mimeType": "audio/m4a"
+            },
+            {
+              "mimeType": "audio/mp4a-latm"
             }
           ]
         }
@@ -122,26 +140,38 @@
           "androidIntentFilters": [
             "audio/mpeg",
             "audio/mp3",
+            "audio/x-mpeg",
+            "audio/mpeg3",
+            "audio/x-mpeg-3",
             "audio/wav",
             "audio/x-wav",
+            "audio/wave",
             "audio/vnd.wave",
             "audio/aac",
             "audio/x-aac",
+            "audio/aacp",
             "audio/mp4",
             "audio/x-m4a",
-            "audio/m4a"
+            "audio/m4a",
+            "audio/mp4a-latm"
           ],
           "androidMultiIntentFilters": [
             "audio/mpeg",
             "audio/mp3",
+            "audio/x-mpeg",
+            "audio/mpeg3",
+            "audio/x-mpeg-3",
             "audio/wav",
             "audio/x-wav",
+            "audio/wave",
             "audio/vnd.wave",
             "audio/aac",
             "audio/x-aac",
+            "audio/aacp",
             "audio/mp4",
             "audio/x-m4a",
-            "audio/m4a"
+            "audio/m4a",
+            "audio/mp4a-latm"
           ]
         }
       ]

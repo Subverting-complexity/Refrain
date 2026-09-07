@@ -26,8 +26,25 @@ jest.mock('expo-crypto', () => ({
   getRandomValues: (arr: Uint8Array) => mockGetRandomValues(arr),
 }));
 
-function makeBlob(bytes = 1000): Blob {
-  return { size: bytes, type: 'audio/mpeg' } as Blob;
+/**
+ * A blob with no declared type, so these tests exercise the filename. The
+ * type is set explicitly in the tests that are about it — a browser `File`
+ * carries a real name, so the extension is the usual signal here, but the
+ * precedence still has to match the native path.
+ */
+function makeBlob(bytes = 1000, type = ''): Blob {
+  return { size: bytes, type } as Blob;
+}
+
+/** A blob whose header can be read, for the last-resort byte check. */
+function makeSniffableBlob(head: number[], type = ''): Blob {
+  return {
+    size: head.length,
+    type,
+    slice: () => ({
+      arrayBuffer: () => Promise.resolve(new Uint8Array(head).buffer),
+    }),
+  } as unknown as Blob;
 }
 
 beforeEach(() => {
@@ -72,13 +89,53 @@ describe('importBlob', () => {
   });
 
   it('rejects an unsupported format before touching storage', async () => {
-    const result = await importBlob(makeBlob(), 'clip.flac', 100);
+    const result = await importBlob(
+      makeBlob(100, 'audio/flac'),
+      'clip.flac',
+      100,
+    );
     expect(result).toEqual({
       success: false,
       error: 'unsupported_format',
       message: expect.stringContaining('flac'),
     });
     expect(mockPutBlob).not.toHaveBeenCalled();
+  });
+
+  it('uses the declared type when the name carries no extension', async () => {
+    const result = await importBlob(
+      makeBlob(100, 'audio/mp4'),
+      'download',
+      100,
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.track.format).toBe('m4a');
+      expect(result.track.filename).toBe('Imported track.m4a');
+    }
+  });
+
+  it('falls back to the header when neither name nor type identifies it', async () => {
+    const wavHeader = [
+      0x52, 0x49, 0x46, 0x46, 0x24, 0x08, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
+    ];
+    const blob = makeSniffableBlob(wavHeader, 'application/octet-stream');
+
+    const result = await importBlob(blob, 'download', 12);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.track.format).toBe('wav');
+    }
+  });
+
+  it('never reports an empty format when nothing identifies the file', async () => {
+    const result = await importBlob(makeBlob(100), 'download', 100);
+    expect(result).toEqual({
+      success: false,
+      error: 'unsupported_format',
+      message: 'Unsupported audio format',
+    });
   });
 
   it('falls back to the sentinel uri when the object URL cannot be made', async () => {

@@ -1,10 +1,14 @@
 import {
   EXTENSION_TO_FORMAT,
+  displayFilename,
   estimateDurationMs,
   getExtension,
   isSupportedFilename,
   makeError,
+  normaliseMimeType,
   parseFormat,
+  parseMimeType,
+  unsupportedFormatMessage,
 } from '../fileImport.shared';
 
 describe('getExtension', () => {
@@ -74,6 +78,95 @@ describe('isSupportedFilename', () => {
   it('rejects filenames whose extension names an Object.prototype key', () => {
     expect(isSupportedFilename('mix.constructor')).toBe(false);
     expect(isSupportedFilename('mix.__proto__')).toBe(false);
+  });
+});
+
+describe('normaliseMimeType', () => {
+  it('lowercases and trims', () => {
+    expect(normaliseMimeType('  Audio/MPEG ')).toBe('audio/mpeg');
+  });
+
+  it('drops parameters', () => {
+    expect(normaliseMimeType('audio/mpeg; charset=binary')).toBe('audio/mpeg');
+  });
+
+  it('returns empty for anything not type-shaped', () => {
+    expect(normaliseMimeType(undefined)).toBe('');
+    expect(normaliseMimeType(null)).toBe('');
+    expect(normaliseMimeType('')).toBe('');
+    expect(normaliseMimeType('audio')).toBe('');
+  });
+});
+
+describe('parseMimeType', () => {
+  it.each([
+    ['audio/mpeg', 'mp3'],
+    ['audio/mp3', 'mp3'],
+    ['audio/x-wav', 'wav'],
+    ['audio/vnd.wave', 'wav'],
+    ['audio/x-aac', 'aac'],
+    ['audio/mp4', 'm4a'],
+    ['audio/x-m4a', 'm4a'],
+    ['audio/mp4a-latm', 'm4a'],
+  ])('parses %s as %s', (mime, format) => {
+    expect(parseMimeType(mime)).toBe(format);
+  });
+
+  it('returns null for types the app cannot play', () => {
+    expect(parseMimeType('audio/flac')).toBeNull();
+    expect(parseMimeType('application/octet-stream')).toBeNull();
+    expect(parseMimeType('')).toBeNull();
+    expect(parseMimeType(undefined)).toBeNull();
+  });
+
+  it('returns null for an inherited Object.prototype key', () => {
+    expect(parseMimeType('constructor')).toBeNull();
+    expect(parseMimeType('__proto__')).toBeNull();
+  });
+});
+
+describe('displayFilename', () => {
+  it('keeps a name that carries a recognised extension', () => {
+    expect(displayFilename('My Song.mp3', 'mp3')).toBe('My Song.mp3');
+  });
+
+  it('percent-decodes a name before storing it', () => {
+    expect(displayFilename('My%20Song.mp3', 'mp3')).toBe('My Song.mp3');
+  });
+
+  // The Play Store rejection: an Android document id is what the picker
+  // returns as the name, and it must never be shown as a track title.
+  it.each(['audio:1000000033', 'msf:42', '9f2c1b', ''])(
+    'replaces the document id %s with a readable label',
+    (name) => {
+      expect(displayFilename(name, 'wav')).toBe('Imported track.wav');
+    },
+  );
+
+  it('replaces a name whose extension is not one we play', () => {
+    expect(displayFilename('clip.flac', 'mp3')).toBe('Imported track.mp3');
+  });
+});
+
+describe('unsupportedFormatMessage', () => {
+  it('names the extension when there is one', () => {
+    expect(unsupportedFormatMessage('clip.flac')).toBe(
+      'Unsupported format: flac',
+    );
+  });
+
+  it('names the declared type when the name carries no extension', () => {
+    expect(unsupportedFormatMessage('audio:1000000033', 'audio/flac')).toBe(
+      'Unsupported format: audio/flac',
+    );
+  });
+
+  // The message in Google's rejection screenshot ended at the colon, which
+  // told the reader nothing about why the import failed.
+  it('never ends at the colon when nothing is known', () => {
+    const message = unsupportedFormatMessage('9f2c1b', '');
+    expect(message).toBe('Unsupported audio format');
+    expect(message).not.toMatch(/:\s*$/);
   });
 });
 
