@@ -314,6 +314,37 @@ export default function PlayerScreen() {
     }
   };
 
+  // The segment rename and delete dialogs. The sheet decides where to mount
+  // this — inside its own Modal or beside it — because the answer differs by
+  // platform; see SegmentProfileSheet. The workflow hook keeps the two
+  // mutually exclusive, so this is never more than one dialog.
+  const segmentDialog = segments.renamingProfile ? (
+    <SegmentRenameDialog
+      currentName={segments.renamingProfile.name}
+      onSave={segments.confirmRename}
+      onCancel={segments.cancelRename}
+    />
+  ) : segments.deletingProfile ? (
+    <ConfirmDestructiveDialog
+      title="Delete segment?"
+      message={`Remove “${segments.deletingProfile.name}” from this track?`}
+      confirmLabel="Delete"
+      confirmAccessibilityLabel={`Confirm delete ${segments.deletingProfile.name}`}
+      cancelAccessibilityLabel="Cancel delete"
+      onConfirm={segments.confirmDelete}
+      onDismiss={segments.cancelDelete}
+    />
+  ) : null;
+
+  // Closing the sheet drops any dialog pending over it, so reopening the sheet
+  // does not bring back a dialog the user had moved on from.
+  const { cancelRename, cancelDelete } = segments;
+  const closeProfiles = useCallback(() => {
+    setProfilesVisible(false);
+    cancelRename();
+    cancelDelete();
+  }, [cancelRename, cancelDelete]);
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
@@ -464,36 +495,10 @@ export default function PlayerScreen() {
           onLoadProfile={segments.requestLoad}
           onRequestRename={segments.requestRename}
           onRequestDelete={segments.requestDelete}
+          dialog={segmentDialog}
           snippetPreviewEnabled={snippetPreviewEnabled}
           onSnippetPreviewChange={setSnippetPreviewEnabled}
-          onClose={() => setProfilesVisible(false)}
-        />
-      ) : null}
-
-      {/* The segment rename and delete dialogs are siblings of the sheet, not
-          children of it. Each is a Modal, and on Android a Modal is its own
-          window, so rendering them inside the sheet nested one window in
-          another: the card was centred against different bounds and the
-          hardware back button had two handlers competing for it (#316). The
-          workflow hook keeps the two mutually exclusive, so at most one is
-          ever mounted alongside the sheet. */}
-      {segments.renamingProfile ? (
-        <SegmentRenameDialog
-          currentName={segments.renamingProfile.name}
-          onSave={segments.confirmRename}
-          onCancel={segments.cancelRename}
-        />
-      ) : null}
-
-      {segments.deletingProfile ? (
-        <ConfirmDestructiveDialog
-          title="Delete segment?"
-          message={`Remove “${segments.deletingProfile.name}” from this track?`}
-          confirmLabel="Delete"
-          confirmAccessibilityLabel={`Confirm delete ${segments.deletingProfile.name}`}
-          cancelAccessibilityLabel="Cancel delete"
-          onConfirm={segments.confirmDelete}
-          onDismiss={segments.cancelDelete}
+          onClose={closeProfiles}
         />
       ) : null}
 

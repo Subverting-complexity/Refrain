@@ -248,7 +248,10 @@ jest.mock('@/src/components/TransportControls', () => ({
 }));
 
 // Capture the sheet's props so a test can drive its onLoadProfile callback and
-// confirm the player applies a loaded profile to the engine setters.
+// confirm the player applies a loaded profile to the engine setters. The stub
+// renders the `dialog` it is handed, because that is the sheet's whole job for
+// it — the real component only chooses where to mount it, which is covered in
+// the sheet's own suite.
 let mockSheetProps:
   | import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps
   | null = null;
@@ -257,7 +260,7 @@ jest.mock('@/src/components/SegmentProfileSheet', () => ({
     props: import('@/src/components/SegmentProfileSheet').SegmentProfileSheetProps,
   ) => {
     mockSheetProps = props;
-    return null;
+    return <>{props.dialog}</>;
   },
 }));
 
@@ -733,6 +736,22 @@ describe('PlayerScreen segment profiles', () => {
       expect(tree.root.findAllByType(Modal).length).toBe(1);
       expect(byLabel(tree, 'Confirm delete Verse')).toBeUndefined();
       expect(byLabel(tree, 'Confirm rename')).toBeDefined();
+    });
+
+    it('drops a pending dialog when the sheet is closed', () => {
+      const tree = openSheet();
+
+      act(() => {
+        mockSheetProps?.onRequestRename(loadedProfile('p2', 'Chorus'));
+      });
+      act(() => {
+        mockSheetProps?.onClose();
+      });
+      act(() => {
+        getSegmentsButton(tree).props.onPress();
+      });
+
+      expect(tree.root.findAllByType(Modal).length).toBe(0);
     });
 
     it('dismisses the dialog on the hardware back request', () => {

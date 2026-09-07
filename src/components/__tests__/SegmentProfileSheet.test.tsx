@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal } from 'react-native';
+import { Modal, Platform, Text as RNText } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { SegmentProfile } from '../../types';
@@ -158,18 +158,17 @@ describe('SegmentProfileSheet', () => {
   });
 
   /**
-   * The sheet is a Modal, and on Android every Modal is its own window, so a
-   * dialog rendered inside it nested one window in another: mismatched bounds
-   * and two competing hardware-back handlers (#316). The dialogs belong to the
-   * player now, as siblings of this sheet.
+   * The sheet holds no dialog state of its own any more: tapping rename or
+   * delete reports the intent and nothing else. The player decides whether a
+   * dialog exists; this sheet only places the one it is handed.
    */
-  describe('nested modals', () => {
-    it('renders exactly one modal — its own', () => {
+  describe('dialogs', () => {
+    it('renders exactly one modal — its own — when handed no dialog', () => {
       const tree = render();
       expect(tree.root.findAllByType(Modal).length).toBe(1);
     });
 
-    it('opens no dialog of its own when rename is tapped', () => {
+    it('opens nothing of its own when rename is tapped', () => {
       const tree = render();
 
       act(() => {
@@ -180,7 +179,7 @@ describe('SegmentProfileSheet', () => {
       expect(inputByLabel(tree, 'Segment name')).toBeUndefined();
     });
 
-    it('opens no dialog of its own when delete is tapped', () => {
+    it('opens nothing of its own when delete is tapped', () => {
       const tree = render();
 
       act(() => {
@@ -189,6 +188,68 @@ describe('SegmentProfileSheet', () => {
 
       expect(tree.root.findAllByType(Modal).length).toBe(1);
       expect(byLabel(tree, 'Confirm delete Segment 1')).toBeUndefined();
+    });
+
+    /**
+     * Where the dialog may be mounted is forced in opposite directions by the
+     * two platforms. Android renders each Modal as its own window, so a dialog
+     * inside the sheet nests one window in another (#316). iOS presents a
+     * Modal from the nearest view controller up the responder chain, so two
+     * sibling Modals both resolve to the root one — already presenting the
+     * sheet — and UIKit refuses the second, which would leave the dialog
+     * silently absent.
+     */
+    describe('placement', () => {
+      let replacedPlatform: ReturnType<typeof jest.replaceProperty> | undefined;
+
+      afterEach(() => {
+        replacedPlatform?.restore();
+        replacedPlatform = undefined;
+      });
+
+      const dialog = <RNText>Dialog body</RNText>;
+
+      /** Every node rendering the dialog's marker text, under `root`. */
+      function dialogNodes(root: {
+        findAll: (
+          predicate: (node: { type: unknown; children: unknown[] }) => boolean,
+        ) => unknown[];
+      }) {
+        return root.findAll(
+          (node) =>
+            node.type === 'Text' &&
+            (node.children as string[]).join('') === 'Dialog body',
+        );
+      }
+
+      /**
+       * Renders on `os` and reports whether the dialog came out inside the
+       * sheet's Modal or as a sibling of it.
+       */
+      function placementOn(os: 'ios' | 'android' | 'web'): 'inside' | 'beside' {
+        replacedPlatform = jest.replaceProperty(Platform, 'OS', os);
+        const tree = render({ dialog });
+
+        // Rendered exactly once, wherever it landed.
+        expect(dialogNodes(tree.root).length).toBe(1);
+        // The sheet is still a single Modal either way.
+        const modals = tree.root.findAllByType(Modal);
+        expect(modals.length).toBe(1);
+
+        return dialogNodes(modals[0]).length > 0 ? 'inside' : 'beside';
+      }
+
+      it('mounts the dialog beside the sheet on Android', () => {
+        expect(placementOn('android')).toBe('beside');
+      });
+
+      it('mounts the dialog inside the sheet on iOS', () => {
+        expect(placementOn('ios')).toBe('inside');
+      });
+
+      it('leaves web where iOS is', () => {
+        expect(placementOn('web')).toBe('inside');
+      });
     });
   });
 });
