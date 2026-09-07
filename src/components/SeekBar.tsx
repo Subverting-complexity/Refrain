@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import {
   AccessibilityActionEvent,
   StyleSheet,
@@ -34,7 +34,11 @@ interface SeekBarProps {
   style?: ViewStyle;
 }
 
-export function SeekBar({
+/**
+ * Memoised. It does follow the playhead, so a tick renders it — but the
+ * player's other state (arming a marker, opening a sheet) must not.
+ */
+export const SeekBar = React.memo(function SeekBar({
   positionMs,
   durationMs,
   onSeek,
@@ -132,7 +136,7 @@ export function SeekBar({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

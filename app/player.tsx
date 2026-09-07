@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,12 +38,6 @@ const ARTWORK_PLACEHOLDER_SIZE = 240;
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
-  const { height: windowHeight } = useWindowDimensions();
-  // Scale the waveform to the viewport so it fills the space instead of sitting
-  // small and boxed-in — taller on bigger screens, with sane phone bounds.
-  const waveformHeight = Math.round(
-    Math.min(340, Math.max(180, windowHeight * 0.28)),
-  );
   const {
     uri: rawUri,
     filename: rawFilename,
@@ -306,13 +295,21 @@ export default function PlayerScreen() {
   // the peak analysis — as opposed to having finished with nothing to show.
   const waveformPending = isResolvingSource || isWaveformLoading;
 
-  const handlePlay = () => {
+  // Every handler the memoised controls receive has to be stable, or a playback
+  // tick hands one of them a fresh prop and undoes its memoisation. The two
+  // ternaries below need no wrapping — they select between references that are
+  // already stable — but an inline arrow would.
+  const handlePlay = useCallback(() => {
     if (isCounting) {
       cancelCountdown();
     } else {
       void playWithCountdown();
     }
-  };
+  }, [isCounting, cancelCountdown, playWithCountdown]);
+
+  const handleOpenSegments = useCallback(() => setProfilesVisible(true), []);
+  const handleSave = trackId ? segments.openSave : undefined;
+  const handlePause = isCounting ? cancelCountdown : pause;
 
   // The segment rename and delete dialogs. The sheet decides where to mount
   // this — inside its own Modal or beside it — because the answer differs by
@@ -383,7 +380,6 @@ export default function PlayerScreen() {
               onPreviewEnd={
                 snippetPreviewEnabled ? handlePreviewEnd : undefined
               }
-              height={waveformHeight}
             />
           ) : (
             <View
@@ -445,7 +441,7 @@ export default function PlayerScreen() {
             onRemoveA={handleClear}
             onRemoveB={handleRemoveB}
             onToggleLoop={setLoopEnabled}
-            onSave={trackId ? segments.openSave : undefined}
+            onSave={handleSave}
             onClear={handleClear}
             style={styles.markers}
           />
@@ -467,16 +463,14 @@ export default function PlayerScreen() {
               onVolumeChange={setVolume}
               skipPreference={skipPreference}
               onSkipPreferenceChange={setSkipPreference}
-              onOpenSegments={
-                trackId ? () => setProfilesVisible(true) : undefined
-              }
+              onOpenSegments={trackId ? handleOpenSegments : undefined}
               style={styles.drawer}
             />
 
             <TransportControls
               status={isCounting ? 'playing' : status}
               onPlay={handlePlay}
-              onPause={isCounting ? cancelCountdown : pause}
+              onPause={handlePause}
               onSkipBack={skipBack}
               onSkipForward={skipForward}
               skipBackLabel={skipBackLabel}

@@ -1,3 +1,4 @@
+import React from 'react';
 import { ViewStyle } from 'react-native';
 
 import { ToastState } from '../hooks/useToast';
@@ -17,8 +18,15 @@ interface ToastHostProps {
  * explicit variant rendered green there and red on the other (#179). Binding
  * hook to component once keeps that impossible: the only variant default now
  * lives in `useToast.showToast`.
+ *
+ * Memoised. A toast outlives several hundred playback ticks and must not be
+ * re-rendered by any of them.
  */
-export function ToastHost({ toast, onDismiss, style }: ToastHostProps) {
+export const ToastHost = React.memo(function ToastHost({
+  toast,
+  onDismiss,
+  style,
+}: ToastHostProps) {
   return (
     <Toast
       message={toast?.message ?? null}
@@ -27,4 +35,4 @@ export function ToastHost({ toast, onDismiss, style }: ToastHostProps) {
       style={style}
     />
   );
-}
+});

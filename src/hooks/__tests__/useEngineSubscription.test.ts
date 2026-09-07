@@ -72,6 +72,78 @@ describe('useEngineSubscription', () => {
     });
   });
 
+  /**
+   * The audio engine publishes on every native status update — ten times a
+   * second on a loaded track — and builds a fresh object each time. Without
+   * this guard the whole player screen re-rendered at that rate for a
+   * transport sitting still.
+   */
+  it('ignores a snapshot carrying the same values', () => {
+    type State = { status: string; positionMs: number };
+    let listener: ((s: State) => void) | null = null;
+    const subscribe = jest.fn((cb: (s: State) => void) => {
+      listener = cb;
+      return jest.fn();
+    });
+
+    const onState = jest.fn();
+    act(() => {
+      create(
+        createElement(HookHost, {
+          subscribe,
+          initial: { status: 'idle', positionMs: 0 },
+          onState,
+        }),
+      );
+    });
+    const renders = onState.mock.calls.length;
+
+    act(() => {
+      listener!({ status: 'playing', positionMs: 100 });
+    });
+    expect(onState.mock.calls.length).toBe(renders + 1);
+
+    // Same values, new object — the shape the engine actually pushes.
+    act(() => {
+      listener!({ status: 'playing', positionMs: 100 });
+    });
+    expect(onState.mock.calls.length).toBe(renders + 1);
+
+    // A real change still gets through.
+    act(() => {
+      listener!({ status: 'playing', positionMs: 200 });
+    });
+    expect(onState.mock.calls.length).toBe(renders + 2);
+  });
+
+  it('sees a field added to an otherwise identical snapshot', () => {
+    type State = { status: string; lastError?: string };
+    let listener: ((s: State) => void) | null = null;
+    const subscribe = jest.fn((cb: (s: State) => void) => {
+      listener = cb;
+      return jest.fn();
+    });
+
+    let captured: State | undefined;
+    act(() => {
+      create(
+        createElement(HookHost, {
+          subscribe,
+          initial: { status: 'error' },
+          onState: (s: State) => {
+            captured = s;
+          },
+        }),
+      );
+    });
+
+    act(() => {
+      listener!({ status: 'error', lastError: 'no such file' });
+    });
+
+    expect(captured?.lastError).toBe('no such file');
+  });
+
   it('calls the unsubscribe function on unmount', () => {
     const unsubscribe = jest.fn();
     const subscribe = jest.fn(() => unsubscribe);

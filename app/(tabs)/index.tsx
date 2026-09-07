@@ -1,4 +1,4 @@
-import { ComponentProps, useCallback, useMemo, useState } from 'react';
+import React, { ComponentProps, useCallback, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -73,6 +73,70 @@ const EMPTY_COUNTS: TrackCounts = {
  * wants nine has a reason and being refused would be worse than being told.
  */
 const PIN_SOFT_CAP = 8;
+
+interface BuiltinRowProps {
+  entry: BuiltinEntry;
+  count: number;
+  onOpen: (entry: BuiltinEntry) => void;
+}
+
+/**
+ * Binds a built-in entry to the screen's stable open handler.
+ *
+ * `FolderListItem`'s callbacks take no arguments, because a built-in row has
+ * no record behind it to hand back, so the row cannot be handed a callback
+ * that is stable across items. Binding the item here instead is what makes
+ * the memoisation work: the closure is rebuilt only when this row's own props
+ * change, rather than for every row on every list render.
+ */
+const BuiltinRow = React.memo(function BuiltinRow({
+  entry,
+  count,
+  onOpen,
+}: BuiltinRowProps) {
+  return (
+    <FolderListItem
+      kind="builtin"
+      name={entry.name}
+      icon={entry.icon}
+      trackCount={count}
+      onPress={() => onOpen(entry)}
+      style={styles.listItem}
+    />
+  );
+});
+
+interface FolderRowProps {
+  folder: Folder;
+  trackCount: number;
+  onOpen: (folder: Folder) => void;
+  onDelete: (folder: Folder) => void;
+  onRename: (folder: Folder) => void;
+  onOpenActions: (folder: Folder) => void;
+}
+
+/** The same binding as `BuiltinRow`, for a real folder. */
+const FolderRow = React.memo(function FolderRow({
+  folder,
+  trackCount,
+  onOpen,
+  onDelete,
+  onRename,
+  onOpenActions,
+}: FolderRowProps) {
+  return (
+    <FolderListItem
+      name={folder.name}
+      trackCount={trackCount}
+      pinned={folder.pinOrder !== null}
+      onPress={() => onOpen(folder)}
+      onDelete={() => onDelete(folder)}
+      onRename={() => onRename(folder)}
+      onOpenActions={() => onOpenActions(folder)}
+      style={styles.listItem}
+    />
+  );
+});
 
 export default function LibraryScreen() {
   const { theme } = useTheme();
@@ -333,17 +397,35 @@ export default function LibraryScreen() {
     [invalidateLoads, showError, showSuccess],
   );
 
+  // One stable callback per action, so the rows below are handed the same
+  // function on every render and can bail out.
+  const openActions = useCallback(
+    (folder: Folder) => setActionsFolder(folder),
+    [],
+  );
+  const requestDelete = useCallback(
+    (folder: Folder) => setDeletingFolder(folder),
+    [],
+  );
+  const requestRename = useCallback(
+    (folder: Folder) => setRenamingFolder({ id: folder.id, name: folder.name }),
+    [],
+  );
+  const reorderPinned = useCallback(
+    (orderedIds: string[]) => {
+      void writePinnedOrder(orderedIds, 'Failed to reorder folders');
+    },
+    [writePinnedOrder],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: RootEntry }) => {
       if (item.type === 'builtin') {
         return (
-          <FolderListItem
-            kind="builtin"
-            name={item.entry.name}
-            icon={item.entry.icon}
-            trackCount={item.count}
-            onPress={() => openBuiltin(item.entry)}
-            style={styles.listItem}
+          <BuiltinRow
+            entry={item.entry}
+            count={item.count}
+            onOpen={openBuiltin}
           />
         );
       }
@@ -353,33 +435,33 @@ export default function LibraryScreen() {
             folders={item.folders}
             trackCounts={counts.byFolder}
             onOpenFolder={openFolder}
-            onOpenActions={(folder) => setActionsFolder(folder)}
-            onDeleteFolder={(folder) => setDeletingFolder(folder)}
-            onRenameFolder={(folder) =>
-              setRenamingFolder({ id: folder.id, name: folder.name })
-            }
-            onReorder={(orderedIds) => {
-              void writePinnedOrder(orderedIds, 'Failed to reorder folders');
-            }}
+            onOpenActions={openActions}
+            onDeleteFolder={requestDelete}
+            onRenameFolder={requestRename}
+            onReorder={reorderPinned}
           />
         );
       }
       return (
-        <FolderListItem
-          name={item.folder.name}
+        <FolderRow
+          folder={item.folder}
           trackCount={item.trackCount}
-          pinned={item.folder.pinOrder !== null}
-          onPress={() => openFolder(item.folder)}
-          onDelete={() => setDeletingFolder(item.folder)}
-          onRename={() =>
-            setRenamingFolder({ id: item.folder.id, name: item.folder.name })
-          }
-          onOpenActions={() => setActionsFolder(item.folder)}
-          style={styles.listItem}
+          onOpen={openFolder}
+          onDelete={requestDelete}
+          onRename={requestRename}
+          onOpenActions={openActions}
         />
       );
     },
-    [openBuiltin, openFolder, counts.byFolder, writePinnedOrder],
+    [
+      openBuiltin,
+      openFolder,
+      counts.byFolder,
+      openActions,
+      requestDelete,
+      requestRename,
+      reorderPinned,
+    ],
   );
 
   const keyExtractor = useCallback((item: RootEntry) => {

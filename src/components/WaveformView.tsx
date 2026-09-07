@@ -3,6 +3,7 @@ import {
   AccessibilityActionEvent,
   AccessibilityInfo,
   StyleSheet,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
@@ -16,9 +17,9 @@ import { formatDuration } from '../utils/formatTime';
 import { WaveformBars } from './WaveformBars';
 import { MARKER_LINE_HALO, WaveformMarkers } from './WaveformMarkers';
 import {
-  DEFAULT_WAVEFORM_HEIGHT,
   HANDLE_ZONE,
   HORIZONTAL_PADDING,
+  waveformHeightForViewport,
 } from './waveformLayout';
 
 interface WaveformViewProps {
@@ -74,15 +75,56 @@ interface WaveformViewProps {
   onPreviewMove?: (centerMs: number) => void;
   onPreviewEnd?: () => void;
   /**
-   * Overall height of the waveform surface. Lets the player scale it to the
-   * screen so it fills the available space instead of sitting small and
-   * boxed-in. Defaults to {@link DEFAULT_WAVEFORM_HEIGHT}.
+   * Overall height of the waveform surface. Omit it — the player does — and
+   * the surface scales itself to the viewport, so it fills the available space
+   * instead of sitting small and boxed-in. See
+   * {@link waveformHeightForViewport}.
+   *
+   * Reading the viewport here rather than in the player is deliberate: on
+   * Android a metric change arrives for every inset and soft-keyboard event,
+   * and subscribing from the screen re-rendered the screen and everything
+   * under it for a height that had not changed. This component follows the
+   * playhead and so re-renders regardless.
    */
   height?: number;
   style?: ViewStyle;
 }
 
 const SEEK_STEP_MS = 5000;
+
+interface CursorProps {
+  /** Playhead as a percentage of the track, matching the bars' 0..1 space. */
+  leftPct: number;
+  color: string;
+  edgeColor: string;
+}
+
+/**
+ * The playhead line. Its own memoised component so that the renders which do
+ * not move it — a marker drag, an arm-state change, a parent re-render — leave
+ * it alone. When the playhead *does* move this is the one element that has to
+ * change, which is the point: it moves on its own rather than dragging the rest
+ * of the surface with it.
+ */
+const Cursor = React.memo(function Cursor({
+  leftPct,
+  color,
+  edgeColor,
+}: CursorProps) {
+  return (
+    <View
+      style={[
+        styles.noPointerEvents,
+        styles.cursor,
+        {
+          left: `${leftPct}%`,
+          backgroundColor: color,
+          borderColor: edgeColor,
+        },
+      ]}
+    />
+  );
+});
 
 /**
  * The waveform surface: a touch target wrapping the bars, the A/B overlay, and
@@ -107,10 +149,12 @@ export function WaveformView({
   onPreviewStart,
   onPreviewMove,
   onPreviewEnd,
-  height = DEFAULT_WAVEFORM_HEIGHT,
+  height: heightProp,
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
+  const { height: viewportHeight } = useWindowDimensions();
+  const height = heightProp ?? waveformHeightForViewport(viewportHeight);
 
   const { gesture, drag, onLayout } = useWaveformGesture({
     durationMs,
@@ -183,6 +227,24 @@ export function WaveformView({
     ],
   );
 
+  // Rebuilt only when a marker handler appears or disappears. Inline, this
+  // array was a fresh one on every playback tick, so the container's props
+  // never compared equal and the accessibility surface was re-registered ten
+  // times a second for a set of actions that had not changed.
+  const a11yActions = useMemo(
+    () => [
+      { name: 'increment' },
+      { name: 'decrement' },
+      ...(onMarkerAChange
+        ? [{ name: 'placeA', label: 'Place A marker at current position' }]
+        : []),
+      ...(onMarkerBChange
+        ? [{ name: 'placeB', label: 'Place B marker at current position' }]
+        : []),
+    ],
+    [onMarkerAChange, onMarkerBChange],
+  );
+
   const a11yLabel = useMemo(() => {
     let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
     if (markerA != null && markerB != null) {
@@ -201,16 +263,7 @@ export function WaveformView({
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
       accessibilityHint="Swipe up or down to seek. Activate for more options including placing loop markers."
-      accessibilityActions={[
-        { name: 'increment' },
-        { name: 'decrement' },
-        ...(onMarkerAChange
-          ? [{ name: 'placeA', label: 'Place A marker at current position' }]
-          : []),
-        ...(onMarkerBChange
-          ? [{ name: 'placeB', label: 'Place B marker at current position' }]
-          : []),
-      ]}
+      accessibilityActions={a11yActions}
       onAccessibilityAction={handleAccessibilityAction}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
     >
@@ -233,16 +286,10 @@ export function WaveformView({
               hasRegion={hasRegion}
             />
 
-            <View
-              style={[
-                styles.noPointerEvents,
-                styles.cursor,
-                {
-                  left: `${progress * 100}%`,
-                  backgroundColor: theme.colors.textPrimary,
-                  borderColor: theme.colors.surface,
-                },
-              ]}
+            <Cursor
+              leftPct={progress * 100}
+              color={theme.colors.textPrimary}
+              edgeColor={theme.colors.surface}
             />
           </View>
         </View>

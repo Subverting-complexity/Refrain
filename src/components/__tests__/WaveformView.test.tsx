@@ -1,9 +1,10 @@
 import React from 'react';
-import { AccessibilityInfo, StyleSheet } from 'react-native';
+import { AccessibilityInfo, Dimensions, StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
 
 import { darkTheme } from '../../theme';
 import { MARKER_LINE_HALO } from '../WaveformMarkers';
+import { waveformHeightForViewport } from '../waveformLayout';
 import { WaveformView } from '../WaveformView';
 
 jest.mock('../../hooks/useTheme');
@@ -201,6 +202,33 @@ describe('WaveformView', () => {
     expect(height).not.toContain('NaN');
   });
 
+  /**
+   * The mechanism #323's fourth criterion turns on: the surface reads the
+   * viewport itself, so an Android inset or soft-keyboard metric change stops
+   * at this component instead of re-rendering the player screen. Without a
+   * test here, putting a static default back would fail nothing.
+   */
+  it('sizes itself to the viewport when the caller gives no height', () => {
+    const spy = jest
+      .spyOn(Dimensions, 'get')
+      .mockReturnValue({ width: 400, height: 1000, scale: 2, fontScale: 1 });
+    try {
+      const tree = renderWaveform();
+      const height = StyleSheet.flatten(getTouchArea(tree).props.style).height;
+
+      expect(height).toBe(waveformHeightForViewport(1000));
+      expect(height).not.toBe(180);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('uses the height it is given over the viewport', () => {
+    const tree = renderWaveform({ height: 210 });
+
+    expect(StyleSheet.flatten(getTouchArea(tree).props.style).height).toBe(210);
+  });
+
   it('renders a cursor element', () => {
     const tree = renderWaveform({ positionMs: 2500 });
 
@@ -216,6 +244,81 @@ describe('WaveformView', () => {
     );
 
     expect(cursors).toHaveLength(1);
+  });
+
+  // A marker's line, found by its own colour so the playhead — which shares
+  // the line's width — cannot be mistaken for one.
+  function markerStyles(tree: ReactTestRenderer) {
+    const line = (color: string) =>
+      tree.root.find(
+        (node) =>
+          node.type === 'View' &&
+          Array.isArray(node.props.style) &&
+          node.props.style.some(
+            (s: Record<string, unknown>) =>
+              s && s.width === 2 + MARKER_LINE_HALO * 2,
+          ) &&
+          node.props.style.some(
+            (s: Record<string, unknown>) => s && s.backgroundColor === color,
+          ),
+      ).props.style;
+    return { a: line('#ffb02e'), b: line('#ff5d77') };
+  }
+
+  describe('render churn', () => {
+    /**
+     * Everything on the surface that is not the playhead has to survive a
+     * playback tick. Reference equality is what can see it: a memoised child
+     * that bailed out keeps the identical props object, not an equal one.
+     */
+    it('leaves the markers alone when only the playhead moves', () => {
+      const tree = renderWaveform({
+        positionMs: 0,
+        markerA: 2000,
+        markerB: 8000,
+      });
+      const before = markerStyles(tree);
+
+      act(() => {
+        tree.update(
+          <WaveformView
+            peaks={DEFAULT_PEAKS}
+            positionMs={100}
+            durationMs={10000}
+            onSeek={jest.fn()}
+            markerA={2000}
+            markerB={8000}
+          />,
+        );
+      });
+
+      const after = markerStyles(tree);
+      expect(after.a).toBe(before.a);
+      expect(after.b).toBe(before.b);
+    });
+
+    // The bars have the same obligation as the markers: a tick moves the fill
+    // edge past one or two of them, and the rest must not be rebuilt.
+    // `useWaveformGesture`'s own tests cover the drag side of this.
+    it('leaves the bars beyond the fill edge alone when the playhead moves', () => {
+      const tree = renderWaveform({ positionMs: 2000 });
+      const before = findBars(tree).map((bar) => bar.props.style);
+
+      act(() => {
+        tree.update(
+          <WaveformView
+            peaks={DEFAULT_PEAKS}
+            positionMs={2100}
+            durationMs={10000}
+            onSeek={jest.fn()}
+          />,
+        );
+      });
+
+      const after = findBars(tree).map((bar) => bar.props.style);
+      expect(after[3]).toBe(before[3]);
+      expect(after[4]).toBe(before[4]);
+    });
   });
 
   it('renders nothing when peaks is empty', () => {
@@ -498,6 +601,9 @@ describe('WaveformView', () => {
         markerA: 4500,
         markerB: 5500,
         durationMs: 10000,
+        // The y values below split a 180-tall surface. Pinned, because the
+        // surface otherwise scales itself to the viewport.
+        height: 180,
         onMarkerAChange,
         onMarkerBChange,
         onSeek,
@@ -521,6 +627,9 @@ describe('WaveformView', () => {
         markerA: 4500,
         markerB: 5500,
         durationMs: 10000,
+        // The y values below split a 180-tall surface. Pinned, because the
+        // surface otherwise scales itself to the viewport.
+        height: 180,
         onMarkerAChange,
         onMarkerBChange,
         onSeek,

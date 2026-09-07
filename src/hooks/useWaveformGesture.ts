@@ -61,6 +61,25 @@ export interface UseWaveformGesture {
 const isMarkerTarget = (target: DragTarget): boolean =>
   target === 'markerA' || target === 'markerB';
 
+/**
+ * Keep the previous drag object when the gesture has not actually moved
+ * anything.
+ *
+ * A pan reports every pointer event, and positions are rounded to whole
+ * milliseconds, so a finger held still or nudged a fraction of a pixel produces
+ * a run of events that resolve to the identical position. Allocating a fresh
+ * `{ms, target}` for each of those re-renders the whole waveform surface for no
+ * visual change. Returning the same object lets React bail out instead.
+ */
+const nextDrag = (
+  previous: WaveformDrag | null,
+  ms: number,
+  target: DragTarget,
+): WaveformDrag | null =>
+  previous != null && previous.ms === ms && previous.target === target
+    ? previous
+    : { ms, target };
+
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
 /**
@@ -257,7 +276,8 @@ export function useWaveformGesture({
       const raw = positionFromX(x);
       if (raw == null) return;
       const ms = clampForTarget(dragTarget.current, raw);
-      setDrag({ ms, target: dragTarget.current });
+      const target = dragTarget.current;
+      setDrag((previous) => nextDrag(previous, ms, target));
       dragThrottle.move(ms);
     },
     [positionFromX, clampForTarget, dragThrottle],

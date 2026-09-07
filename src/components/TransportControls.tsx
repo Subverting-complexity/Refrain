@@ -1,3 +1,4 @@
+import React from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -22,7 +23,11 @@ export interface TransportControlsProps {
   style?: ViewStyle;
 }
 
-export function TransportControls({
+/**
+ * Memoised. Nothing here follows the playhead; only the transport status
+ * moves it.
+ */
+export const TransportControls = React.memo(function TransportControls({
   status,
   onPlay,
   onPause,
@@ -101,7 +106,7 @@ export function TransportControls({
       </AccessiblePressable>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

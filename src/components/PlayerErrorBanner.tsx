@@ -1,3 +1,4 @@
+import React from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -21,8 +22,11 @@ export interface PlayerErrorBannerProps {
  * The player screen's inline error strip: an alert icon with a one-line
  * headline, and an optional caption underneath. Used for both "track is
  * gone from the library" and "track failed to load".
+ *
+ * Memoised. Its two strings change when an error does, not when the
+ * playhead moves.
  */
-export function PlayerErrorBanner({
+export const PlayerErrorBanner = React.memo(function PlayerErrorBanner({
   message,
   detail,
   detailNumberOfLines,
@@ -51,7 +55,7 @@ export function PlayerErrorBanner({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   banner: {

@@ -1,4 +1,4 @@
-import { ComponentProps, useRef } from 'react';
+import React, { ComponentProps, useRef } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -49,7 +49,11 @@ export interface FolderListItemProps {
   style?: ViewStyle;
 }
 
-export function FolderListItem({
+/**
+ * Memoised, for the same reason as `TrackListItem`: renaming or pinning one
+ * folder must re-render that row, not the whole visible list.
+ */
+export const FolderListItem = React.memo(function FolderListItem({
   name,
   trackCount,
   kind = 'folder',
@@ -202,7 +206,7 @@ export function FolderListItem({
       </View>
     </ReanimatedSwipeable>
   );
-}
+});
 
 // Row chrome (border, main pressable, icon square, info column) is shared
 // with TrackListItem — see listRowStyles.

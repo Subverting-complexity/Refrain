@@ -228,6 +228,40 @@ describe('useWaveformGesture', () => {
       rerender();
       expect(lastResult.drag).toBeNull();
     });
+
+    /**
+     * The reason `moveDrag` compares before it sets. A pan reports every
+     * pointer event and positions round to whole milliseconds, so a held
+     * finger sends a run of moves that all resolve to the same place. Each one
+     * used to allocate a fresh drag object and re-render the whole waveform
+     * surface for a value that had not changed.
+     */
+    it('keeps the same drag object when a move resolves to the same position', () => {
+      render();
+      layout();
+
+      begin(xFor(2500));
+      const afterBegin = lastResult.drag;
+
+      move(xFor(2500));
+
+      expect(lastResult.drag).toBe(afterBegin);
+      finalize();
+    });
+
+    it('allocates a new drag object when the position actually moves', () => {
+      render();
+      layout();
+
+      begin(xFor(2500));
+      const afterBegin = lastResult.drag;
+
+      move(xFor(6000));
+
+      expect(lastResult.drag).not.toBe(afterBegin);
+      expect(lastResult.drag).toEqual({ ms: 6000, target: 'seek' });
+      finalize();
+    });
   });
 
   describe('snippet preview', () => {
