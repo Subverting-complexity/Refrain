@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useShareIntent as useExpoShareIntent } from 'expo-share-intent';
 
-import { importFromUri, isSupportedFilename } from '../services/fileImport';
+import { importFromUri } from '../services/fileImport';
 import { Track } from '../types';
 import { errorMessage } from '../utils/errorMessage';
 import { extractFilename } from '../utils/extractFilename';
@@ -48,9 +48,9 @@ export function useShareIntent({
   // reaching the caller's onError. Catch here so every import failure is
   // reported the same way, whichever door the file arrived through.
   const importAndReport = useCallback(
-    async (uri: string, filename: string) => {
+    async (uri: string, filename: string, mimeType?: string | null) => {
       try {
-        const result = await importFromUri(uri, filename);
+        const result = await importFromUri(uri, filename, mimeType);
         if (result.success) {
           onTrackImportedRef.current(result.track);
         } else {
@@ -88,14 +88,13 @@ export function useShareIntent({
       for (const file of files) {
         const filename = file.fileName || extractFilename(file.path);
 
-        if (!isSupportedFilename(filename)) {
-          onErrorRef.current?.('Unsupported audio format');
-          continue;
-        }
-
+        // No extension check here. A share can arrive from a content URI
+        // whose name is an opaque document id, and the import knows how to
+        // identify one of those from the declared type or the bytes; a guard
+        // on the name alone rejected files the app can play perfectly well.
         // Caught per file (inside importAndReport) so one bad share does not
         // abort the files queued behind it.
-        await importAndReport(file.path, filename);
+        await importAndReport(file.path, filename, file.mimeType);
       }
     })().catch(() => undefined);
     // The callback refs are stable, so this still re-runs only per share.
@@ -134,14 +133,10 @@ export function useShareIntent({
       // "Unsupported audio format" error on every deep-link launch.
       if (!/^(file|content):/i.test(url)) return;
 
-      const filename = extractFilename(url);
-
-      if (!isSupportedFilename(filename)) {
-        onErrorRef.current?.('Unsupported audio format');
-        return;
-      }
-
-      await importAndReport(url, filename);
+      // As above: an Android "open with" intent hands over a content URI
+      // whose last segment is a document id, so the name says nothing about
+      // the format. The import identifies it and reports its own failure.
+      await importAndReport(url, extractFilename(url));
     }
 
     Linking.getInitialURL()

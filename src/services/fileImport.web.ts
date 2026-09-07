@@ -1,11 +1,14 @@
-import { ImportOutcome, Track } from '../types';
+import { AudioFormat, ImportOutcome, Track } from '../types';
 import { generateId } from '../utils/generateId';
+import { SNIFF_LENGTH, sniffFormat } from './audioSniff';
 import { getObjectUrl, putBlob } from './webBlobStore.web';
 import {
+  displayFilename,
   estimateDurationMs,
-  getExtension,
   makeError,
   parseFormat,
+  parseMimeType,
+  unsupportedFormatMessage,
 } from './fileImport.shared';
 
 export { isSupportedFilename } from './fileImport.shared';
@@ -72,11 +75,19 @@ export async function importBlob(
   originalFilename: string,
   fileSizeBytes: number,
 ): Promise<ImportOutcome> {
-  const format = parseFormat(originalFilename);
+  // Same precedence as the native path, so the two cannot disagree about
+  // what the app accepts: the declared type, then the extension, then the
+  // container's own header. A blob fetched from a `blob:` or `http:` URL
+  // often arrives with no filename worth reading.
+  const format =
+    parseMimeType(blob.type) ??
+    parseFormat(originalFilename) ??
+    (await sniffBlob(blob));
+
   if (!format) {
     return makeError(
       'unsupported_format',
-      `Unsupported format: ${getExtension(originalFilename)}`,
+      unsupportedFormatMessage(originalFilename, blob.type),
     );
   }
 
@@ -88,7 +99,7 @@ export async function importBlob(
 
     const track: Track = {
       id,
-      filename: originalFilename,
+      filename: displayFilename(originalFilename, format),
       uri,
       format,
       durationMs: estimateDurationMs(fileSizeBytes, format),
@@ -103,6 +114,22 @@ export async function importBlob(
     return { success: true, track };
   } catch {
     return makeError('copy_failed', 'Failed to save file to browser storage');
+  }
+}
+
+/**
+ * The container a blob's leading bytes describe, or null. Only the header is
+ * read, so identifying a large track does not pull the whole file into
+ * memory. `arrayBuffer` is missing from some older test and browser
+ * environments, where the answer is simply "cannot tell".
+ */
+async function sniffBlob(blob: Blob): Promise<AudioFormat | null> {
+  try {
+    const head = blob.slice(0, SNIFF_LENGTH);
+    if (typeof head.arrayBuffer !== 'function') return null;
+    return sniffFormat(new Uint8Array(await head.arrayBuffer()));
+  } catch {
+    return null;
   }
 }
 

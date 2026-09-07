@@ -47,12 +47,10 @@ jest.mock('expo-share-intent', () => ({
 }));
 
 const mockImportFromUri = jest.fn();
-const mockIsSupportedFilename = jest.fn<boolean, [string]>();
 
 jest.mock('../../services/fileImport', () => ({
-  importFromUri: (uri: string, filename: string) =>
-    mockImportFromUri(uri, filename),
-  isSupportedFilename: (filename: string) => mockIsSupportedFilename(filename),
+  importFromUri: (uri: string, filename: string, mimeType?: string | null) =>
+    mockImportFromUri(uri, filename, mimeType),
 }));
 
 const track: Track = {
@@ -114,7 +112,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetInitialURL.mockResolvedValue(null);
   mockAddEventListener.mockReturnValue({ remove: mockRemove });
-  mockIsSupportedFilename.mockReturnValue(true);
   mockImportFromUri.mockResolvedValue({ success: true, track });
   // The web test below flips Platform.OS; reset it so suite order can't leak.
   Platform.OS = 'ios';
@@ -135,6 +132,7 @@ describe('useShareIntent (expo-linking URL flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'file:///shared/song.mp3',
       'song.mp3',
+      undefined,
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
     expect(onError).not.toHaveBeenCalled();
@@ -151,6 +149,7 @@ describe('useShareIntent (expo-linking URL flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'content://downloads/song.mp3',
       'song.mp3',
+      undefined,
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
   });
@@ -181,14 +180,41 @@ describe('useShareIntent (expo-linking URL flow)', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it('reports an unsupported extension on a shared file URL', async () => {
-    mockIsSupportedFilename.mockReturnValue(false);
+  // The filename no longer gates this. An Android "open with" intent hands
+  // over a content URI whose last segment is an opaque document id, so a
+  // guard on the name rejected files the app can play; the import identifies
+  // the file from its declared type or its bytes and reports its own failure.
+  it('lets the import decide on a shared file URL it cannot play', async () => {
+    mockImportFromUri.mockResolvedValue({
+      success: false,
+      error: 'unsupported_format',
+      message: 'Unsupported format: txt',
+    });
     mockGetInitialURL.mockResolvedValue('file:///shared/notes.txt');
 
     await renderHook();
 
-    expect(mockImportFromUri).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith('Unsupported audio format');
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'file:///shared/notes.txt',
+      'notes.txt',
+      undefined,
+    );
+    expect(onError).toHaveBeenCalledWith('Unsupported format: txt');
+  });
+
+  it('imports a content URL whose name is an opaque document id', async () => {
+    mockGetInitialURL.mockResolvedValue(
+      'content://com.android.providers.media.documents/document/audio%3A1000000033',
+    );
+
+    await renderHook();
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'content://com.android.providers.media.documents/document/audio%3A1000000033',
+      'audio:1000000033',
+      undefined,
+    );
+    expect(onTrackImported).toHaveBeenCalledWith(track);
   });
 
   it('reports a failed import', async () => {
@@ -274,6 +300,7 @@ describe('useShareIntent (system share sheet flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'file:///shared/song.mp3',
       'song.mp3',
+      'audio/mpeg',
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
     expect(mockResetShareIntent).toHaveBeenCalled();
@@ -323,6 +350,7 @@ describe('useShareIntent (system share sheet flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'content://media/42/song.m4a',
       'song.mp3',
+      'audio/mpeg',
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
   });
@@ -343,6 +371,7 @@ describe('useShareIntent (system share sheet flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'file:///shared/other.wav',
       'other.wav',
+      'audio/mpeg',
     );
     expect(onTrackImported).toHaveBeenCalledTimes(2);
   });
@@ -361,22 +390,48 @@ describe('useShareIntent (system share sheet flow)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'content://media/123/song.m4a',
       'song.m4a',
+      'audio/mpeg',
     );
   });
 
   it('reports an unsupported shared file and still consumes the intent', async () => {
-    mockIsSupportedFilename.mockReturnValue(false);
+    mockImportFromUri.mockResolvedValue({
+      success: false,
+      error: 'unsupported_format',
+      message: 'Unsupported format: txt',
+    });
     mockShareState = {
       hasShareIntent: true,
-      files: [shareFile({ fileName: 'notes.txt' })],
+      files: [shareFile({ fileName: 'notes.txt', mimeType: 'text/plain' })],
       error: null,
     };
 
     await renderHook();
 
-    expect(mockImportFromUri).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith('Unsupported audio format');
+    expect(onError).toHaveBeenCalledWith('Unsupported format: txt');
     expect(mockResetShareIntent).toHaveBeenCalled();
+  });
+
+  it('forwards the type the share intent declares', async () => {
+    mockShareState = {
+      hasShareIntent: true,
+      files: [
+        shareFile({
+          path: 'content://media/external/audio/media/33',
+          fileName: '',
+          mimeType: 'audio/x-m4a',
+        }),
+      ],
+      error: null,
+    };
+
+    await renderHook();
+
+    expect(mockImportFromUri).toHaveBeenCalledWith(
+      'content://media/external/audio/media/33',
+      '33',
+      'audio/x-m4a',
+    );
   });
 
   it('reports a failed share-sheet import', async () => {
@@ -463,6 +518,7 @@ describe('useShareIntent (import throws rather than resolving)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'file:///shared/good.mp3',
       'good.mp3',
+      'audio/mpeg',
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
   });
@@ -600,6 +656,7 @@ describe('useShareIntent (enabled gate)', () => {
     expect(mockImportFromUri).toHaveBeenCalledWith(
       'file:///shared/song.mp3',
       'song.mp3',
+      undefined,
     );
     expect(onTrackImported).toHaveBeenCalledWith(track);
   });
