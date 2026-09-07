@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../hooks/useTheme';
@@ -24,11 +24,6 @@ export interface WaveformBarsProps {
 }
 
 /**
- * The amplitude bars. Purely presentational — it is handed positions already in
- * fraction space and only picks each bar's tonal tier from them. Memoised
- * because the playhead moves every frame while the peaks never do.
- */
-/**
  * A bar's height as a percentage of the band, floored so a silent passage
  * still draws something to click on.
  *
@@ -43,6 +38,40 @@ function barHeightPct(peak: number): number {
   return Math.max(4, peak * 100);
 }
 
+interface BarProps {
+  heightPct: number;
+  color: string;
+}
+
+/**
+ * One amplitude bar.
+ *
+ * Memoised on two primitives, which is the whole point of it being a component
+ * at all. The playhead moves ten times a second while a track plays and every
+ * frame while a finger is down, but only the one or two bars either side of the
+ * fill edge change tier. Without this every bar's style array is rebuilt,
+ * flattened and diffed on each of those renders; with it the unchanged ones
+ * stop at a two-field comparison.
+ *
+ * The style array is built here rather than by the caller so the caller never
+ * allocates for a bar that is about to bail out.
+ */
+const Bar = React.memo(function Bar({ heightPct, color }: BarProps) {
+  return (
+    <View
+      style={[styles.bar, { height: `${heightPct}%`, backgroundColor: color }]}
+    />
+  );
+});
+
+/**
+ * The amplitude bars. Purely presentational — it is handed positions already in
+ * fraction space and only picks each bar's tonal tier from them.
+ *
+ * The per-bar values that do not depend on the playhead — the height, the bar's
+ * centre, and its graded played colour — are computed once per track rather
+ * than on every tick. What is left per render is one tier decision per bar.
+ */
 export const WaveformBars = React.memo(function WaveformBars({
   peaks,
   progress,
@@ -60,41 +89,43 @@ export const WaveformBars = React.memo(function WaveformBars({
   // and the measured figures; what this does is pick a tier per bar.
   const { waveformDull, waveformLoop, waveformPlayed, waveformPeak } =
     theme.colors;
-  const denom = peaks.length;
+
+  // The played tier is a range, not a value: grading it by the bar's own
+  // amplitude is what keeps the waveform reading as a waveform rather than a
+  // block of colour. The quiet end is the one that has to stay clear of the
+  // loop tier below it. Neither the grade nor the height nor the centre
+  // depends on the playhead, so all three are resolved once per track.
+  const bars = useMemo(
+    () =>
+      peaks.map((peak, index) => ({
+        // A bar's centre fraction, in the SAME 0..1 space as `progress` and
+        // the cursor, so the fill edge lands exactly under the playhead.
+        center: (index + 0.5) / peaks.length,
+        heightPct: barHeightPct(peak),
+        playedColor: mix(waveformPlayed, waveformPeak, peak),
+      })),
+    [peaks, waveformPlayed, waveformPeak],
+  );
 
   return (
     <View style={styles.container}>
-      {peaks.map((peak, index) => {
-        // A bar's centre fraction, in the SAME 0..1 space as `progress` and the
-        // cursor, so the fill edge lands exactly under the playhead.
-        const center = (index + 0.5) / denom;
-        const inRegion = hasRegion && center >= aFrac && center <= bFrac;
+      {bars.map((bar, index) => {
+        const inRegion =
+          hasRegion && bar.center >= aFrac && bar.center <= bFrac;
         const played = loopActive
-          ? inRegion && center <= progress
-          : center <= progress;
+          ? inRegion && bar.center <= progress
+          : bar.center <= progress;
 
-        let backgroundColor: string;
+        let color: string;
         if (played) {
-          // The played tier is a range, not a value: grading it by the bar's
-          // own amplitude is what keeps the waveform reading as a waveform
-          // rather than a block of colour. The quiet end is the one that has
-          // to stay clear of the loop tier below it.
-          backgroundColor = mix(waveformPlayed, waveformPeak, peak);
+          color = bar.playedColor;
         } else if (inRegion) {
-          backgroundColor = waveformLoop;
+          color = waveformLoop;
         } else {
-          backgroundColor = waveformDull;
+          color = waveformDull;
         }
 
-        return (
-          <View
-            key={index}
-            style={[
-              styles.bar,
-              { height: `${barHeightPct(peak)}%`, backgroundColor },
-            ]}
-          />
-        );
+        return <Bar key={index} heightPct={bar.heightPct} color={color} />;
       })}
     </View>
   );
