@@ -1,6 +1,7 @@
 import React from 'react';
 import { AccessibilityInfo, Dimensions, StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
+import { makeMutable, SharedValue } from 'react-native-reanimated';
 
 import { darkTheme } from '../../theme';
 import { MARKER_LINE_HALO } from '../WaveformMarkers';
@@ -70,21 +71,55 @@ function findBars(tree: ReactTestRenderer) {
   );
 }
 
-function renderWaveform(
-  props: Partial<React.ComponentProps<typeof WaveformView>> = {},
-) {
+/**
+ * The playhead the surface was last rendered with. It takes a shared value
+ * rather than a number — the cursor follows it on the UI thread — so the tests
+ * hand it one and write to this to move the engine without re-rendering.
+ */
+let playheadMs: SharedValue<number>;
+
+/**
+ * The last surface rendered, so it can be torn down between tests.
+ *
+ * The UI-thread projections are driven by reactions that live as long as the
+ * component does. A tree left mounted keeps running them against the previous
+ * test's shared values while the next test is waiting on a frame, which
+ * surfaces as an error raised inside whichever test happens to be running.
+ */
+let currentTree: ReactTestRenderer | null = null;
+
+afterEach(async () => {
+  const tree = currentTree;
+  currentTree = null;
+  if (!tree) return;
+  // Let this test's own reactions finish inside `act` before tearing the tree
+  // down, so a pending frame cannot land in the middle of the next test.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  act(() => tree.unmount());
+});
+
+function renderWaveform({
+  positionMs = 0,
+  ...props
+}: Partial<Omit<React.ComponentProps<typeof WaveformView>, 'playheadMs'>> & {
+  positionMs?: number;
+} = {}) {
+  playheadMs = makeMutable(positionMs);
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
       <WaveformView
         peaks={DEFAULT_PEAKS}
-        positionMs={0}
+        playheadMs={playheadMs}
         durationMs={10000}
         onSeek={jest.fn()}
         {...props}
       />,
     );
   });
+  currentTree = tree;
   return tree;
 }
 
@@ -111,6 +146,21 @@ function layout(tree: ReactTestRenderer, width = 300) {
 async function fire(run: () => void): Promise<void> {
   await act(async () => {
     run();
+  });
+}
+
+/**
+ * Let the UI-thread projections reach React.
+ *
+ * The bars' three edges, the announced percentage and the spoken time are all
+ * derived in the UI runtime and mirrored back with `runOnJS`, so none of them
+ * is on the first render. Under Jest those reactions are driven from the frame
+ * loop, which runs on real timers, so draining the microtask queue is not
+ * enough — anything asserting one of them has to let a frame pass.
+ */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 }
 
@@ -149,6 +199,7 @@ describe('WaveformView', () => {
 
   it('colors bars based on playback progress', async () => {
     const tree = renderWaveform({ positionMs: 5000 });
+    await settle();
     const bars = findBars(tree);
 
     // progress = 0.5; bar centres are (i+0.5)/5 → 0.1, 0.3, 0.5 played and
@@ -165,6 +216,7 @@ describe('WaveformView', () => {
       markerA: 2000,
       markerB: 8000,
     });
+    await settle();
     const bars = findBars(tree);
 
     // Region 0.2..0.8 of a 10s track covers the bars centred at 0.3, 0.5
@@ -177,6 +229,7 @@ describe('WaveformView', () => {
   // block of colour, so a quiet played bar and a loud one must not match.
   it('grades a played bar by its amplitude', async () => {
     const tree = renderWaveform({ positionMs: 10000, peaks: [0.1, 1] });
+    await settle();
     const [quiet, loud] = findBars(tree);
 
     expect(barFill(quiet)).not.toBe(barFill(loud));
@@ -189,6 +242,7 @@ describe('WaveformView', () => {
   // against the bars around it, which is the bug #268 was filed for.
   it('starts the played range at the played tier, not below it', async () => {
     const tree = renderWaveform({ positionMs: 10000, peaks: [0, 1] });
+    await settle();
     const [silent] = findBars(tree);
 
     expect(barFill(silent)).toBe(darkTheme.colors.waveformPlayed);
@@ -288,20 +342,12 @@ describe('WaveformView', () => {
         markerA: 2000,
         markerB: 8000,
       });
+      await settle();
       const before = markerStyles(tree);
 
-      act(() => {
-        tree.update(
-          <WaveformView
-            peaks={DEFAULT_PEAKS}
-            positionMs={100}
-            durationMs={10000}
-            onSeek={jest.fn()}
-            markerA={2000}
-            markerB={8000}
-          />,
-        );
-      });
+      // A playback tick moves the shared value; nothing is re-rendered for it.
+      playheadMs.value = 100;
+      await settle();
 
       const after = markerStyles(tree);
       expect(after.a).toBe(before.a);
@@ -313,18 +359,11 @@ describe('WaveformView', () => {
     // `useWaveformGesture`'s own tests cover the drag side of this.
     it('leaves the bars beyond the fill edge alone when the playhead moves', async () => {
       const tree = renderWaveform({ positionMs: 2000 });
+      await settle();
       const before = findBars(tree).map((bar) => bar.props.style);
 
-      act(() => {
-        tree.update(
-          <WaveformView
-            peaks={DEFAULT_PEAKS}
-            positionMs={2100}
-            durationMs={10000}
-            onSeek={jest.fn()}
-          />,
-        );
-      });
+      playheadMs.value = 2100;
+      await settle();
 
       const after = findBars(tree).map((bar) => bar.props.style);
       expect(after[3]).toBe(before[3]);
@@ -340,6 +379,7 @@ describe('WaveformView', () => {
 
   it('sets accessibility role and label', async () => {
     const tree = renderWaveform({ positionMs: 5000, durationMs: 120000 });
+    await settle();
 
     const container = tree.root.findAll(
       (node) =>
@@ -524,7 +564,7 @@ describe('WaveformView', () => {
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('continues dragging marker on move after grant near marker', async () => {
+    it('reports where a dragged marker was released, not each move', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
@@ -540,12 +580,19 @@ describe('WaveformView', () => {
       await begin(150);
       onMarkerAChange.mockClear();
 
-      // Advance past the throttle window so the move commits a native call.
+      // Well past the throttle window: a seek would have committed here, and
+      // a marker deliberately does not — writing one republishes the transport
+      // and re-renders the screen, so the drag is read from the shared values
+      // instead until it settles.
       nowSpy.mockReturnValue(1100);
       await move(180);
+      expect(onMarkerAChange).not.toHaveBeenCalled();
 
       // Bars are inset by HORIZONTAL_PADDING (spacing.md = 12) on each side,
       // so the track spans 276px: (180 - 12) / 276 * 10000 = 6087ms.
+      nowSpy.mockReturnValue(1120);
+      await finalize();
+      expect(onMarkerAChange).toHaveBeenCalledTimes(1);
       expect(onMarkerAChange).toHaveBeenCalledWith(6087);
       expect(onSeek).not.toHaveBeenCalled();
       nowSpy.mockRestore();
@@ -573,6 +620,8 @@ describe('WaveformView', () => {
       // never to or below A.
       nowSpy.mockReturnValue(1100);
       await move(30);
+      nowSpy.mockReturnValue(1120);
+      await finalize();
 
       expect(onMarkerBChange).toHaveBeenCalledWith(2001);
       onMarkerBChange.mock.calls.forEach(([ms]) => {
@@ -603,6 +652,8 @@ describe('WaveformView', () => {
       // never to or beyond B.
       nowSpy.mockReturnValue(1100);
       await move(270);
+      nowSpy.mockReturnValue(1120);
+      await finalize();
 
       expect(onMarkerAChange).toHaveBeenCalledWith(7999);
       onMarkerAChange.mock.calls.forEach(([ms]) => {
@@ -1194,6 +1245,7 @@ describe('WaveformView', () => {
 
     it('announces progress as a percentage via accessibilityValue', async () => {
       const tree = renderWaveform({ positionMs: 5000, durationMs: 20000 });
+      await settle();
       const container = getAdjustable(tree);
       expect(container.props.accessibilityValue).toEqual({
         min: 0,
@@ -1311,11 +1363,11 @@ describe('WaveformView', () => {
       nowSpy.mockReturnValue(1100);
       await move(180);
       expect(onPreviewMove).toHaveBeenCalledWith(6087);
-      expect(onMarkerAChange).toHaveBeenCalledWith(6087);
 
-      // Release stops the preview.
+      // Release stops the preview, and delivers the marker.
       nowSpy.mockReturnValue(1120);
       await finalize();
+      expect(onMarkerAChange).toHaveBeenCalledWith(6087);
       expect(onPreviewEnd).toHaveBeenCalledTimes(1);
     });
 
@@ -1400,18 +1452,11 @@ describe('WaveformView', () => {
       // Five bars over ten seconds: centres at 1s, 3s, 5s, 7s and 9s. Both
       // positions sit between the second and third, so no bar can change.
       const tree = renderWaveform({ positionMs: 3400, durationMs: 10000 });
+      await settle();
       const before = findBars(tree).map((bar) => bar.props.style);
 
-      act(() => {
-        tree.update(
-          <WaveformView
-            peaks={DEFAULT_PEAKS}
-            positionMs={3600}
-            durationMs={10000}
-            onSeek={jest.fn()}
-          />,
-        );
-      });
+      playheadMs.value = 3600;
+      await settle();
 
       expect(findBars(tree).map((bar) => bar.props.style)).toEqual(before);
       findBars(tree).forEach((bar, index) => {
@@ -1421,18 +1466,13 @@ describe('WaveformView', () => {
 
     it('still recolours the bar the playhead crosses', async () => {
       const tree = renderWaveform({ positionMs: 2900, durationMs: 10000 });
+      await settle();
       const before = findBars(tree).map((bar) => bar.props.style);
 
-      act(() => {
-        tree.update(
-          <WaveformView
-            peaks={DEFAULT_PEAKS}
-            positionMs={3100}
-            durationMs={10000}
-            onSeek={jest.fn()}
-          />,
-        );
-      });
+      // The playhead moves by writing the shared value, exactly as the engine
+      // moves it — no prop, and so no render until the crossing forces one.
+      playheadMs.value = 3100;
+      await settle();
 
       const after = findBars(tree).map((bar) => bar.props.style);
       expect(after[1]).not.toBe(before[1]);
@@ -1454,15 +1494,17 @@ describe('WaveformView', () => {
       // centred at 3000 and 5000, so the nudge moves it in milliseconds
       // without reaching either centre.
       await begin(137);
+      await settle();
       const before = findBars(tree).map((bar) => bar.props.style);
       await move(138);
+      await settle();
 
       findBars(tree).forEach((bar, index) => {
         expect(bar.props.style).toBe(before[index]);
       });
-      // The drag is live all the same: the marker itself moved.
-      expect(onMarkerAChange).toHaveBeenCalled();
+      // The drag is live all the same: the marker lands where it was dropped.
       await finalize();
+      expect(onMarkerAChange).toHaveBeenLastCalledWith(4565);
     });
   });
 

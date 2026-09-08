@@ -1,5 +1,6 @@
 import React from 'react';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
+import { makeMutable, SharedValue } from 'react-native-reanimated';
 
 import { SeekBar } from '../SeekBar';
 
@@ -51,14 +52,25 @@ jest.mock('react-native-gesture-handler', () => {
 const RNGH = require('react-native-gesture-handler');
 const handlers = () => RNGH.__getHandlers();
 
-function renderSeekBar(
-  props: Partial<React.ComponentProps<typeof SeekBar>> = {},
-) {
+/**
+ * The playhead the bar was last rendered with. The component takes it as a
+ * shared value rather than a number — the fill and the thumb follow it on the
+ * UI thread — so the tests hand it one and write to this to move the engine.
+ */
+let playheadMs: SharedValue<number>;
+
+function renderSeekBar({
+  positionMs = 0,
+  ...props
+}: Partial<Omit<React.ComponentProps<typeof SeekBar>, 'playheadMs'>> & {
+  positionMs?: number;
+} = {}) {
+  playheadMs = makeMutable(positionMs);
   let tree!: ReactTestRenderer;
   act(() => {
     tree = create(
       <SeekBar
-        positionMs={0}
+        playheadMs={playheadMs}
         durationMs={10000}
         onSeek={jest.fn()}
         {...props}
@@ -101,6 +113,21 @@ async function fire(run: () => void): Promise<void> {
   });
 }
 
+/**
+ * Let the UI-thread projections reach React.
+ *
+ * The elapsed clock and the announced percentage are derived in the UI runtime
+ * and mirrored back with `runOnJS`, so neither is on the first render. Under
+ * Jest the UI runtime's reactions are driven from the frame loop, which runs on
+ * real timers, so draining the microtask queue is not enough — anything
+ * asserting one of those figures has to let a frame pass.
+ */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
 const begin = (x: number) => fire(() => handlers().begin({ x }));
 const move = (x: number) => fire(() => handlers().update({ x }));
 const finalize = () => fire(() => handlers().finalize({}));
@@ -108,6 +135,7 @@ const finalize = () => fire(() => handlers().finalize({}));
 describe('SeekBar', () => {
   it('sets adjustable role and position label', async () => {
     const tree = renderSeekBar({ positionMs: 5000, durationMs: 120000 });
+    await settle();
     const container = getAdjustable(tree);
     expect(container).toBeDefined();
     expect(container.props.accessibilityLabel).toContain('0:05');
@@ -293,6 +321,7 @@ describe('SeekBar', () => {
         rangeStartMs: 5000,
         rangeEndMs: 15000,
       });
+      await settle();
       const container = getAdjustable(tree);
       // 8s is 3s into a 10s region.
       expect(container.props.accessibilityLabel).toContain('Loop position');
@@ -307,6 +336,7 @@ describe('SeekBar', () => {
         rangeStartMs: 5000,
         rangeEndMs: 15000,
       });
+      await settle();
       // 10s sits halfway through [5s, 15s].
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
     });
@@ -333,6 +363,7 @@ describe('SeekBar', () => {
         rangeStartMs: 15000,
         rangeEndMs: 5000,
       });
+      await settle();
       // Invalid range falls back to track-wide: 30s of 60s = 50%.
       const container = getAdjustable(tree);
       expect(container.props.accessibilityLabel).toContain('Playback position');
@@ -352,6 +383,7 @@ describe('SeekBar', () => {
 
     it('announces progress as a percentage via accessibilityValue', async () => {
       const tree = renderSeekBar({ positionMs: 5000, durationMs: 20000 });
+      await settle();
       const container = getAdjustable(tree);
       expect(container.props.accessibilityValue).toEqual({
         min: 0,

@@ -15,8 +15,9 @@ import Animated, {
   useDerivedValue,
 } from 'react-native-reanimated';
 
-import { usePlayheadValue } from '../hooks/usePlayheadValue';
+import { MarkerDrag } from '../hooks/useMarkerDrag';
 import { useSharedNumber } from '../hooks/useSharedNumber';
+import { useUiDerivedNumber } from '../hooks/useUiDerivedNumber';
 import { useTheme } from '../hooks/useTheme';
 import {
   NO_MARKER,
@@ -43,17 +44,35 @@ import {
 
 interface WaveformViewProps {
   peaks: WaveformPeaks;
-  positionMs: number;
-  durationMs: number;
   /**
-   * Whether the transport is running, so the playhead can be drawn between the
-   * engine's reports instead of stepping to each one. See
-   * {@link usePlayheadValue}.
+   * The playhead, in milliseconds, as a shared value.
+   *
+   * A shared value rather than a number because this surface is one of the two
+   * that draws it. Handed the number, the component had to re-render for the
+   * playhead to move — ten times a second while playing, and at the drag's
+   * cadence while scrubbing — and on the New Architecture every one of those
+   * renders is mounted on the Android UI thread in the same pass that draws the
+   * frame. The cursor now follows it from the UI thread, and the three coarse
+   * things React still draws from it (the bar tiers, the announced percentage,
+   * the spoken time) are projected with {@link useUiDerivedNumber} so each
+   * re-renders at its own rate rather than the playhead's.
    */
-  isPlaying?: boolean;
+  playheadMs: SharedValue<number>;
+  durationMs: number;
   onSeek: (positionMs: number) => void;
+  /**
+   * A and B as the engine last committed them. They decide which markers exist
+   * and name them for a screen reader; where each one is *drawn* comes from
+   * {@link markerDrag} while a finger is on it.
+   */
   markerA?: number;
   markerB?: number;
+  /**
+   * Where to publish an in-flight drag, so surfaces outside the waveform can
+   * follow it. Pass the screen's own — the marker tiles read the same one — and
+   * omit it for a waveform that stands alone. See {@link MarkerDrag}.
+   */
+  markerDrag?: MarkerDrag;
   /**
    * Whether the A/B loop is armed. When both markers are set and this is
    * true, the fill is scoped to the loop: the region before A is never
@@ -167,19 +186,21 @@ const Cursor = React.memo(function Cursor({
  *
  * The bars are the exception, and are still drawn by React. They can be,
  * because a bar changes colour only when an edge crosses its centre: about once
- * a second on a three-minute track, and during a drag at the throttled cadence
- * the engine echoes positions back at. The fractions handed to them are snapped
- * to the bar grid so a movement that cannot change the picture cannot change
- * the props either, and the memo below holds.
+ * a second on a three-minute track. All three edges they are given — the
+ * playhead and the region's two ends — are snapped to the bar grid on the UI
+ * thread, so a movement that cannot change the picture cannot change the props
+ * either, and the memo below holds. None of them is read from a prop: the
+ * playhead and a dragged marker both live in shared values, and taking them
+ * through React would put the screen back in the path of every pointer event.
  */
 export const WaveformView = React.memo(function WaveformView({
   peaks,
-  positionMs,
+  playheadMs,
   durationMs,
-  isPlaying = false,
   onSeek,
   markerA,
   markerB,
+  markerDrag,
   loopEnabled = true,
   placeMode = 'none',
   onPlaceComplete,
@@ -208,6 +229,7 @@ export const WaveformView = React.memo(function WaveformView({
   } = useWaveformGesture({
     durationMs,
     height,
+    drag: markerDrag,
     markerA,
     markerB,
     placeMode,
@@ -255,25 +277,103 @@ export const WaveformView = React.memo(function WaveformView({
   );
 
   // The loop is "active" (and the fill scoped to A..B) only when both markers
-  // exist, A precedes B, and looping is armed.
+  // exist, A precedes B, and looping is armed. A drag cannot change any of
+  // those: the handles are clamped so A stays before B, so the region survives
+  // the whole gesture and only its edges move.
   const hasRegion =
     markerA != null && markerB != null && markerA < markerB && durationMs > 0;
-  const progress = durationMs > 0 ? positionMs / durationMs : 0;
-  const aFrac = hasRegion ? (markerA as number) / durationMs : 0;
-  const bFrac = hasRegion ? (markerB as number) / durationMs : 0;
   const loopActive = hasRegion && loopEnabled;
 
-  // What the bars are handed, snapped to their own grid. See `snapDownToBarGrid`.
   const displayBarCount = displayPeaks.length;
-  const barsProgress = snapDownToBarGrid(progress, displayBarCount);
-  const barsAFrac = hasRegion ? snapUpToBarGrid(aFrac, displayBarCount) : 0;
-  const barsBFrac = hasRegion ? snapDownToBarGrid(bFrac, displayBarCount) : 0;
-
-  // Where the overlays sit, resolved on the UI thread. While a drag is in
-  // flight the dragged element follows the finger; everything else follows the
-  // value the engine last reported.
-  const playhead = usePlayheadValue(positionMs, isPlaying);
+  const playhead = playheadMs;
   const durationValue = useSharedNumber(durationMs);
+  const barCountValue = useSharedNumber(displayBarCount);
+  const hasRegionValue = useSharedNumber(hasRegion ? 1 : 0);
+
+  // The playhead's grid position cannot be snapped here, because the playhead
+  // is not here: it lives in a shared value and moves every frame. It is
+  // snapped on the UI thread instead, and only a movement that actually
+  // crosses a bar centre is allowed to re-render the bars — a few times a
+  // second on a phone-width track, rather than ten.
+  const deriveBarsProgress = useCallback(() => {
+    'worklet';
+    if (durationValue.value <= 0 || barCountValue.value <= 0) return 0;
+    return snapDownToBarGrid(
+      playhead.value / durationValue.value,
+      barCountValue.value,
+    );
+  }, [playhead, durationValue, barCountValue]);
+  const barsProgress = useUiDerivedNumber(deriveBarsProgress, 0);
+
+  // The two figures the accessibility surface announces, each derived at the
+  // rate it is actually spoken at: a whole percentage changes a hundred times
+  // across a track, a whole second once a second. Feeding either of them
+  // milliseconds re-registered the host view's accessibility props at the
+  // engine's rate for a value that reads the same.
+  const deriveA11yPercent = useCallback(() => {
+    'worklet';
+    if (durationValue.value <= 0) return 0;
+    const ratio = playhead.value / durationValue.value;
+    return Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+  }, [playhead, durationValue]);
+  const a11yPercent = useUiDerivedNumber(deriveA11yPercent, 0);
+
+  const deriveSpokenSecond = useCallback(() => {
+    'worklet';
+    return Math.floor(Math.max(0, playhead.value) / 1000);
+  }, [playhead]);
+  const spokenSecond = useUiDerivedNumber(deriveSpokenSecond, 0);
+
+  // The region's two edges, snapped to the bar grid on the UI thread for the
+  // same reason the playhead is: a dragged marker is not here — it is in a
+  // shared value moving at the display's rate — and only a movement that
+  // actually carries an edge across a bar centre can change the picture. Each
+  // edge is derived on its own, so dragging A leaves B's derivation quiet.
+  const deriveBarsAFrac = useCallback(() => {
+    'worklet';
+    if (
+      hasRegionValue.value === 0 ||
+      durationValue.value <= 0 ||
+      barCountValue.value <= 0
+    ) {
+      return 0;
+    }
+    const ms =
+      dragTarget.value === TARGET_MARKER_A ? dragMs.value : markerAValue.value;
+    if (ms === NO_MARKER) return 0;
+    return snapUpToBarGrid(ms / durationValue.value, barCountValue.value);
+  }, [
+    hasRegionValue,
+    durationValue,
+    barCountValue,
+    dragTarget,
+    dragMs,
+    markerAValue,
+  ]);
+  const barsAFrac = useUiDerivedNumber(deriveBarsAFrac, 0);
+
+  const deriveBarsBFrac = useCallback(() => {
+    'worklet';
+    if (
+      hasRegionValue.value === 0 ||
+      durationValue.value <= 0 ||
+      barCountValue.value <= 0
+    ) {
+      return 0;
+    }
+    const ms =
+      dragTarget.value === TARGET_MARKER_B ? dragMs.value : markerBValue.value;
+    if (ms === NO_MARKER) return 0;
+    return snapDownToBarGrid(ms / durationValue.value, barCountValue.value);
+  }, [
+    hasRegionValue,
+    durationValue,
+    barCountValue,
+    dragTarget,
+    dragMs,
+    markerBValue,
+  ]);
+  const barsBFrac = useUiDerivedNumber(deriveBarsBFrac, 0);
 
   const cursorX = useDerivedValue(() => {
     const ms = dragTarget.value === TARGET_SEEK ? dragMs.value : playhead.value;
@@ -298,6 +398,11 @@ export const WaveformView = React.memo(function WaveformView({
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       if (durationMs <= 0) return;
+      // Read the playhead now rather than closing over a rendered copy of it.
+      // A shared value is readable from this thread, and taking it at the
+      // moment the action fires is both more accurate and what lets this
+      // callback stay stable while the playhead moves.
+      const positionMs = playhead.value;
       const { actionName } = e.nativeEvent;
       if (actionName === 'increment') {
         onSeek(Math.min(durationMs, positionMs + SEEK_STEP_MS));
@@ -323,7 +428,7 @@ export const WaveformView = React.memo(function WaveformView({
     },
     [
       durationMs,
-      positionMs,
+      playhead,
       markerA,
       onSeek,
       onMarkerAChange,
@@ -352,22 +457,20 @@ export const WaveformView = React.memo(function WaveformView({
 
   // A fresh object here is a changed prop on the host view, so the platform
   // was handed a new accessibility value ten times a second while playing.
-  // What it announces is a whole percentage, which changes a hundred times
-  // across an entire track — so the memo keys on that rounded figure, not on
-  // the position it came from.
-  const a11yPercent = Math.round(progress * 100);
+  // The memo keys on the rounded figure derived above, not on the position it
+  // came from.
   const a11yValue = useMemo(
     () => ({ min: 0, max: 100, now: a11yPercent }),
     [a11yPercent],
   );
 
   const a11yLabel = useMemo(() => {
-    let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
+    let label = `Waveform. Playback position: ${formatDuration(spokenSecond * 1000)} of ${formatDuration(durationMs)}`;
     if (markerA != null && markerB != null) {
       label += `. Loop from ${formatDuration(markerA)} to ${formatDuration(markerB)}`;
     }
     return label;
-  }, [positionMs, durationMs, markerA, markerB]);
+  }, [spokenSecond, durationMs, markerA, markerB]);
 
   return (
     <View

@@ -1,9 +1,12 @@
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
+import { makeMutable } from 'react-native-reanimated';
 
 import {
+  MarkerDrag,
   NO_MARKER,
   TARGET_MARKER_A,
+  TARGET_MARKER_B,
   TARGET_NONE,
   TARGET_SEEK,
   useWaveformGesture,
@@ -294,6 +297,78 @@ describe('useWaveformGesture', () => {
 
       // 300px container, 12px of padding each side.
       expect(lastResult.trackWidth.value).toBe(276);
+    });
+  });
+
+  describe('publishing to a shared drag', () => {
+    /** A drag owned by someone else, the way the player screen supplies one. */
+    const makeDrag = (): MarkerDrag => ({
+      target: makeMutable(TARGET_NONE),
+      ms: makeMutable(0),
+    });
+
+    it('writes the supplied drag rather than its own', async () => {
+      const drag = makeDrag();
+      render({ drag, markerA: 5000, onMarkerAChange: jest.fn() });
+      layout();
+
+      await begin(xFor(5000));
+      expect(drag.target.value).toBe(TARGET_MARKER_A);
+
+      await move(xFor(6000));
+      expect(drag.ms.value).toBe(6000);
+
+      // The hook hands back what it was given, so a caller that only reads the
+      // return value sees the same two values as one that supplied them.
+      expect(lastResult.drag).toBe(drag);
+      expect(lastResult.dragMs.value).toBe(6000);
+
+      await finalize();
+      expect(drag.target.value).toBe(TARGET_NONE);
+    });
+
+    it('publishes a B drag under its own target', async () => {
+      const drag = makeDrag();
+      render({
+        drag,
+        markerA: 2000,
+        markerB: 8000,
+        onMarkerBChange: jest.fn(),
+      });
+      layout();
+
+      await begin(xFor(8000), HEIGHT - 10);
+
+      expect(drag.target.value).toBe(TARGET_MARKER_B);
+      await finalize();
+    });
+
+    /**
+     * The reason the drag is shared at all. A marker written to the engine on
+     * every pointer event republished the transport twenty times a second, and
+     * every one of those was a render of the whole player screen. So the engine
+     * hears the grab and the release; the movement in between is only ever
+     * published here.
+     */
+    it('moves a marker through the drag, not through the engine', async () => {
+      const drag = makeDrag();
+      const onMarkerAChange = jest.fn();
+      render({ drag, markerA: 5000, onMarkerAChange });
+      layout();
+
+      await begin(xFor(5000));
+      onMarkerAChange.mockClear();
+
+      await move(xFor(5500));
+      await move(xFor(6000));
+      await move(xFor(6500));
+
+      expect(onMarkerAChange).not.toHaveBeenCalled();
+      expect(drag.ms.value).toBe(6500);
+
+      await finalize();
+      expect(onMarkerAChange).toHaveBeenCalledTimes(1);
+      expect(onMarkerAChange).toHaveBeenCalledWith(6500);
     });
   });
 

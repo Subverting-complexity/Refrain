@@ -14,7 +14,19 @@ const IDLE_STATE: PlaybackState = {
   volume: 1,
 };
 
-let subscriber: ((state: PlaybackState) => void) | null = null;
+// The engine as the hook now sees it: a store with a current snapshot and a
+// set of listeners. `useAudioPlayer` reads it through a selector, so a snapshot
+// has to be readable on demand and not only pushed. Both carry the `mock`
+// prefix because the module factory below closes over them, and Jest only
+// allows a hoisted factory to reach names spelled that way.
+let mockEngineState: PlaybackState = IDLE_STATE;
+const mockSubscribers = new Set<(state: PlaybackState) => void>();
+
+function publish(next: PlaybackState): void {
+  mockEngineState = next;
+  for (const listener of mockSubscribers) listener(next);
+}
+
 const mockLoadTrack = jest.fn<
   Promise<void>,
   [string, string | undefined, string | undefined]
@@ -31,12 +43,12 @@ const mockCommitMarkerPlacement = jest.fn<Promise<void>, ['A' | 'B']>();
 
 jest.mock('../../services/audioEngine', () => ({
   subscribe: (cb: (state: PlaybackState) => void) => {
-    subscriber = cb;
-    cb(IDLE_STATE);
+    mockSubscribers.add(cb);
     return () => {
-      subscriber = null;
+      mockSubscribers.delete(cb);
     };
   },
+  getState: () => mockEngineState,
   loadTrack: (uri: string, trackId?: string, trackName?: string) =>
     mockLoadTrack(uri, trackId, trackName),
   unloadTrack: () => mockUnloadTrack(),
@@ -57,6 +69,7 @@ jest.mock('../../services/audioEngine', () => ({
 }));
 
 let lastResult: ReturnType<typeof useAudioPlayer>;
+let renders = 0;
 
 function TestComponent({
   uri,
@@ -67,6 +80,7 @@ function TestComponent({
   trackId?: string | null;
   trackName?: string | null;
 }) {
+  renders += 1;
   lastResult = useAudioPlayer(uri, trackId, trackName);
   return null;
 }
@@ -85,7 +99,8 @@ function renderHook(
 
 beforeEach(() => {
   jest.clearAllMocks();
-  subscriber = null;
+  mockEngineState = IDLE_STATE;
+  mockSubscribers.clear();
   mockLoadTrack.mockResolvedValue(undefined);
   mockUnloadTrack.mockResolvedValue(undefined);
 });
@@ -132,7 +147,7 @@ describe('useAudioPlayer', () => {
     renderHook('file:///bad.mp3');
 
     act(() => {
-      subscriber?.({
+      publish({
         ...IDLE_STATE,
         status: 'error',
         lastError: 'unsupported format',
@@ -179,7 +194,7 @@ describe('useAudioPlayer', () => {
     renderHook('file:///test.mp3');
 
     act(() => {
-      subscriber?.({ ...IDLE_STATE, volume: 0.4 });
+      publish({ ...IDLE_STATE, volume: 0.4 });
     });
 
     expect(lastResult.volume).toBe(0.4);
@@ -250,5 +265,57 @@ describe('useAudioPlayer', () => {
     });
 
     expect(mockCommitMarkerPlacement).toHaveBeenCalledWith('B');
+  });
+
+  it('reports the playhead as a shared value, not as state', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      publish({ ...IDLE_STATE, status: 'paused', positionMs: 7300 });
+    });
+
+    expect(lastResult.playheadMs.value).toBe(7300);
+    // The position must not appear on the transport at all: a component that
+    // reads the transport would then re-render ten times a second while
+    // playing, which is the thing the split exists to prevent.
+    expect(lastResult).not.toHaveProperty('positionMs');
+  });
+
+  it('does not re-render for a position that only moves the playhead', () => {
+    renderHook('file:///test.mp3');
+    const before = renders;
+
+    act(() => {
+      publish({ ...IDLE_STATE, status: 'paused', positionMs: 1000 });
+    });
+    act(() => {
+      publish({ ...IDLE_STATE, status: 'paused', positionMs: 2000 });
+    });
+
+    expect(lastResult.playheadMs.value).toBe(2000);
+    // One render for entering 'paused'; none at all for the second position.
+    expect(renders - before).toBe(1);
+  });
+
+  it('re-renders when something on the transport actually changes', () => {
+    renderHook('file:///test.mp3');
+    const before = renders;
+
+    act(() => {
+      publish({ ...IDLE_STATE, markerA: 5000 });
+    });
+
+    expect(lastResult.markerA).toBe(5000);
+    expect(renders).toBeGreaterThan(before);
+  });
+
+  it('exposes the engine snapshot for event-time reads', () => {
+    renderHook('file:///test.mp3');
+
+    act(() => {
+      publish({ ...IDLE_STATE, positionMs: 8800 });
+    });
+
+    expect(lastResult.getPlaybackState().positionMs).toBe(8800);
   });
 });

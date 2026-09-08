@@ -1,6 +1,7 @@
 import React from 'react';
 import { AccessibilityInfo, Modal } from 'react-native';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
+import { makeMutable } from 'react-native-reanimated';
 
 import PlayerScreen from '../player';
 import { updateTrackDuration } from '@/src/services/trackStore';
@@ -10,7 +11,10 @@ const mockSetMarkerB = jest.fn<boolean, [number]>();
 
 const mockAudioPlayerState = {
   status: 'paused' as const,
-  positionMs: 1000,
+  // The playhead is a shared value, not state: the surfaces that draw it read
+  // it from the UI thread. See `useAudioPlayer`.
+  playheadMs: makeMutable(1000),
+  getPlaybackState: jest.fn(),
   durationMs: 10000,
   markerA: 5000,
   markerB: null as number | null,
