@@ -92,15 +92,19 @@ function layout(tree: ReactTestRenderer, width: number) {
   });
 }
 
-function begin(x: number) {
-  act(() => handlers().begin({ x }));
+/**
+ * Drive one gesture callback and let its `runOnJS` calls land. The handlers are
+ * worklets and reach JavaScript through `runOnJS`, which queues a microtask.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
 }
-function move(x: number) {
-  act(() => handlers().update({ x }));
-}
-function finalize() {
-  act(() => handlers().finalize({}));
-}
+
+const begin = (x: number) => fire(() => handlers().begin({ x }));
+const move = (x: number) => fire(() => handlers().update({ x }));
+const finalize = () => fire(() => handlers().finalize({}));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -110,12 +114,12 @@ beforeEach(() => {
 });
 
 describe('VolumeControl', () => {
-  it('renders the slider inline', () => {
+  it('renders the slider inline', async () => {
     const tree = renderControl({ volume: 0.5 });
     expect(getAdjustable(tree)).toBeDefined();
   });
 
-  it('sets adjustable role with a percentage label and value', () => {
+  it('sets adjustable role with a percentage label and value', async () => {
     const tree = renderControl({ volume: 0.5 });
     const container = getAdjustable(tree);
 
@@ -127,7 +131,7 @@ describe('VolumeControl', () => {
     });
   });
 
-  it('increments volume by a step, clamped to 1', () => {
+  it('increments volume by a step, clamped to 1', async () => {
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0.98, onVolumeChange });
     const container = getAdjustable(tree);
@@ -141,7 +145,7 @@ describe('VolumeControl', () => {
     expect(onVolumeChange).toHaveBeenCalledWith(1);
   });
 
-  it('decrements volume by a step, clamped to 0', () => {
+  it('decrements volume by a step, clamped to 0', async () => {
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0.02, onVolumeChange });
     const container = getAdjustable(tree);
@@ -155,30 +159,30 @@ describe('VolumeControl', () => {
     expect(onVolumeChange).toHaveBeenCalledWith(0);
   });
 
-  it('seeks volume from a tap based on touch position', () => {
+  it('seeks volume from a tap based on touch position', async () => {
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0, onVolumeChange });
     layout(tree, 200);
 
-    begin(50);
+    await begin(50);
 
     // 50 / 200 = 0.25
     expect(onVolumeChange).toHaveBeenCalledWith(0.25);
   });
 
-  it('updates volume while dragging and commits on release', () => {
+  it('updates volume while dragging and commits on release', async () => {
     const nowSpy = jest.spyOn(Date, 'now');
     const onVolumeChange = jest.fn();
     const tree = renderControl({ volume: 0, onVolumeChange });
     layout(tree, 100);
 
     nowSpy.mockReturnValue(1000);
-    begin(10);
+    await begin(10);
     // Throttled move within the window — visual updates, no native call yet.
     nowSpy.mockReturnValue(1010);
-    move(80);
+    await move(80);
     nowSpy.mockReturnValue(1020);
-    finalize();
+    await finalize();
 
     // Grant fires immediately (0.1); the final value (0.8) is committed on
     // release even though the intervening move was throttled.
@@ -187,7 +191,7 @@ describe('VolumeControl', () => {
     nowSpy.mockRestore();
   });
 
-  it('shows the iOS limitation note only on iOS web without Web Audio gain', () => {
+  it('shows the iOS limitation note only on iOS web without Web Audio gain', async () => {
     mockIsIOSWeb.mockReturnValue(true);
     mockIsWebAudioGainSupported.mockReturnValue(false);
     const tree = renderControl();
@@ -199,7 +203,7 @@ describe('VolumeControl', () => {
     expect(hasNote).toBe(true);
   });
 
-  it('hides the iOS note on non-iOS platforms', () => {
+  it('hides the iOS note on non-iOS platforms', async () => {
     mockIsIOSWeb.mockReturnValue(false);
     const tree = renderControl();
     const texts = tree.root.findAllByType('Text' as never);
@@ -210,7 +214,7 @@ describe('VolumeControl', () => {
     expect(hasNote).toBe(false);
   });
 
-  it('hides the iOS note on iOS web when Web Audio gain attenuates volume', () => {
+  it('hides the iOS note on iOS web when Web Audio gain attenuates volume', async () => {
     mockIsIOSWeb.mockReturnValue(true);
     mockIsWebAudioGainSupported.mockReturnValue(true);
     const tree = renderControl();

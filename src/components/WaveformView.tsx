@@ -1,26 +1,43 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   AccessibilityActionEvent,
   AccessibilityInfo,
+  LayoutChangeEvent,
   StyleSheet,
   useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  SharedValue,
+  useAnimatedStyle,
+  useDerivedValue,
+} from 'react-native-reanimated';
 
+import { usePlayheadValue } from '../hooks/usePlayheadValue';
+import { useSharedNumber } from '../hooks/useSharedNumber';
 import { useTheme } from '../hooks/useTheme';
-import { useWaveformGesture } from '../hooks/useWaveformGesture';
+import {
+  NO_MARKER,
+  TARGET_MARKER_A,
+  TARGET_MARKER_B,
+  TARGET_SEEK,
+  useWaveformGesture,
+} from '../hooks/useWaveformGesture';
 import { radii, spacing } from '../theme';
 import { WaveformPeaks } from '../types';
 import { formatDuration } from '../utils/formatTime';
 import { WaveformBars } from './WaveformBars';
 import { MARKER_LINE_HALO, WaveformMarkers } from './WaveformMarkers';
 import {
+  barCountForTrackWidth,
+  downsamplePeaks,
   HANDLE_ZONE,
   HORIZONTAL_PADDING,
   snapDownToBarGrid,
   snapUpToBarGrid,
+  trackOffsetPx,
   waveformHeightForViewport,
 } from './waveformLayout';
 
@@ -28,6 +45,12 @@ interface WaveformViewProps {
   peaks: WaveformPeaks;
   positionMs: number;
   durationMs: number;
+  /**
+   * Whether the transport is running, so the playhead can be drawn between the
+   * engine's reports instead of stepping to each one. See
+   * {@link usePlayheadValue}.
+   */
+  isPlaying?: boolean;
   onSeek: (positionMs: number) => void;
   markerA?: number;
   markerB?: number;
@@ -85,8 +108,7 @@ interface WaveformViewProps {
    * Reading the viewport here rather than in the player is deliberate: on
    * Android a metric change arrives for every inset and soft-keyboard event,
    * and subscribing from the screen re-rendered the screen and everything
-   * under it for a height that had not changed. This component follows the
-   * playhead and so re-renders regardless.
+   * under it for a height that had not changed.
    */
   height?: number;
   style?: ViewStyle;
@@ -95,34 +117,37 @@ interface WaveformViewProps {
 const SEEK_STEP_MS = 5000;
 
 interface CursorProps {
-  /** Playhead as a percentage of the track, matching the bars' 0..1 space. */
-  leftPct: number;
+  /** Playhead offset along the track, in pixels. */
+  offsetX: SharedValue<number>;
   color: string;
   edgeColor: string;
 }
 
 /**
- * The playhead line. Its own memoised component so that the renders which do
- * not move it — a marker drag, an arm-state change, a parent re-render — leave
- * it alone. When the playhead *does* move this is the one element that has to
- * change, which is the point: it moves on its own rather than dragging the rest
- * of the surface with it.
+ * The playhead line.
+ *
+ * Translated along the track from a shared value, so it follows both the
+ * engine and a finger on the UI thread — no render, and no layout pass. It was
+ * previously placed with a percentage `left`, which meant Yoga ran over the
+ * whole surface ten times a second while playing and on every pointer event of
+ * a drag; on Android that is the work that showed as stutter.
  */
 const Cursor = React.memo(function Cursor({
-  leftPct,
+  offsetX,
   color,
   edgeColor,
 }: CursorProps) {
+  const slide = useAnimatedStyle(() => ({
+    transform: [{ translateX: offsetX.value }],
+  }));
+
   return (
-    <View
+    <Animated.View
       style={[
         styles.noPointerEvents,
         styles.cursor,
-        {
-          left: `${leftPct}%`,
-          backgroundColor: color,
-          borderColor: edgeColor,
-        },
+        { backgroundColor: color, borderColor: edgeColor },
+        slide,
       ]}
     />
   );
@@ -131,14 +156,27 @@ const Cursor = React.memo(function Cursor({
 /**
  * The waveform surface: a touch target wrapping the bars, the A/B overlay, and
  * the playhead. Touch behaviour lives in {@link useWaveformGesture} and the
- * drawing in `WaveformBars`/`WaveformMarkers`; what remains here is resolving
- * the displayed values (prop-driven, or the live drag value while one is in
- * flight) and the accessibility surface.
+ * drawing in `WaveformBars`/`WaveformMarkers`.
+ *
+ * ## What moves where
+ *
+ * Everything that moves continuously — the playhead, the marker handles and
+ * their lines, the loop wash — is positioned by a translation driven from a
+ * shared value, so it is drawn on the UI thread at the display's own rate and
+ * costs neither a React render nor a layout pass.
+ *
+ * The bars are the exception, and are still drawn by React. They can be,
+ * because a bar changes colour only when an edge crosses its centre: about once
+ * a second on a three-minute track, and during a drag at the throttled cadence
+ * the engine echoes positions back at. The fractions handed to them are snapped
+ * to the bar grid so a movement that cannot change the picture cannot change
+ * the props either, and the memo below holds.
  */
 export const WaveformView = React.memo(function WaveformView({
   peaks,
   positionMs,
   durationMs,
+  isPlaying = false,
   onSeek,
   markerA,
   markerB,
@@ -155,10 +193,19 @@ export const WaveformView = React.memo(function WaveformView({
   style,
 }: WaveformViewProps) {
   const { theme } = useTheme();
-  const { height: viewportHeight } = useWindowDimensions();
+  const { height: viewportHeight, width: viewportWidth } =
+    useWindowDimensions();
   const height = heightProp ?? waveformHeightForViewport(viewportHeight);
 
-  const { gesture, drag, onLayout } = useWaveformGesture({
+  const {
+    gesture,
+    onLayout: measureGesture,
+    trackWidth,
+    dragTarget,
+    dragMs,
+    markerAValue,
+    markerBValue,
+  } = useWaveformGesture({
     durationMs,
     height,
     markerA,
@@ -174,39 +221,79 @@ export const WaveformView = React.memo(function WaveformView({
     onPreviewEnd,
   });
 
-  // While a drag is in flight the dragged element follows the finger every
-  // frame; everything else stays on its prop value.
-  const displayPositionMs = drag?.target === 'seek' ? drag.ms : positionMs;
-  const displayMarkerA = drag?.target === 'markerA' ? drag.ms : markerA;
-  const displayMarkerB = drag?.target === 'markerB' ? drag.ms : markerB;
-  const progress = durationMs > 0 ? displayPositionMs / durationMs : 0;
+  // The track width is needed on both sides of the thread boundary: by the
+  // worklets, to turn a touch into a position, and here, to decide how many
+  // bars will fit. The gesture hook owns the shared value; this is the React
+  // copy, and it is written only when the number actually changes, so a layout
+  // pass that reports the same width costs nothing.
+  const [measuredTrack, setMeasuredTrack] = useState(0);
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      measureGesture(e);
+      const width = Math.max(
+        0,
+        e.nativeEvent.layout.width - 2 * HORIZONTAL_PADDING,
+      );
+      setMeasuredTrack((previous) => (previous === width ? previous : width));
+    },
+    [measureGesture],
+  );
+
+  // Before the first layout the viewport stands in for the track, which is a
+  // little wider than it and so errs towards more bars rather than an empty
+  // first frame.
+  const trackEstimate =
+    measuredTrack > 0
+      ? measuredTrack
+      : Math.max(0, viewportWidth - 2 * HORIZONTAL_PADDING);
+  const barCount = barCountForTrackWidth(trackEstimate, peaks.length);
+  // The analyser produces two hundred buckets, which is the right resolution to
+  // keep and more than a phone can draw; see `MIN_BAR_PITCH`.
+  const displayPeaks = useMemo(
+    () => downsamplePeaks(peaks, barCount),
+    [peaks, barCount],
+  );
 
   // The loop is "active" (and the fill scoped to A..B) only when both markers
   // exist, A precedes B, and looping is armed.
   const hasRegion =
-    displayMarkerA != null &&
-    displayMarkerB != null &&
-    displayMarkerA < displayMarkerB &&
-    durationMs > 0;
-  const aFrac = hasRegion ? (displayMarkerA as number) / durationMs : 0;
-  const bFrac = hasRegion ? (displayMarkerB as number) / durationMs : 0;
+    markerA != null && markerB != null && markerA < markerB && durationMs > 0;
+  const progress = durationMs > 0 ? positionMs / durationMs : 0;
+  const aFrac = hasRegion ? (markerA as number) / durationMs : 0;
+  const bFrac = hasRegion ? (markerB as number) / durationMs : 0;
   const loopActive = hasRegion && loopEnabled;
 
-  // What the bars are handed, snapped to their own grid.
-  //
-  // The overlays below follow the playhead and the markers exactly, because a
-  // cursor that moved in bar-width steps would read as stuttering. The bars
-  // cannot: a bar is one of three colours, decided by which side of the edge
-  // its centre falls on, so it can only change when an edge crosses a centre.
-  // Between crossings the raw fractions still differ on every frame, and that
-  // is what re-rendered a memoised component with 200 children ten times a
-  // second while playing and on every pointer event of a drag. Snapped, the
-  // props are identical across every movement that draws the same picture, and
-  // the memo holds. See `snapDownToBarGrid`.
-  const barCount = peaks.length;
-  const barsProgress = snapDownToBarGrid(progress, barCount);
-  const barsAFrac = hasRegion ? snapUpToBarGrid(aFrac, barCount) : 0;
-  const barsBFrac = hasRegion ? snapDownToBarGrid(bFrac, barCount) : 0;
+  // What the bars are handed, snapped to their own grid. See `snapDownToBarGrid`.
+  const displayBarCount = displayPeaks.length;
+  const barsProgress = snapDownToBarGrid(progress, displayBarCount);
+  const barsAFrac = hasRegion ? snapUpToBarGrid(aFrac, displayBarCount) : 0;
+  const barsBFrac = hasRegion ? snapDownToBarGrid(bFrac, displayBarCount) : 0;
+
+  // Where the overlays sit, resolved on the UI thread. While a drag is in
+  // flight the dragged element follows the finger; everything else follows the
+  // value the engine last reported.
+  const playhead = usePlayheadValue(positionMs, isPlaying);
+  const durationValue = useSharedNumber(durationMs);
+
+  const cursorX = useDerivedValue(() => {
+    const ms = dragTarget.value === TARGET_SEEK ? dragMs.value : playhead.value;
+    return trackOffsetPx(ms, durationValue.value, trackWidth.value);
+  });
+  const markerAX = useDerivedValue(() => {
+    const ms =
+      dragTarget.value === TARGET_MARKER_A ? dragMs.value : markerAValue.value;
+    if (ms === NO_MARKER) return 0;
+    return trackOffsetPx(ms, durationValue.value, trackWidth.value);
+  });
+  const markerBX = useDerivedValue(() => {
+    const ms =
+      dragTarget.value === TARGET_MARKER_B ? dragMs.value : markerBValue.value;
+    if (ms === NO_MARKER) return 0;
+    return trackOffsetPx(ms, durationValue.value, trackWidth.value);
+  });
+  const regionWidth = useDerivedValue(() =>
+    Math.max(0, markerBX.value - markerAX.value),
+  );
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -264,10 +351,10 @@ export const WaveformView = React.memo(function WaveformView({
   );
 
   // A fresh object here is a changed prop on the host view, so the platform
-  // was handed a new accessibility value ten times a second while playing and
-  // on every pointer event of a drag. What it announces is a whole percentage,
-  // which changes a hundred times across an entire track — so the memo keys on
-  // that rounded figure, not on the position it came from.
+  // was handed a new accessibility value ten times a second while playing.
+  // What it announces is a whole percentage, which changes a hundred times
+  // across an entire track — so the memo keys on that rounded figure, not on
+  // the position it came from.
   const a11yPercent = Math.round(progress * 100);
   const a11yValue = useMemo(
     () => ({ min: 0, max: 100, now: a11yPercent }),
@@ -300,7 +387,7 @@ export const WaveformView = React.memo(function WaveformView({
         <View style={[styles.touchArea, { height }]} onLayout={onLayout}>
           <View style={styles.track}>
             <WaveformBars
-              peaks={peaks}
+              peaks={displayPeaks}
               progress={barsProgress}
               hasRegion={hasRegion}
               aFrac={barsAFrac}
@@ -310,13 +397,17 @@ export const WaveformView = React.memo(function WaveformView({
 
             <WaveformMarkers
               durationMs={durationMs}
-              markerA={displayMarkerA}
-              markerB={displayMarkerB}
+              markerA={markerA}
+              markerB={markerB}
               hasRegion={hasRegion}
+              markerAX={markerAX}
+              markerBX={markerBX}
+              regionX={markerAX}
+              regionWidth={regionWidth}
             />
 
             <Cursor
-              leftPct={progress * 100}
+              offsetX={cursorX}
               color={theme.colors.textPrimary}
               edgeColor={theme.colors.surface}
             />
@@ -350,6 +441,7 @@ const styles = StyleSheet.create({
   },
   cursor: {
     position: 'absolute',
+    left: 0,
     top: HANDLE_ZONE,
     bottom: HANDLE_ZONE,
     // Same edge treatment as the marker lines, for the same reason: the

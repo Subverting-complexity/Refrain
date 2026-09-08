@@ -362,6 +362,7 @@ export default function PlayerScreen() {
               peaks={peaks}
               positionMs={positionMs}
               durationMs={durationMs}
+              isPlaying={status === 'playing'}
               onSeek={seekTo}
               markerA={markerA ?? undefined}
               markerB={markerB ?? undefined}
@@ -449,6 +450,7 @@ export default function PlayerScreen() {
           <SeekBar
             positionMs={positionMs}
             durationMs={durationMs}
+            isPlaying={status === 'playing'}
             onSeek={seekTo}
             rangeStartMs={markerA ?? undefined}
             rangeEndMs={markerB ?? undefined}

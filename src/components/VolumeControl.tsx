@@ -2,7 +2,8 @@ import { useCallback, useMemo } from 'react';
 import { AccessibilityActionEvent, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useSliderGesture } from '../hooks/useSliderGesture';
+import { useSharedNumber } from '../hooks/useSharedNumber';
+import { useDisplayRatio, useSliderGesture } from '../hooks/useSliderGesture';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { isWebAudioGainSupported } from '../services/webAudioGain';
@@ -34,12 +35,19 @@ interface VolumeControlProps {
 export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
   const { theme } = useTheme();
 
-  const { pan, handleLayout, dragRatio } = useSliderGesture({
+  const { pan, handleLayout, trackWidth, dragRatio } = useSliderGesture({
     onValueChange: onVolumeChange,
   });
 
-  const displayVolume = clamp01(dragRatio ?? volume);
+  // The bar follows the finger on the UI thread; the icon and the percentage
+  // follow the engine's echo of the value, which arrives at the drag's
+  // throttled cadence. Fifty milliseconds behind a moving finger is not
+  // something a reader can see on a number, and it keeps a dragging thumb from
+  // re-rendering the row it sits in.
+  const displayVolume = clamp01(volume);
   const percent = Math.round(displayVolume * 100);
+  const settledRatio = useSharedNumber(displayVolume);
+  const progress = useDisplayRatio(settledRatio, dragRatio);
 
   const showIOSHint = isIOSWeb() && !isWebAudioGainSupported();
 
@@ -82,7 +90,8 @@ export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
           accessibilityValue={a11yValue}
         >
           <SliderBar
-            progress={displayVolume}
+            progress={progress}
+            trackWidth={trackWidth}
             trackColor={theme.colors.track}
             fillColor={theme.colors.accentForeground}
             pan={pan}

@@ -1,21 +1,38 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { LayoutChangeEvent } from 'react-native';
+import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated';
 
 import {
   HORIZONTAL_PADDING,
   MARKER_HIT_ZONE_PX,
+  positionFromTouchX,
+  trackOffsetPx,
 } from '../components/waveformLayout';
 import { clampToBounds, markerBounds } from '../utils/markerBounds';
-import { useDragThrottle } from './useDragThrottle';
+import { useLatestRef } from './useLatestRef';
 import { usePanGesture } from './usePanGesture';
+import { useSharedNumber } from './useSharedNumber';
+import { useUiDragThrottle } from './useUiDragThrottle';
 
 /** What an in-flight waveform gesture is moving. */
 export type DragTarget = 'markerA' | 'markerB' | 'seek';
 
-/** The live value of the element under the finger during a drag. */
-export interface WaveformDrag {
-  ms: number;
-  target: DragTarget;
+/**
+ * The drag target as a number, because the UI thread carries it in a shared
+ * value and a shared value holding a string costs a serialisation branch on
+ * every write. `TARGET_NONE` also means "no drag in flight".
+ */
+export const TARGET_NONE = 0;
+export const TARGET_SEEK = 1;
+export const TARGET_MARKER_A = 2;
+export const TARGET_MARKER_B = 3;
+
+/** A marker position that is not set. Positions are never negative. */
+export const NO_MARKER = -1;
+
+/** Which marker a numeric target names, for the callbacks that take a letter. */
+function markerLetter(target: number): 'A' | 'B' {
+  return target === TARGET_MARKER_A ? 'A' : 'B';
 }
 
 export interface UseWaveformGestureParams {
@@ -26,7 +43,8 @@ export interface UseWaveformGestureParams {
   markerB?: number;
   /**
    * Tap-to-place arm state. `'none'` means a tap only seeks; `'A'`/`'B'` means
-   * the next tap drops that marker. Grabbing an existing handle works either way.
+   * the next tap drops that marker. Grabbing an existing handle works either
+   * way.
    */
   placeMode: 'none' | 'A' | 'B';
   onSeek: (positionMs: number) => void;
@@ -49,47 +67,47 @@ export interface UseWaveformGestureParams {
 export interface UseWaveformGesture {
   /** The Pan gesture to hand to a `GestureDetector`. Built once. */
   gesture: ReturnType<typeof usePanGesture>;
-  /**
-   * The element being dragged and its live position, or `null` when no drag is
-   * in flight. Drives the visual every frame while native calls stay throttled.
-   */
-  drag: WaveformDrag | null;
   /** Layout handler for the touch surface; measures the track width. */
   onLayout: (e: LayoutChangeEvent) => void;
+  /** Width of the track the bars occupy, in pixels. */
+  trackWidth: SharedValue<number>;
+  /** Which element the finger is moving, as one of the `TARGET_*` constants. */
+  dragTarget: SharedValue<number>;
+  /** Where that element currently is, in milliseconds. */
+  dragMs: SharedValue<number>;
+  /** A and B as the UI thread sees them, with {@link NO_MARKER} for unset. */
+  markerAValue: SharedValue<number>;
+  markerBValue: SharedValue<number>;
 }
 
-const isMarkerTarget = (target: DragTarget): boolean =>
-  target === 'markerA' || target === 'markerB';
-
-/**
- * Keep the previous drag object when the gesture has not actually moved
- * anything.
- *
- * A pan reports every pointer event, and positions are rounded to whole
- * milliseconds, so a finger held still or nudged a fraction of a pixel produces
- * a run of events that resolve to the identical position. Allocating a fresh
- * `{ms, target}` for each of those re-renders the whole waveform surface for no
- * visual change. Returning the same object lets React bail out instead.
- */
-const nextDrag = (
-  previous: WaveformDrag | null,
-  ms: number,
-  target: DragTarget,
-): WaveformDrag | null =>
-  previous != null && previous.ms === ms && previous.target === target
-    ? previous
-    : { ms, target };
-
-const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+function isMarkerTarget(target: number): boolean {
+  'worklet';
+  return target === TARGET_MARKER_A || target === TARGET_MARKER_B;
+}
 
 /**
  * The waveform's touch behaviour: hit-testing a touch to a marker handle or a
  * seek, mapping x to a position, keeping a dragged marker inside its legal
  * bounds, throttling the native callback, and wiring the snippet preview.
  *
- * It owns the drag's transient state and hands back a Pan gesture built once —
- * a marker drag updates markerA/markerB ~20x/sec mid-gesture, and rebuilding
- * the gesture that often risks RNGH dropping the active drag.
+ * ## Where the work happens
+ *
+ * Everything between the finger and the pixel runs on the UI thread. A pointer
+ * event is hit-tested, mapped and clamped in a worklet, and the result written
+ * to `dragMs`; the overlays read that through animated styles. React is not
+ * involved in a drag at all, which is the point — see `usePanGesture` for why
+ * the previous arrangement could not be made fast enough on Android.
+ *
+ * JavaScript is reached only for what genuinely has to happen there: the audio
+ * engine calls, at the throttled twenty a second, and the once-per-gesture
+ * bookkeeping at either end. Those cross through `runOnJS`, which preserves the
+ * order calls were scheduled in — which is what lets the start hook run before
+ * the first value it applies to, and the final value be delivered before the
+ * commit that reads it.
+ *
+ * Every input the worklets need is mirrored into a shared value rather than
+ * captured, so the handlers never change identity and the Pan is built exactly
+ * once. A gesture rebuilt mid-drag drops the drag.
  */
 export function useWaveformGesture({
   durationMs,
@@ -106,210 +124,256 @@ export function useWaveformGesture({
   onPreviewMove,
   onPreviewEnd,
 }: UseWaveformGestureParams): UseWaveformGesture {
-  const containerWidth = useRef(0);
-  const dragTarget = useRef<DragTarget>('seek');
+  const trackWidth = useSharedValue(0);
+  const dragTarget = useSharedValue(TARGET_NONE);
+  const dragMs = useSharedValue(0);
   // Whether the in-flight gesture is an arm-driven placement (vs. a fine-tune
-  // drag of an existing handle or a plain seek), so endDrag knows to advance
-  // the parent's arm state on completion.
-  const isPlacement = useRef(false);
-  const dragThrottle = useDragThrottle();
+  // drag of an existing handle, or a plain seek), so the end of the gesture
+  // knows to advance the parent's arm state.
+  const isPlacement = useSharedValue(false);
 
-  // The target is carried in state (snapshotted from the ref when the drag
-  // starts) so render can pick the live element without reading the ref during
-  // render. null = not dragging.
-  const [drag, setDrag] = useState<WaveformDrag | null>(null);
-
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    containerWidth.current = e.nativeEvent.layout.width;
-  }, []);
-
-  // The bars are inset by HORIZONTAL_PADDING on each side, so the
-  // touchable track spans containerWidth - 2 * HORIZONTAL_PADDING.
-  const trackWidth = () => containerWidth.current - 2 * HORIZONTAL_PADDING;
-
-  // Map a touch x (relative to the touch area) to a position in ms, clamped
-  // to the track. Returns null before layout or for a zero-length track.
-  const positionFromX = useCallback(
-    (x: number): number | null => {
-      if (durationMs <= 0 || trackWidth() <= 0) return null;
-      const ratio = clamp01((x - HORIZONTAL_PADDING) / trackWidth());
-      return Math.round(ratio * durationMs);
-    },
-    [durationMs],
+  const durationValue = useSharedNumber(durationMs);
+  const heightValue = useSharedNumber(height);
+  const markerAValue = useSharedNumber(markerA ?? NO_MARKER);
+  const markerBValue = useSharedNumber(markerB ?? NO_MARKER);
+  // Only markers with a change handler are grabbable, so a read-only waveform
+  // never claims a touch for a drag. The arm state is folded in the same way:
+  // the UI thread needs it to decide what a tap does.
+  const canMoveA = useSharedNumber(onMarkerAChange ? 1 : 0);
+  const canMoveB = useSharedNumber(onMarkerBChange ? 1 : 0);
+  const armed = useSharedNumber(
+    placeMode === 'A'
+      ? TARGET_MARKER_A
+      : placeMode === 'B'
+        ? TARGET_MARKER_B
+        : TARGET_NONE,
   );
 
-  // Which existing marker handle (if any) sits under this touch. Only markers
-  // with a change handler are grabbable, so a read-only waveform never claims
-  // the touch for a drag. When both handles fall within the horizontal hit
-  // zone (markers near the same x), the touch's vertical half disambiguates:
-  // A lives at the top, B at the bottom, so near-overlapping markers stay
-  // individually selectable on a small screen.
-  const detectGrabbedHandle = useCallback(
-    (x: number, y: number): DragTarget => {
-      if (trackWidth() <= 0 || durationMs <= 0) return 'seek';
+  // The JavaScript-thread side. Every one of these is stable — it reads the
+  // newest props from a ref — so nothing that captures it has to be rebuilt.
+  const seekRef = useLatestRef(onSeek);
+  const markerARef = useLatestRef(onMarkerAChange);
+  const markerBRef = useLatestRef(onMarkerBChange);
+  const placeCompleteRef = useLatestRef(onPlaceComplete);
+  const markerCommitRef = useLatestRef(onMarkerCommit);
+  const previewStartRef = useLatestRef(onPreviewStart);
+  const previewMoveRef = useLatestRef(onPreviewMove);
+  const previewEndRef = useLatestRef(onPreviewEnd);
 
-      const aHit =
-        markerA != null &&
-        onMarkerAChange != null &&
-        Math.abs(
-          x - (HORIZONTAL_PADDING + (markerA / durationMs) * trackWidth()),
-        ) <= MARKER_HIT_ZONE_PX;
-      const bHit =
-        markerB != null &&
-        onMarkerBChange != null &&
-        Math.abs(
-          x - (HORIZONTAL_PADDING + (markerB / durationMs) * trackWidth()),
-        ) <= MARKER_HIT_ZONE_PX;
+  // Which element the throttled callback below is feeding. Set once per
+  // gesture, from the UI thread, before any value is delivered.
+  const activeTarget = useRef<number>(TARGET_NONE);
 
-      if (aHit && bHit) {
-        return y < height / 2 ? 'markerA' : 'markerB';
-      }
-      if (aHit) return 'markerA';
-      if (bHit) return 'markerB';
-      return 'seek';
+  const deliver = useCallback(
+    (ms: number) => {
+      const target = activeTarget.current;
+      if (target === TARGET_MARKER_A) markerARef.current?.(ms);
+      else if (target === TARGET_MARKER_B) markerBRef.current?.(ms);
+      else seekRef.current(ms);
+      // The preview follows the marker at the same throttled cadence as the
+      // marker itself, and never follows a plain seek.
+      if (isMarkerTarget(target)) previewMoveRef.current?.(ms);
     },
-    [durationMs, markerA, markerB, onMarkerAChange, onMarkerBChange, height],
+    [seekRef, markerARef, markerBRef, previewMoveRef],
+  );
+  const throttle = useUiDragThrottle(deliver);
+
+  const beginOnJS = useCallback(
+    (target: number, ms: number) => {
+      activeTarget.current = target;
+      if (isMarkerTarget(target)) previewStartRef.current?.(ms);
+    },
+    [previewStartRef],
   );
 
-  // Decide what a touch does: grab an existing handle (fine-tune), drop an
-  // armed marker, or seek. Placement only happens when the parent has armed
-  // it (placeMode) — an unarmed tap on the wave always just seeks. Grabbing an
-  // existing handle takes priority so a placed marker stays adjustable.
-  const detectDragTarget = useCallback(
-    (x: number, y: number): DragTarget => {
-      const grabbed = detectGrabbedHandle(x, y);
-      if (grabbed !== 'seek') {
-        isPlacement.current = false;
-        return grabbed;
+  const endOnJS = useCallback(
+    (target: number, placement: boolean) => {
+      if (isMarkerTarget(target)) {
+        // Commit before tearing the preview down. While the monitor is still
+        // active the engine redirects its pending restore to the loop start, so
+        // the playhead moves exactly once instead of racing the restore's seek.
+        markerCommitRef.current?.(markerLetter(target));
+        previewEndRef.current?.();
       }
-      if (placeMode === 'A' && onMarkerAChange) {
-        isPlacement.current = true;
-        return 'markerA';
-      }
-      if (placeMode === 'B' && onMarkerBChange) {
-        isPlacement.current = true;
-        return 'markerB';
-      }
-      isPlacement.current = false;
-      return 'seek';
+      if (placement) placeCompleteRef.current?.(markerLetter(target));
+      activeTarget.current = TARGET_NONE;
     },
-    [detectGrabbedHandle, placeMode, onMarkerAChange, onMarkerBChange],
+    [markerCommitRef, previewEndRef, placeCompleteRef],
   );
 
-  // Keep a dragged/placed marker valid relative to its sibling. The B handle
-  // can never be placed at or before A (the A < B invariant the engine
-  // enforces), so clamp it to just past A — the handle visibly stops at the
-  // boundary instead of snapping back silently when dropped before A. Shared
-  // with the marker time editor via `markerBounds` so both stop identically.
-  const clampForTarget = useCallback(
-    (target: DragTarget, ms: number): number => {
-      if (!isMarkerTarget(target)) return ms;
-      return clampToBounds(
-        ms,
-        markerBounds(
-          target === 'markerA' ? 'A' : 'B',
-          markerA ?? null,
-          markerB ?? null,
-          durationMs,
-        ),
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      // The bars are inset by HORIZONTAL_PADDING on each side, so the touchable
+      // track spans the measured width less both insets.
+      trackWidth.value = Math.max(
+        0,
+        e.nativeEvent.layout.width - 2 * HORIZONTAL_PADDING,
       );
     },
-    [markerA, markerB, durationMs],
+    [trackWidth],
   );
 
-  // The callback for the active drag target. markerA/markerB targets are
-  // only chosen by detectDragTarget when their handler exists, so seek (with
-  // its always-present onSeek) is the safe fallback.
-  const callbackForTarget = useCallback(
-    (target: DragTarget): ((ms: number) => void) => {
-      if (target === 'markerA' && onMarkerAChange) return onMarkerAChange;
-      if (target === 'markerB' && onMarkerBChange) return onMarkerBChange;
-      return onSeek;
-    },
-    [onSeek, onMarkerAChange, onMarkerBChange],
-  );
+  /**
+   * Which existing marker handle (if any) sits under this touch. When both
+   * handles fall within the horizontal hit zone (markers near the same x), the
+   * touch's vertical half disambiguates: A lives at the top, B at the bottom,
+   * so near-overlapping markers stay individually selectable on a small screen.
+   */
+  const grabbedHandle = useCallback(
+    (x: number, y: number): number => {
+      'worklet';
+      if (trackWidth.value <= 0 || durationValue.value <= 0) return TARGET_NONE;
 
-  // Drag start: pick the target, update the visual, and fire immediately
-  // (instant tap response — no throttling on grant).
-  const beginDrag = useCallback(
-    (x: number, y: number) => {
-      dragTarget.current = detectDragTarget(x, y);
-      const raw = positionFromX(x);
-      if (raw == null) {
-        isPlacement.current = false;
-        return;
-      }
-      const target = dragTarget.current;
-      const ms = clampForTarget(target, raw);
-      setDrag({ ms, target });
+      const hits = (ms: number): boolean => {
+        'worklet';
+        const handleX =
+          HORIZONTAL_PADDING +
+          trackOffsetPx(ms, durationValue.value, trackWidth.value);
+        return Math.abs(x - handleX) <= MARKER_HIT_ZONE_PX;
+      };
 
-      // Wire the rolling-monitor preview to marker gestures only (never plain
-      // seeks). Start it once here, and compose its follow into the throttled
-      // marker callback so it tracks the marker at the same ~20/sec cadence.
-      let throttledCallback = callbackForTarget(target);
-      if (isMarkerTarget(target) && (onPreviewStart || onPreviewMove)) {
-        onPreviewStart?.(ms);
-        if (onPreviewMove) {
-          const base = throttledCallback;
-          throttledCallback = (value: number) => {
-            base(value);
-            onPreviewMove(value);
-          };
-        }
+      const aHit =
+        markerAValue.value !== NO_MARKER &&
+        canMoveA.value === 1 &&
+        hits(markerAValue.value);
+      const bHit =
+        markerBValue.value !== NO_MARKER &&
+        canMoveB.value === 1 &&
+        hits(markerBValue.value);
+
+      if (aHit && bHit) {
+        return y < heightValue.value / 2 ? TARGET_MARKER_A : TARGET_MARKER_B;
       }
-      dragThrottle.begin(ms, throttledCallback);
+      if (aHit) return TARGET_MARKER_A;
+      if (bHit) return TARGET_MARKER_B;
+      return TARGET_NONE;
     },
     [
-      detectDragTarget,
-      positionFromX,
-      clampForTarget,
-      callbackForTarget,
-      dragThrottle,
-      onPreviewStart,
-      onPreviewMove,
+      trackWidth,
+      durationValue,
+      markerAValue,
+      markerBValue,
+      canMoveA,
+      canMoveB,
+      heightValue,
     ],
   );
 
-  // Drag move: update the visual every frame, but throttle native calls.
-  const moveDrag = useCallback(
-    (x: number) => {
-      const raw = positionFromX(x);
-      if (raw == null) return;
-      const ms = clampForTarget(dragTarget.current, raw);
-      const target = dragTarget.current;
-      setDrag((previous) => nextDrag(previous, ms, target));
-      dragThrottle.move(ms);
+  /**
+   * Decide what a touch does: grab an existing handle (fine-tune), drop an
+   * armed marker, or seek. Placement only happens when the parent has armed it
+   * — an unarmed tap on the wave always just seeks. Grabbing an existing handle
+   * takes priority so a placed marker stays adjustable.
+   */
+  const detectTarget = useCallback(
+    (x: number, y: number): number => {
+      'worklet';
+      const grabbed = grabbedHandle(x, y);
+      if (grabbed !== TARGET_NONE) {
+        isPlacement.value = false;
+        return grabbed;
+      }
+      const arm = armed.value;
+      if (arm === TARGET_MARKER_A && canMoveA.value === 1) {
+        isPlacement.value = true;
+        return TARGET_MARKER_A;
+      }
+      if (arm === TARGET_MARKER_B && canMoveB.value === 1) {
+        isPlacement.value = true;
+        return TARGET_MARKER_B;
+      }
+      isPlacement.value = false;
+      return TARGET_SEEK;
     },
-    [positionFromX, clampForTarget, dragThrottle],
+    [grabbedHandle, armed, canMoveA, canMoveB, isPlacement],
   );
 
-  // Drag end (or interruption): commit the final value, advance the arm state
-  // if this was an arm-driven placement, then drop back to the prop-driven
-  // visual.
-  const endDrag = useCallback(() => {
-    // Commit the final throttled value (which also delivers the final preview
-    // follow) before tearing the preview down, so the monitor restores from the
-    // correct end state.
-    dragThrottle.end();
-    if (isMarkerTarget(dragTarget.current)) {
-      // Commit before tearing the preview down. While the monitor is still
-      // active the engine redirects its pending restore to the loop start, so
-      // the playhead moves exactly once instead of racing the restore's seek.
-      onMarkerCommit?.(dragTarget.current === 'markerA' ? 'A' : 'B');
-      onPreviewEnd?.();
-    }
-    if (isPlacement.current) {
-      isPlacement.current = false;
-      onPlaceComplete?.(dragTarget.current === 'markerA' ? 'A' : 'B');
-    }
-    setDrag(null);
-  }, [dragThrottle, onPlaceComplete, onMarkerCommit, onPreviewEnd]);
+  /**
+   * Keep a dragged or placed marker valid relative to its sibling. B can never
+   * be placed at or before A (the A < B invariant the engine enforces), so it
+   * is clamped to just past A — the handle visibly stops at the boundary
+   * instead of snapping back silently when dropped before A. Shared with the
+   * marker time editor via `markerBounds` so both stop identically.
+   */
+  const clampForTarget = useCallback(
+    (target: number, ms: number): number => {
+      'worklet';
+      if (!isMarkerTarget(target)) return ms;
+      const a = markerAValue.value === NO_MARKER ? null : markerAValue.value;
+      const b = markerBValue.value === NO_MARKER ? null : markerBValue.value;
+      return clampToBounds(
+        ms,
+        markerBounds(markerLetter(target), a, b, durationValue.value),
+      );
+    },
+    [markerAValue, markerBValue, durationValue],
+  );
 
-  const gesture = usePanGesture({
-    onBegin: beginDrag,
-    onUpdate: moveDrag,
-    onFinalize: endDrag,
-  });
+  const onBegin = useCallback(
+    (x: number, y: number) => {
+      'worklet';
+      const raw = positionFromTouchX(x, trackWidth.value, durationValue.value);
+      if (raw === null) {
+        isPlacement.value = false;
+        return;
+      }
+      const target = detectTarget(x, y);
+      const ms = clampForTarget(target, raw);
+      dragTarget.value = target;
+      dragMs.value = ms;
+      // Scheduled before the throttle's first delivery, so the JavaScript side
+      // knows where to route it and the preview is running when it lands.
+      runOnJS(beginOnJS)(target, ms);
+      throttle.begin(ms);
+    },
+    [
+      trackWidth,
+      durationValue,
+      detectTarget,
+      clampForTarget,
+      dragTarget,
+      dragMs,
+      isPlacement,
+      beginOnJS,
+      throttle,
+    ],
+  );
 
-  return { gesture, drag, onLayout };
+  const onUpdate = useCallback(
+    (x: number) => {
+      'worklet';
+      if (dragTarget.value === TARGET_NONE) return;
+      const raw = positionFromTouchX(x, trackWidth.value, durationValue.value);
+      if (raw === null) return;
+      dragMs.value = clampForTarget(dragTarget.value, raw);
+      throttle.move(dragMs.value);
+    },
+    [dragTarget, trackWidth, durationValue, clampForTarget, dragMs, throttle],
+  );
+
+  const onFinalize = useCallback(() => {
+    'worklet';
+    const target = dragTarget.value;
+    if (target === TARGET_NONE) return;
+    const placement = isPlacement.value;
+    // Commit the final throttled value — which also delivers the final preview
+    // follow — before the end hook, so the monitor restores from the correct
+    // end state. `runOnJS` keeps the two in that order.
+    throttle.end();
+    runOnJS(endOnJS)(target, placement);
+    isPlacement.value = false;
+    dragTarget.value = TARGET_NONE;
+  }, [dragTarget, isPlacement, throttle, endOnJS]);
+
+  const gesture = usePanGesture({ onBegin, onUpdate, onFinalize });
+
+  return {
+    gesture,
+    onLayout,
+    trackWidth,
+    dragTarget,
+    dragMs,
+    markerAValue,
+    markerBValue,
+  };
 }

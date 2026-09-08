@@ -7,6 +7,12 @@
  *
  * These helpers are that single source of truth, shared by the waveform drag
  * handles and the marker time editor so both stop at the same boundary.
+ *
+ * Both are marked `'worklet'`. The waveform clamps a dragged handle on the UI
+ * thread, one pointer event at a time, and a worklet may only call functions
+ * the compiler has prepared for that runtime. The directive is what prepares
+ * them; it changes nothing for a plain JavaScript caller, so the marker time
+ * editor and the tests still call them exactly as before.
  */
 
 /** Smallest gap the `markerA < markerB` invariant allows between the markers. */
@@ -30,6 +36,7 @@ export function markerBounds(
   markerB: number | null,
   durationMs: number,
 ): MarkerBounds {
+  'worklet';
   const trackEnd = Math.max(0, durationMs);
 
   if (marker === 'A') {
@@ -45,5 +52,6 @@ export function markerBounds(
 
 /** Clamp `ms` into `bounds`. */
 export function clampToBounds(ms: number, bounds: MarkerBounds): number {
+  'worklet';
   return Math.max(bounds.minMs, Math.min(ms, bounds.maxMs));
 }

@@ -101,20 +101,27 @@ function layout(tree: ReactTestRenderer, width = 300) {
   });
 }
 
-// Default y of 0 puts the touch in the top half (where A's flag lives); tests
-// that exercise the A/B vertical split pass an explicit y.
-function begin(x: number, y = 0) {
-  act(() => handlers().begin({ x, y }));
-}
-function move(x: number) {
-  act(() => handlers().update({ x }));
-}
-function finalize() {
-  act(() => handlers().finalize({}));
+/**
+ * Drive one gesture callback and let its `runOnJS` calls land.
+ *
+ * The handlers are worklets: they move the surface by writing shared values,
+ * and reach JavaScript only through `runOnJS`, which queues a microtask. So
+ * nothing has been delivered to the callbacks until that queue has drained.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
 }
 
+// Default y of 0 puts the touch in the top half (where A's flag lives); tests
+// that exercise the A/B vertical split pass an explicit y.
+const begin = (x: number, y = 0) => fire(() => handlers().begin({ x, y }));
+const move = (x: number) => fire(() => handlers().update({ x }));
+const finalize = () => fire(() => handlers().finalize({}));
+
 describe('WaveformView', () => {
-  it('renders bars for each peak', () => {
+  it('renders bars for each peak', async () => {
     const tree = renderWaveform();
     const bars = findBars(tree);
     expect(bars).toHaveLength(DEFAULT_PEAKS.length);
@@ -140,7 +147,7 @@ describe('WaveformView', () => {
   const isPlayed = (bar: ReturnType<typeof findBars>[number]) =>
     !isDull(bar) && !isLoop(bar) && barFill(bar).startsWith('#');
 
-  it('colors bars based on playback progress', () => {
+  it('colors bars based on playback progress', async () => {
     const tree = renderWaveform({ positionMs: 5000 });
     const bars = findBars(tree);
 
@@ -152,7 +159,7 @@ describe('WaveformView', () => {
 
   // The middle tier is the whole point of #268: it is what tells the reader
   // where the loop window is before it has played.
-  it('gives the unplayed part of the loop region its own tier', () => {
+  it('gives the unplayed part of the loop region its own tier', async () => {
     const tree = renderWaveform({
       positionMs: 0,
       markerA: 2000,
@@ -168,7 +175,7 @@ describe('WaveformView', () => {
 
   // Grading is what keeps the waveform reading as a waveform rather than a
   // block of colour, so a quiet played bar and a loud one must not match.
-  it('grades a played bar by its amplitude', () => {
+  it('grades a played bar by its amplitude', async () => {
     const tree = renderWaveform({ positionMs: 10000, peaks: [0.1, 1] });
     const [quiet, loud] = findBars(tree);
 
@@ -180,7 +187,7 @@ describe('WaveformView', () => {
   // the top pinned, grading from the *dull* tier instead of the played one
   // passes every other test here while collapsing a quiet played bar to 1.12
   // against the bars around it, which is the bug #268 was filed for.
-  it('starts the played range at the played tier, not below it', () => {
+  it('starts the played range at the played tier, not below it', async () => {
     const tree = renderWaveform({ positionMs: 10000, peaks: [0, 1] });
     const [silent] = findBars(tree);
 
@@ -190,7 +197,7 @@ describe('WaveformView', () => {
   // `Math.max` passes NaN through, so an unguarded height reaches the style as
   // the string "NaN%". A 32-bit float WAV can carry a NaN sample, and
   // `normalizePeaks` does not filter individual samples.
-  it('keeps a bar height numeric when its peak is not', () => {
+  it('keeps a bar height numeric when its peak is not', async () => {
     const tree = renderWaveform({ positionMs: 0, peaks: [NaN, 0.5] });
     const [bad] = findBars(tree);
     const height = (
@@ -208,7 +215,7 @@ describe('WaveformView', () => {
    * at this component instead of re-rendering the player screen. Without a
    * test here, putting a static default back would fail nothing.
    */
-  it('sizes itself to the viewport when the caller gives no height', () => {
+  it('sizes itself to the viewport when the caller gives no height', async () => {
     const spy = jest
       .spyOn(Dimensions, 'get')
       .mockReturnValue({ width: 400, height: 1000, scale: 2, fontScale: 1 });
@@ -223,25 +230,29 @@ describe('WaveformView', () => {
     }
   });
 
-  it('uses the height it is given over the viewport', () => {
+  it('uses the height it is given over the viewport', async () => {
     const tree = renderWaveform({ height: 210 });
 
     expect(StyleSheet.flatten(getTouchArea(tree).props.style).height).toBe(210);
   });
 
-  it('renders a cursor element', () => {
+  /**
+   * The playhead is translated along the track from a shared value rather than
+   * placed with a percentage `left`, so where it sits cannot be read from the
+   * rendered tree — an animated style resolves to an empty object under Jest.
+   * The arithmetic behind the translation is covered in
+   * `waveformLayout.test.ts`; what is checked here is that the element exists
+   * and is anchored at the track's left edge for the translation to work from.
+   */
+  it('renders a cursor element anchored for translation', async () => {
     const tree = renderWaveform({ positionMs: 2500 });
 
-    const cursors = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        node.props.style &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) =>
-            s && s.left === '25%' && s.backgroundColor === '#e8f5f0',
-        ),
-    );
+    const cursors = tree.root.findAll((node) => {
+      if (node.type !== 'View' || !Array.isArray(node.props.style))
+        return false;
+      const flat = StyleSheet.flatten(node.props.style);
+      return flat.backgroundColor === '#e8f5f0' && flat.left === 0;
+    });
 
     expect(cursors).toHaveLength(1);
   });
@@ -271,7 +282,7 @@ describe('WaveformView', () => {
      * playback tick. Reference equality is what can see it: a memoised child
      * that bailed out keeps the identical props object, not an equal one.
      */
-    it('leaves the markers alone when only the playhead moves', () => {
+    it('leaves the markers alone when only the playhead moves', async () => {
       const tree = renderWaveform({
         positionMs: 0,
         markerA: 2000,
@@ -300,7 +311,7 @@ describe('WaveformView', () => {
     // The bars have the same obligation as the markers: a tick moves the fill
     // edge past one or two of them, and the rest must not be rebuilt.
     // `useWaveformGesture`'s own tests cover the drag side of this.
-    it('leaves the bars beyond the fill edge alone when the playhead moves', () => {
+    it('leaves the bars beyond the fill edge alone when the playhead moves', async () => {
       const tree = renderWaveform({ positionMs: 2000 });
       const before = findBars(tree).map((bar) => bar.props.style);
 
@@ -321,13 +332,13 @@ describe('WaveformView', () => {
     });
   });
 
-  it('renders nothing when peaks is empty', () => {
+  it('renders nothing when peaks is empty', async () => {
     const tree = renderWaveform({ peaks: [] });
     const bars = findBars(tree);
     expect(bars).toHaveLength(0);
   });
 
-  it('sets accessibility role and label', () => {
+  it('sets accessibility role and label', async () => {
     const tree = renderWaveform({ positionMs: 5000, durationMs: 120000 });
 
     const container = tree.root.findAll(
@@ -340,7 +351,7 @@ describe('WaveformView', () => {
     expect(container[0].props.accessibilityLabel).toContain('2:00');
   });
 
-  it('includes loop range in accessibility label when markers set', () => {
+  it('includes loop range in accessibility label when markers set', async () => {
     const tree = renderWaveform({
       positionMs: 5000,
       durationMs: 120000,
@@ -358,40 +369,40 @@ describe('WaveformView', () => {
     );
   });
 
-  it('calls onSeek when touch area is tapped', () => {
+  it('calls onSeek when touch area is tapped', async () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek });
     layout(tree);
 
-    begin(150);
+    await begin(150);
 
     expect(onSeek).toHaveBeenCalledWith(5000);
   });
 
-  it('maps a tap at the bars left edge to position 0 (padding-aware)', () => {
+  it('maps a tap at the bars left edge to position 0 (padding-aware)', async () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek, durationMs: 10000 });
     layout(tree);
 
     // The bars start HORIZONTAL_PADDING (spacing.md = 12) in from the edge,
     // so a tap there is the start of the track, not a positive offset.
-    begin(12);
+    await begin(12);
 
     expect(onSeek).toHaveBeenCalledWith(0);
   });
 
-  it('maps a tap at the bars right edge to the full duration', () => {
+  it('maps a tap at the bars right edge to the full duration', async () => {
     const onSeek = jest.fn();
     const tree = renderWaveform({ onSeek, durationMs: 10000 });
     layout(tree);
 
     // Right edge of the bars sits at width - HORIZONTAL_PADDING = 288.
-    begin(288);
+    await begin(288);
 
     expect(onSeek).toHaveBeenCalledWith(10000);
   });
 
-  it('renders A/B marker lines in their marker colors, edged in the card colour', () => {
+  it('renders A/B marker lines in their marker colors, edged in the card colour', async () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
     const markerLine = (color: string) =>
@@ -422,7 +433,7 @@ describe('WaveformView', () => {
     }
   });
 
-  it('renders labelled grab handles for the markers', () => {
+  it('renders labelled grab handles for the markers', async () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
     const handleLabels = tree.root
@@ -433,24 +444,31 @@ describe('WaveformView', () => {
     expect(handleLabels).toEqual(expect.arrayContaining(['A', 'B']));
   });
 
-  it('renders highlighted region between A/B markers', () => {
+  /**
+   * The loop wash is a one-pixel band scaled to the region's width, not a band
+   * whose width is set: a scale is resolved when the frame is drawn, where a
+   * width would re-run layout on every pointer event of a marker drag.
+   */
+  it('renders the loop region as a band it can scale', async () => {
+    const isRegion = (node: {
+      type: unknown;
+      props: Record<string, unknown>;
+    }) =>
+      node.type === 'View' &&
+      Array.isArray(node.props.style) &&
+      (node.props.style as Record<string, unknown>[]).some(
+        (s) => s && s.width === 1 && s.transformOrigin === 'left center',
+      );
+
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
+    expect(tree.root.findAll(isRegion)).toHaveLength(1);
 
-    const regions = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        node.props.style &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) =>
-            s && typeof s.width === 'string' && s.width === '60%',
-        ),
-    );
-
-    expect(regions).toHaveLength(1);
+    // Absent when there is no region to wash.
+    const none = renderWaveform({ markerA: 2000 });
+    expect(none.root.findAll(isRegion)).toHaveLength(0);
   });
 
-  it('adds accessibility labels to marker lines', () => {
+  it('adds accessibility labels to marker lines', async () => {
     const tree = renderWaveform({ markerA: 2000, markerB: 8000 });
 
     const markerALabel = tree.root.findAll(
@@ -471,7 +489,7 @@ describe('WaveformView', () => {
   });
 
   describe('marker dragging', () => {
-    it('calls onMarkerAChange when touch starts near markerA', () => {
+    it('calls onMarkerAChange when touch starts near markerA', async () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -482,13 +500,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(152);
+      await begin(152);
 
       expect(onMarkerAChange).toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('calls onMarkerBChange when touch starts near markerB', () => {
+    it('calls onMarkerBChange when touch starts near markerB', async () => {
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -500,13 +518,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(242);
+      await begin(242);
 
       expect(onMarkerBChange).toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('continues dragging marker on move after grant near marker', () => {
+    it('continues dragging marker on move after grant near marker', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
@@ -519,12 +537,12 @@ describe('WaveformView', () => {
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
+      await begin(150);
       onMarkerAChange.mockClear();
 
       // Advance past the throttle window so the move commits a native call.
       nowSpy.mockReturnValue(1100);
-      move(180);
+      await move(180);
 
       // Bars are inset by HORIZONTAL_PADDING (spacing.md = 12) on each side,
       // so the track spans 276px: (180 - 12) / 276 * 10000 = 6087ms.
@@ -533,7 +551,7 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('clamps the B handle so it cannot be dragged before marker A', () => {
+    it('clamps the B handle so it cannot be dragged before marker A', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
@@ -548,13 +566,13 @@ describe('WaveformView', () => {
 
       // Grab the B handle (markerB X ≈ 233px on a 276px track).
       nowSpy.mockReturnValue(1000);
-      begin(233);
+      await begin(233);
       onMarkerBChange.mockClear();
 
       // Drag well before A; the value must clamp to just past A (2001ms),
       // never to or below A.
       nowSpy.mockReturnValue(1100);
-      move(30);
+      await move(30);
 
       expect(onMarkerBChange).toHaveBeenCalledWith(2001);
       onMarkerBChange.mock.calls.forEach(([ms]) => {
@@ -563,7 +581,7 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('clamps the A handle so it cannot be dragged past marker B', () => {
+    it('clamps the A handle so it cannot be dragged past marker B', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
@@ -578,13 +596,13 @@ describe('WaveformView', () => {
 
       // Grab the A handle (markerA X ≈ 67px on a 276px track).
       nowSpy.mockReturnValue(1000);
-      begin(67);
+      await begin(67);
       onMarkerAChange.mockClear();
 
       // Drag well past B; the value must clamp to just before B (7999ms),
       // never to or beyond B.
       nowSpy.mockReturnValue(1100);
-      move(270);
+      await move(270);
 
       expect(onMarkerAChange).toHaveBeenCalledWith(7999);
       onMarkerAChange.mock.calls.forEach(([ms]) => {
@@ -593,7 +611,7 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('disambiguates overlapping markers by vertical half (top → A)', () => {
+    it('disambiguates overlapping markers by vertical half (top → A)', async () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
@@ -612,14 +630,14 @@ describe('WaveformView', () => {
 
       // Both handles are within the horizontal hit zone of x=150; a touch in
       // the top half (y=10) grabs A (its flag sits at the top).
-      begin(150, 10);
+      await begin(150, 10);
 
       expect(onMarkerAChange).toHaveBeenCalled();
       expect(onMarkerBChange).not.toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('disambiguates overlapping markers by vertical half (bottom → B)', () => {
+    it('disambiguates overlapping markers by vertical half (bottom → B)', async () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
@@ -638,14 +656,14 @@ describe('WaveformView', () => {
 
       // A touch in the bottom half (y=120) grabs B (its flag sits at the
       // bottom), even though both handles overlap horizontally.
-      begin(150, 120);
+      await begin(150, 120);
 
       expect(onMarkerBChange).toHaveBeenCalled();
       expect(onMarkerAChange).not.toHaveBeenCalled();
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('falls back to seek when touch is not near any marker', () => {
+    it('falls back to seek when touch is not near any marker', async () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -656,13 +674,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(30);
+      await begin(30);
 
       expect(onSeek).toHaveBeenCalled();
       expect(onMarkerAChange).not.toHaveBeenCalled();
     });
 
-    it('does not drag markers when callbacks are not provided', () => {
+    it('does not drag markers when callbacks are not provided', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         markerA: 5000,
@@ -671,12 +689,12 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
+      await begin(150);
 
       expect(onSeek).toHaveBeenCalled();
     });
 
-    it('only seeks on an unarmed tap, even with no markers', () => {
+    it('only seeks on an unarmed tap, even with no markers', async () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -687,13 +705,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
+      await begin(150);
 
       expect(onSeek).toHaveBeenCalledWith(5000);
       expect(onMarkerAChange).not.toHaveBeenCalled();
     });
 
-    it('places A at the tapped position when armed for A', () => {
+    it('places A at the tapped position when armed for A', async () => {
       const onMarkerAChange = jest.fn();
       const onPlaceComplete = jest.fn();
       const onSeek = jest.fn();
@@ -706,8 +724,8 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(onMarkerAChange).toHaveBeenCalledWith(5000);
       expect(onSeek).not.toHaveBeenCalled();
@@ -715,7 +733,7 @@ describe('WaveformView', () => {
       expect(onPlaceComplete).toHaveBeenCalledWith('A');
     });
 
-    it('places B at the tapped position when armed for B', () => {
+    it('places B at the tapped position when armed for B', async () => {
       const onMarkerBChange = jest.fn();
       const onPlaceComplete = jest.fn();
       const onSeek = jest.fn();
@@ -730,15 +748,15 @@ describe('WaveformView', () => {
       layout(tree);
 
       // 200px → (200 - 12) / 276 * 10000 ≈ 6812ms, well clear of A.
-      begin(200);
-      finalize();
+      await begin(200);
+      await finalize();
 
       expect(onMarkerBChange).toHaveBeenCalledWith(6812);
       expect(onSeek).not.toHaveBeenCalled();
       expect(onPlaceComplete).toHaveBeenCalledWith('B');
     });
 
-    it('does not fire onPlaceComplete when fine-tuning an existing handle', () => {
+    it('does not fire onPlaceComplete when fine-tuning an existing handle', async () => {
       const onMarkerAChange = jest.fn();
       const onPlaceComplete = jest.fn();
       const onSeek = jest.fn();
@@ -753,14 +771,14 @@ describe('WaveformView', () => {
       layout(tree);
 
       // Grab the existing A handle (x ≈ 150) and release.
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(onMarkerAChange).toHaveBeenCalled();
       expect(onPlaceComplete).not.toHaveBeenCalled();
     });
 
-    it('fires onMarkerCommit on release of a tap-to-place', () => {
+    it('fires onMarkerCommit on release of a tap-to-place', async () => {
       const onMarkerCommit = jest.fn();
       const tree = renderWaveform({
         durationMs: 10000,
@@ -770,14 +788,14 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
+      await begin(150);
       expect(onMarkerCommit).not.toHaveBeenCalled();
-      finalize();
+      await finalize();
 
       expect(onMarkerCommit).toHaveBeenCalledWith('A');
     });
 
-    it('fires onMarkerCommit when fine-tuning an existing handle', () => {
+    it('fires onMarkerCommit when fine-tuning an existing handle', async () => {
       const onMarkerCommit = jest.fn();
       const tree = renderWaveform({
         markerA: 5000,
@@ -789,14 +807,14 @@ describe('WaveformView', () => {
       layout(tree);
 
       // A nudge re-parks the playhead even though it never re-arms placement.
-      begin(150);
-      move(160);
-      finalize();
+      await begin(150);
+      await move(160);
+      await finalize();
 
       expect(onMarkerCommit).toHaveBeenCalledWith('A');
     });
 
-    it('does not fire onMarkerCommit for a plain seek', () => {
+    it('does not fire onMarkerCommit for a plain seek', async () => {
       const onMarkerCommit = jest.fn();
       const tree = renderWaveform({
         durationMs: 10000,
@@ -806,13 +824,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(onMarkerCommit).not.toHaveBeenCalled();
     });
 
-    it('commits before tearing the snippet preview down', () => {
+    it('commits before tearing the snippet preview down', async () => {
       // The engine redirects the preview's pending restore, so the commit must
       // land while the monitor is still up — otherwise the restore's seek
       // races it and can win.
@@ -827,13 +845,13 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(order).toEqual(['commit', 'previewEnd']);
     });
 
-    it('seeks on a bare tap once both markers exist', () => {
+    it('seeks on a bare tap once both markers exist', async () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
       const onSeek = jest.fn();
@@ -849,7 +867,7 @@ describe('WaveformView', () => {
       layout(tree);
 
       // 150px is the track midpoint (5000ms) and far from either handle.
-      begin(150);
+      await begin(150);
 
       expect(onSeek).toHaveBeenCalledWith(5000);
       expect(onMarkerAChange).not.toHaveBeenCalled();
@@ -875,30 +893,39 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('throttles native seeks during rapid drag moves', () => {
+    it('throttles native seeks during rapid drag moves', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(12);
+      await begin(12);
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenLastCalledWith(0);
 
       // Two moves within the throttle window: no extra native seeks.
       nowSpy.mockReturnValue(1010);
-      move(60);
+      await move(60);
       nowSpy.mockReturnValue(1020);
-      move(90);
+      await move(90);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       // A move past the throttle window fires one native seek.
       nowSpy.mockReturnValue(1100);
-      move(150);
+      await move(150);
       expect(onSeek).toHaveBeenCalledTimes(2);
     });
 
-    it('keeps the cursor visual smooth while seeks are throttled', () => {
+    /**
+     * The point of the whole rewrite. The playhead follows the finger from a
+     * shared value through an animated style, so a pointer event moves it
+     * without rendering anything — and on Android there are up to a hundred and
+     * twenty of those a second.
+     *
+     * Element identity is what can see it: a re-render would build fresh child
+     * elements even where every value it computed was equal.
+     */
+    it('does not re-render the surface while the finger moves', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 0,
@@ -908,46 +935,52 @@ describe('WaveformView', () => {
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(12);
-      // Throttled move (within window): no native seek, but visual advances.
+      await begin(12);
+      const afterBegin = getAdjustable(tree).props;
+
       nowSpy.mockReturnValue(1010);
-      move(150);
+      await move(60);
+      nowSpy.mockReturnValue(1020);
+      await move(150);
+      nowSpy.mockReturnValue(1030);
+      await move(200);
+
       expect(onSeek).toHaveBeenCalledTimes(1);
-      // (150 - 12) / 276 * 100 ≈ 50% even though no native seek fired.
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
+      expect(getAdjustable(tree).props).toBe(afterBegin);
+      await finalize();
     });
 
-    it('fires one final unthrottled seek on release', () => {
+    it('fires one final unthrottled seek on release', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(12);
+      await begin(12);
       // Throttled move — final position must still commit on release.
       nowSpy.mockReturnValue(1010);
-      move(150);
+      await move(150);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1020);
-      finalize();
+      await finalize();
       expect(onSeek).toHaveBeenCalledTimes(2);
     });
 
-    it('does not fire a redundant seek on release after a pure tap', () => {
+    it('does not fire a redundant seek on release after a pure tap', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenCalledWith(5000);
     });
 
-    it('throttles marker updates and commits the final one on release', () => {
+    it('throttles marker updates and commits the final one on release', async () => {
       const onMarkerAChange = jest.fn();
       const onSeek = jest.fn();
       const tree = renderWaveform({
@@ -959,23 +992,30 @@ describe('WaveformView', () => {
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
+      await begin(150);
       expect(onMarkerAChange).toHaveBeenCalledTimes(1);
 
       // Throttled move within the window — no extra native call yet.
       nowSpy.mockReturnValue(1010);
-      move(180);
+      await move(180);
       expect(onMarkerAChange).toHaveBeenCalledTimes(1);
 
       // Release commits the final marker position.
       nowSpy.mockReturnValue(1020);
-      finalize();
+      await finalize();
       expect(onMarkerAChange).toHaveBeenCalledTimes(2);
       expect(onMarkerAChange).toHaveBeenLastCalledWith(6087);
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('clears the drag visual when the gesture finalizes', () => {
+    /**
+     * What the platform is told, as distinct from what is drawn. The announced
+     * percentage follows the engine, not the finger: a screen reader drives
+     * this surface with the increment and decrement actions rather than by
+     * dragging, and re-announcing a value a hundred times a second would both
+     * flood the reader and re-render the surface for every pointer event.
+     */
+    it('announces the engine position rather than the finger', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 0,
@@ -985,17 +1025,16 @@ describe('WaveformView', () => {
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(288);
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(100);
+      await begin(288);
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
 
-      finalize();
-      // dragMs cleared → falls back to positionMs prop (0).
+      await finalize();
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
     });
   });
 
   describe('accessibility actions', () => {
-    it('exposes increment and decrement actions when no marker callbacks are provided', () => {
+    it('exposes increment and decrement actions when no marker callbacks are provided', async () => {
       const tree = renderWaveform();
       const container = getAdjustable(tree);
       expect(container.props.accessibilityActions).toEqual([
@@ -1004,7 +1043,7 @@ describe('WaveformView', () => {
       ]);
     });
 
-    it('adds placeA action when onMarkerAChange is provided', () => {
+    it('adds placeA action when onMarkerAChange is provided', async () => {
       const tree = renderWaveform({ onMarkerAChange: jest.fn() });
       const actions = getAdjustable(tree).props.accessibilityActions;
       expect(actions).toContainEqual({
@@ -1013,7 +1052,7 @@ describe('WaveformView', () => {
       });
     });
 
-    it('adds placeB action when onMarkerBChange is provided', () => {
+    it('adds placeB action when onMarkerBChange is provided', async () => {
       const tree = renderWaveform({ onMarkerBChange: jest.fn() });
       const actions = getAdjustable(tree).props.accessibilityActions;
       expect(actions).toContainEqual({
@@ -1022,7 +1061,7 @@ describe('WaveformView', () => {
       });
     });
 
-    it('places A at current position on placeA action', () => {
+    it('places A at current position on placeA action', async () => {
       const onMarkerAChange = jest.fn();
       const announceSpy = jest
         .spyOn(AccessibilityInfo, 'announceForAccessibility')
@@ -1044,7 +1083,7 @@ describe('WaveformView', () => {
       announceSpy.mockRestore();
     });
 
-    it('places B at current position on placeB action', () => {
+    it('places B at current position on placeB action', async () => {
       const onMarkerBChange = jest.fn();
       const announceSpy = jest
         .spyOn(AccessibilityInfo, 'announceForAccessibility')
@@ -1066,7 +1105,7 @@ describe('WaveformView', () => {
       announceSpy.mockRestore();
     });
 
-    it('commits the placement made by the placeA action', () => {
+    it('commits the placement made by the placeA action', async () => {
       const onMarkerCommit = jest.fn();
       const announceSpy = jest
         .spyOn(AccessibilityInfo, 'announceForAccessibility')
@@ -1086,7 +1125,7 @@ describe('WaveformView', () => {
       announceSpy.mockRestore();
     });
 
-    it('commits a placeB action that lands after A', () => {
+    it('commits a placeB action that lands after A', async () => {
       const onMarkerCommit = jest.fn();
       const announceSpy = jest
         .spyOn(AccessibilityInfo, 'announceForAccessibility')
@@ -1107,7 +1146,7 @@ describe('WaveformView', () => {
       announceSpy.mockRestore();
     });
 
-    it('does not commit a placeB action the engine will reject', () => {
+    it('does not commit a placeB action the engine will reject', async () => {
       // This path isn't clamped past A like a drag is, so B at or before A is
       // refused — and a refused placement must not move the playhead.
       const onMarkerBChange = jest.fn();
@@ -1132,7 +1171,7 @@ describe('WaveformView', () => {
       announceSpy.mockRestore();
     });
 
-    it('does not call onMarkerAChange for placeA when callback is absent', () => {
+    it('does not call onMarkerAChange for placeA when callback is absent', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 5000,
@@ -1147,13 +1186,13 @@ describe('WaveformView', () => {
       expect(onSeek).not.toHaveBeenCalled();
     });
 
-    it('exposes an accessibilityHint describing available actions', () => {
+    it('exposes an accessibilityHint describing available actions', async () => {
       const tree = renderWaveform();
       const hint = getAdjustable(tree).props.accessibilityHint;
       expect(hint).toContain('loop markers');
     });
 
-    it('announces progress as a percentage via accessibilityValue', () => {
+    it('announces progress as a percentage via accessibilityValue', async () => {
       const tree = renderWaveform({ positionMs: 5000, durationMs: 20000 });
       const container = getAdjustable(tree);
       expect(container.props.accessibilityValue).toEqual({
@@ -1163,7 +1202,7 @@ describe('WaveformView', () => {
       });
     });
 
-    it('seeks forward 5s on increment', () => {
+    it('seeks forward 5s on increment', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 5000,
@@ -1178,7 +1217,7 @@ describe('WaveformView', () => {
       expect(onSeek).toHaveBeenCalledWith(10000);
     });
 
-    it('seeks back 5s on decrement', () => {
+    it('seeks back 5s on decrement', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 8000,
@@ -1193,7 +1232,7 @@ describe('WaveformView', () => {
       expect(onSeek).toHaveBeenCalledWith(3000);
     });
 
-    it('clamps increment to duration', () => {
+    it('clamps increment to duration', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 18000,
@@ -1208,7 +1247,7 @@ describe('WaveformView', () => {
       expect(onSeek).toHaveBeenCalledWith(20000);
     });
 
-    it('clamps decrement to zero', () => {
+    it('clamps decrement to zero', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({
         positionMs: 2000,
@@ -1223,7 +1262,7 @@ describe('WaveformView', () => {
       expect(onSeek).toHaveBeenCalledWith(0);
     });
 
-    it('ignores actions when duration is zero', () => {
+    it('ignores actions when duration is zero', async () => {
       const onSeek = jest.fn();
       const tree = renderWaveform({ positionMs: 0, durationMs: 0, onSeek });
       act(() => {
@@ -1246,7 +1285,7 @@ describe('WaveformView', () => {
       nowSpy.mockRestore();
     });
 
-    it('starts the preview and follows the marker while dragging it', () => {
+    it('starts the preview and follows the marker while dragging it', async () => {
       const onPreviewStart = jest.fn();
       const onPreviewMove = jest.fn();
       const onPreviewEnd = jest.fn();
@@ -1264,23 +1303,23 @@ describe('WaveformView', () => {
       // Grab the A handle (x ≈ 150 → 5000ms): the preview starts there and the
       // follow fires with the same value at the marker-callback cadence.
       nowSpy.mockReturnValue(1000);
-      begin(150);
+      await begin(150);
       expect(onPreviewStart).toHaveBeenCalledWith(5000);
       expect(onPreviewMove).toHaveBeenCalledWith(5000);
 
       // A move past the throttle window follows the marker to its new position.
       nowSpy.mockReturnValue(1100);
-      move(180);
+      await move(180);
       expect(onPreviewMove).toHaveBeenCalledWith(6087);
       expect(onMarkerAChange).toHaveBeenCalledWith(6087);
 
       // Release stops the preview.
       nowSpy.mockReturnValue(1120);
-      finalize();
+      await finalize();
       expect(onPreviewEnd).toHaveBeenCalledTimes(1);
     });
 
-    it('previews a tap-to-place placement (start then end)', () => {
+    it('previews a tap-to-place placement (start then end)', async () => {
       const onPreviewStart = jest.fn();
       const onPreviewEnd = jest.fn();
       const onMarkerAChange = jest.fn();
@@ -1293,14 +1332,14 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       expect(onPreviewStart).toHaveBeenCalledWith(5000);
       expect(onPreviewEnd).toHaveBeenCalledTimes(1);
     });
 
-    it('never invokes the preview during a plain seek drag', () => {
+    it('never invokes the preview during a plain seek drag', async () => {
       const onPreviewStart = jest.fn();
       const onPreviewMove = jest.fn();
       const onPreviewEnd = jest.fn();
@@ -1317,10 +1356,10 @@ describe('WaveformView', () => {
 
       // x=30 is far from the marker → a seek, not a marker grab.
       nowSpy.mockReturnValue(1000);
-      begin(30);
+      await begin(30);
       nowSpy.mockReturnValue(1100);
-      move(60);
-      finalize();
+      await move(60);
+      await finalize();
 
       expect(onSeek).toHaveBeenCalled();
       expect(onPreviewStart).not.toHaveBeenCalled();
@@ -1328,7 +1367,7 @@ describe('WaveformView', () => {
       expect(onPreviewEnd).not.toHaveBeenCalled();
     });
 
-    it('drags the marker normally when no preview callbacks are wired', () => {
+    it('drags the marker normally when no preview callbacks are wired', async () => {
       const onMarkerAChange = jest.fn();
       const tree = renderWaveform({
         markerA: 5000,
@@ -1337,8 +1376,8 @@ describe('WaveformView', () => {
       });
       layout(tree);
 
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       // No preview props → marker still moves, nothing throws.
       expect(onMarkerAChange).toHaveBeenCalledWith(5000);
@@ -1357,7 +1396,7 @@ describe('WaveformView', () => {
    * previous element for a memoised child that bailed out.
    */
   describe('what a movement re-renders', () => {
-    it('leaves every bar alone when the playhead moves within one bar', () => {
+    it('leaves every bar alone when the playhead moves within one bar', async () => {
       // Five bars over ten seconds: centres at 1s, 3s, 5s, 7s and 9s. Both
       // positions sit between the second and third, so no bar can change.
       const tree = renderWaveform({ positionMs: 3400, durationMs: 10000 });
@@ -1380,7 +1419,7 @@ describe('WaveformView', () => {
       });
     });
 
-    it('still recolours the bar the playhead crosses', () => {
+    it('still recolours the bar the playhead crosses', async () => {
       const tree = renderWaveform({ positionMs: 2900, durationMs: 10000 });
       const before = findBars(tree).map((bar) => bar.props.style);
 
@@ -1400,7 +1439,7 @@ describe('WaveformView', () => {
       expect(after[2]).toBe(before[2]);
     });
 
-    it('leaves the bars alone while a marker is dragged within one bar', () => {
+    it('leaves the bars alone while a marker is dragged within one bar', async () => {
       const onMarkerAChange = jest.fn();
       const tree = renderWaveform({
         markerA: 4500,
@@ -1414,20 +1453,20 @@ describe('WaveformView', () => {
       // Grab A and nudge it a pixel. A sits at 4500ms, between the bars
       // centred at 3000 and 5000, so the nudge moves it in milliseconds
       // without reaching either centre.
-      begin(137);
+      await begin(137);
       const before = findBars(tree).map((bar) => bar.props.style);
-      move(138);
+      await move(138);
 
       findBars(tree).forEach((bar, index) => {
         expect(bar.props.style).toBe(before[index]);
       });
       // The drag is live all the same: the marker itself moved.
       expect(onMarkerAChange).toHaveBeenCalled();
-      finalize();
+      await finalize();
     });
   });
 
-  it('accepts style prop override', () => {
+  it('accepts style prop override', async () => {
     const tree = renderWaveform({ style: { marginTop: 20 } });
 
     const container = tree.root.findAll(

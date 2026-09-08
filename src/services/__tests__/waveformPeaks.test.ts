@@ -56,6 +56,23 @@ function readerFor(buffer: ArrayBuffer) {
   return createBufferReader(new Uint8Array(buffer));
 }
 
+/** A reader that also records how many bytes it has handed out. */
+function countingReader(bytes: Uint8Array) {
+  const inner = createBufferReader(bytes);
+  let bytesRead = 0;
+  return {
+    reader: {
+      size: inner.size,
+      readAt(offset: number, length: number) {
+        const chunk = inner.readAt(offset, length);
+        bytesRead += chunk.length;
+        return chunk;
+      },
+    },
+    read: () => bytesRead,
+  };
+}
+
 describe('createBufferReader', () => {
   it('reports the byte length as size', () => {
     const reader = createBufferReader(new Uint8Array([1, 2, 3, 4]));
@@ -192,5 +209,122 @@ describe('computePeaks', () => {
     const a = computePeaks(readerFor(buffer), 10);
     const b = computePeaks(readerFor(buffer), 10);
     expect(a).toEqual(b);
+  });
+});
+
+/**
+ * Past a certain length, reading every byte of a file to draw two hundred bars
+ * is not worth what it costs. The scan is synchronous and runs on the JS
+ * thread, so on a phone-sized engine a full-length track froze everything for
+ * seconds — including the callbacks that report the audio has finished
+ * loading, which made a slow *waveform* look like slow *audio*.
+ *
+ * Beyond that length each bucket is measured from a few short windows spread
+ * across it instead. These are the tests for the two properties that matters:
+ * the work stops growing with the file, and a bar still reports its own span.
+ */
+describe('computePeaks on a track too long to read whole', () => {
+  // A bucket over 2048 frames is past the point where reading it whole is
+  // worth the wait; these are four times that.
+  const FRAMES_PER_BUCKET = 8000;
+  const BUCKETS = 4;
+  const AMPLITUDES = [0.25, 0.5, 1, 0.125];
+
+  function longWav(): ArrayBuffer {
+    const samples: number[] = [];
+    for (const amplitude of AMPLITUDES) {
+      for (let i = 0; i < FRAMES_PER_BUCKET; i++) samples.push(amplitude);
+    }
+    return createWavBuffer(samples);
+  }
+
+  it('reports each WAV bucket at its own amplitude', () => {
+    const peaks = computePeaks(readerFor(longWav()), BUCKETS);
+
+    // A bucket of constant amplitude samples to exactly the figure a full
+    // scan would produce, so the sampling is visible only in what it costs.
+    expect(peaks).toHaveLength(BUCKETS);
+    peaks.forEach((peak, index) => {
+      expect(peak).toBeCloseTo(AMPLITUDES[index], 4);
+    });
+  });
+
+  it('examines a small fraction of a long WAV', () => {
+    const bytes = new Uint8Array(longWav());
+    const { reader, read } = countingReader(bytes);
+
+    computePeaks(reader, BUCKETS);
+
+    // Four windows of 512 frames per bucket at two bytes a frame, plus the
+    // header walk — against 64KB of audio data.
+    expect(read()).toBeLessThan(bytes.length / 3);
+  });
+
+  it('still reads a short WAV in full', () => {
+    // Small enough that the exact scan is cheap, so it is kept: the sampling
+    // is a concession to length, not a change of algorithm.
+    const bytes = new Uint8Array(createWavBuffer([0.5, -0.5, 0.25, -0.25]));
+    const { reader, read } = countingReader(bytes);
+
+    computePeaks(reader, 2);
+
+    expect(read()).toBeGreaterThanOrEqual(8);
+  });
+
+  // Almost every real track takes this path, because almost every real track
+  // is a compressed file of more than a couple of megabytes.
+  const BYTES_PER_BUCKET = 10000;
+  const LEVELS = [64, 128, 255, 32];
+
+  function longCompressed(): Uint8Array {
+    const bytes = new Uint8Array(BYTES_PER_BUCKET * LEVELS.length);
+    LEVELS.forEach((level, index) => {
+      bytes.fill(
+        level,
+        index * BYTES_PER_BUCKET,
+        (index + 1) * BYTES_PER_BUCKET,
+      );
+    });
+    return bytes;
+  }
+
+  it('reports each compressed bucket at its own byte magnitude', () => {
+    const peaks = computePeaks(createBufferReader(longCompressed()), BUCKETS);
+
+    expect(peaks).toHaveLength(BUCKETS);
+    peaks.forEach((peak, index) => {
+      expect(peak).toBeCloseTo(LEVELS[index] / 255, 4);
+    });
+  });
+
+  it('examines a small fraction of a long compressed file', () => {
+    const bytes = longCompressed();
+    const { reader, read } = countingReader(bytes);
+
+    computePeaks(reader, BUCKETS);
+
+    // Four 2KB windows per bucket against 10KB of bucket, plus the dozen
+    // bytes the WAV check reads before giving up on the format.
+    expect(read()).toBeLessThan(bytes.length);
+    expect(read()).toBeLessThanOrEqual(4 * 2048 * BUCKETS + 64);
+  });
+
+  /**
+   * The bound is on the work per bucket, not on the file: doubling the track
+   * must not double the reading. This is the property that turns a load time
+   * which grew with the track into one that does not.
+   */
+  it('does not read more from a file twice the length', () => {
+    const single = longCompressed();
+    const doubled = new Uint8Array(single.length * 2);
+    doubled.set(single, 0);
+    doubled.set(single, single.length);
+
+    const a = countingReader(single);
+    const b = countingReader(doubled);
+    computePeaks(a.reader, BUCKETS);
+    computePeaks(b.reader, BUCKETS);
+
+    expect(b.read()).toBe(a.read());
   });
 });

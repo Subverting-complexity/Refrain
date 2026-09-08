@@ -48,6 +48,18 @@ jest.mock('../FolderListItem', () => {
   };
 });
 
+/**
+ * Drive one gesture callback and let its `runOnJS` calls land.
+ *
+ * The handlers are worklets now, so they reach JavaScript through `runOnJS`,
+ * which queues a microtask. Nothing has been delivered until it drains.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
+}
+
 function makeFolder(id: string, name: string, pinOrder: number): Folder {
   return {
     id,
@@ -112,7 +124,7 @@ describe('DraggablePinnedFolderList', () => {
     act(() => renderer.unmount());
   });
 
-  it('reorders folders downward on drag gesture and releases with new order', () => {
+  it('reorders folders downward on drag gesture and releases with new order', async () => {
     const folders = [
       makeFolder('f1', 'Folder 1', 0),
       makeFolder('f2', 'Folder 2', 1),
@@ -146,21 +158,15 @@ describe('DraggablePinnedFolderList', () => {
     const panHandlers = RNGH.__getPanInstances();
 
     // Drag item 0 down by 70px (to index 1)
-    act(() => {
-      panHandlers[0].start({});
-    });
-    act(() => {
-      panHandlers[0].update({ translationY: 70 });
-    });
-    act(() => {
-      panHandlers[0].finalize({});
-    });
+    await fire(() => panHandlers[0].start({}));
+    await fire(() => panHandlers[0].update({ translationY: 70 }));
+    await fire(() => panHandlers[0].finalize({}));
 
     expect(onReorder).toHaveBeenCalledWith(['f2', 'f1', 'f3']);
     act(() => renderer.unmount());
   });
 
-  it('reorders folders upward on drag gesture and releases with new order', () => {
+  it('reorders folders upward on drag gesture and releases with new order', async () => {
     const folders = [
       makeFolder('f1', 'Folder 1', 0),
       makeFolder('f2', 'Folder 2', 1),
@@ -185,21 +191,15 @@ describe('DraggablePinnedFolderList', () => {
     const panHandlers = RNGH.__getPanInstances();
 
     // Drag item 2 up by -130px (to index 0)
-    act(() => {
-      panHandlers[2].start({});
-    });
-    act(() => {
-      panHandlers[2].update({ translationY: -130 });
-    });
-    act(() => {
-      panHandlers[2].finalize({});
-    });
+    await fire(() => panHandlers[2].start({}));
+    await fire(() => panHandlers[2].update({ translationY: -130 }));
+    await fire(() => panHandlers[2].finalize({}));
 
     expect(onReorder).toHaveBeenCalledWith(['f3', 'f1', 'f2']);
     act(() => renderer.unmount());
   });
 
-  it('does not fire onReorder if dropped back in same spot', () => {
+  it('does not fire onReorder if dropped back in same spot', async () => {
     const folders = [
       makeFolder('f1', 'Folder 1', 0),
       makeFolder('f2', 'Folder 2', 1),
@@ -222,15 +222,9 @@ describe('DraggablePinnedFolderList', () => {
 
     const panHandlers = RNGH.__getPanInstances();
 
-    act(() => {
-      panHandlers[0].start({});
-    });
-    act(() => {
-      panHandlers[0].update({ translationY: 10 });
-    });
-    act(() => {
-      panHandlers[0].finalize({});
-    });
+    await fire(() => panHandlers[0].start({}));
+    await fire(() => panHandlers[0].update({ translationY: 10 }));
+    await fire(() => panHandlers[0].finalize({}));
 
     expect(onReorder).not.toHaveBeenCalled();
     act(() => renderer.unmount());

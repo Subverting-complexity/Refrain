@@ -1,5 +1,6 @@
 import React from 'react';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
+import { makeMutable, SharedValue } from 'react-native-reanimated';
 
 import { SliderBar } from '../SliderBar';
 
@@ -20,6 +21,17 @@ jest.mock('react-native-gesture-handler', () => {
   };
 });
 
+/**
+ * Shared values stand in for the hook's, since the bar is driven from the UI
+ * thread rather than from props. What they hold cannot be asserted through the
+ * rendered tree — an animated style resolves to an empty object under Jest —
+ * so the arithmetic they feed is covered in `sliderGeometry.test.ts` and what
+ * is checked here is the structure it is applied to.
+ */
+function shared(value: number): SharedValue<number> {
+  return makeMutable(value);
+}
+
 function renderBar(
   props: Partial<React.ComponentProps<typeof SliderBar>> = {},
 ) {
@@ -32,7 +44,8 @@ function renderBar(
   act(() => {
     tree = create(
       <SliderBar
-        progress={0.5}
+        progress={shared(0.5)}
+        trackWidth={shared(200)}
         trackColor="#333"
         fillColor="#0f0"
         pan={pan as import('react-native-gesture-handler').PanGesture}
@@ -44,6 +57,24 @@ function renderBar(
   return tree;
 }
 
+/** The Views carrying `style` as an array, which is every part of the bar. */
+function styledViews(tree: ReactTestRenderer) {
+  return tree.root.findAll(
+    (node) => node.type === 'View' && Array.isArray(node.props.style),
+  );
+}
+
+function hasStyle(
+  tree: ReactTestRenderer,
+  match: (style: Record<string, unknown>) => boolean,
+) {
+  return styledViews(tree).filter((node) =>
+    node.props.style.some(
+      (style: Record<string, unknown>) => style && match(style),
+    ),
+  );
+}
+
 describe('SliderBar', () => {
   it('renders track, fill, and thumb', () => {
     const tree = renderBar();
@@ -51,30 +82,50 @@ describe('SliderBar', () => {
     expect(views.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('sets fill width from progress', () => {
-    const tree = renderBar({ progress: 0.75 });
-    const fills = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) => s && s.width === '75%',
-        ),
+  /**
+   * The fill is laid out at full width and scaled down from its left edge, so
+   * the level it shows is a draw-time transform rather than a width. A width
+   * would put Yoga between the finger and the pixel on every pointer event,
+   * which is the arrangement this bar was rewritten to get rid of.
+   */
+  it('draws the fill as a scale from the left edge, not a width', () => {
+    const tree = renderBar();
+    const fills = hasStyle(
+      tree,
+      (style) => style.transformOrigin === 'left center',
     );
-    expect(fills.length).toBe(1);
+
+    expect(fills).toHaveLength(1);
+    const fillStyle = fills[0].props.style.find(
+      (style: Record<string, unknown>) =>
+        style && style.transformOrigin === 'left center',
+    );
+    // Stretched over the track it sits in, so the scale is the whole story.
+    expect(fillStyle.left).toBe(0);
+    expect(fillStyle.right).toBe(0);
+    expect(
+      fills[0].props.style.every((style: unknown) => {
+        const candidate = style as Record<string, unknown> | null;
+        return !candidate || candidate.width === undefined;
+      }),
+    ).toBe(true);
   });
 
-  it('sets thumb position from progress', () => {
-    const tree = renderBar({ progress: 0.25 });
-    const thumbs = tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (s: Record<string, unknown>) => s && s.left === '25%',
-        ),
+  it('centres the thumb on its position rather than offsetting it', () => {
+    const tree = renderBar();
+    const thumbs = hasStyle(
+      tree,
+      (style) => typeof style.marginLeft === 'number' && style.marginLeft < 0,
     );
-    expect(thumbs.length).toBe(1);
+
+    expect(thumbs).toHaveLength(1);
+    const thumbStyle = thumbs[0].props.style.find(
+      (style: Record<string, unknown>) =>
+        style && typeof style.marginLeft === 'number',
+    );
+    // Half its own size back, so the translation places its centre.
+    expect(thumbStyle.marginLeft).toBe(-thumbStyle.width / 2);
+    expect(thumbStyle.left).toBe(0);
   });
 
   it('applies track and fill colors', () => {
