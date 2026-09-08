@@ -54,7 +54,9 @@ export function SliderBar({
   }));
 
   const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: thumbOffsetPx(progress.value, trackWidth.value) }],
+    transform: [
+      { translateX: thumbOffsetPx(progress.value, trackWidth.value) },
+    ],
   }));
 
   return (
