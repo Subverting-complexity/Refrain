@@ -136,7 +136,7 @@ describe('WaveformBars', () => {
  * same picture the flat per-bar rules did, and that it actually confines a
  * re-render to the group the edge is in.
  */
-describe('WaveformBars grouping', () => {
+describe('WaveformBars tiers', () => {
   // Enough bars for several groups, with amplitudes that vary so a played
   // bar's grading is distinguishable from its neighbour's.
   const MANY = Array.from({ length: 50 }, (_, i) => ((i % 9) + 1) / 9);
@@ -231,33 +231,19 @@ describe('WaveformBars grouping', () => {
     );
   });
 
-  /** The group containers: the only Views carrying a numeric `flexGrow`. */
-  function findGroups(tree: ReactTestRenderer) {
-    return tree.root.findAll(
-      (node) =>
-        node.type === 'View' &&
-        Array.isArray(node.props.style) &&
-        node.props.style.some(
-          (style: Record<string, unknown>) =>
-            style && typeof style.flexGrow === 'number',
-        ),
-    );
-  }
-
   /**
-   * The property the grouping exists for. Moving the playhead past one bar
-   * must re-render the group that bar is in and no other — reference equality
-   * is the assertion that can see it, because React reuses the previous
-   * element for a memoised child that bailed out.
+   * Moving the playhead past one bar must rebuild that bar and no other —
+   * reference equality is the assertion that can see it, because React reuses
+   * the previous element for a memoised child that bailed out.
    *
-   * Without this, every one of the two hundred bars on a real track was
-   * rebuilt and re-reconciled ten times a second while playing, and on every
-   * pointer event of a drag.
+   * This is what makes it affordable to keep the bars in React while the
+   * playhead, the markers and the loop wash are drawn on the UI thread: a bar
+   * only changes when an edge crosses its centre, which on a three-minute
+   * track is about once a second.
    */
-  it('re-renders only the group the edge moved through', () => {
-    // Fifty bars, so centres sit 0.02 apart at 0.01, 0.03, 0.05 ... The bar
-    // centred at 0.51 is index 25, in the third group of ten; 0.505 sits just
-    // before it and 0.515 just past it.
+  it('re-renders only the bar the edge moved through', () => {
+    // Fifty bars, so centres sit 0.02 apart at 0.01, 0.03, 0.05 ... 0.505 sits
+    // just before the bar centred at 0.51, and 0.515 just past it.
     const tree = renderMany({
       progress: 0.505,
       hasRegion: false,
@@ -265,8 +251,7 @@ describe('WaveformBars grouping', () => {
       bFrac: 0,
       loopActive: false,
     });
-    const groupsBefore = findGroups(tree).map((group) => group.props.style);
-    const barsBefore = findBars(tree).map((bar) => bar.props.style);
+    const before = findBars(tree).map((bar) => bar.props.style);
 
     act(() => {
       tree.update(
@@ -280,24 +265,21 @@ describe('WaveformBars grouping', () => {
         />,
       );
     });
-    const groupsAfter = findGroups(tree).map((group) => group.props.style);
-    const barsAfter = findBars(tree).map((bar) => bar.props.style);
+    const after = findBars(tree).map((bar) => bar.props.style);
 
-    // The crossed bar, and the group holding it, are the only things rebuilt.
-    expect(barsAfter[25]).not.toBe(barsBefore[25]);
-    expect(groupsAfter[2]).not.toBe(groupsBefore[2]);
-    for (const group of [0, 1, 3, 4]) {
-      expect(groupsAfter[group]).toBe(groupsBefore[group]);
-    }
+    expect(after[25]).not.toBe(before[25]);
     for (const bar of [0, 9, 24, 26, 30, 49]) {
-      expect(barsAfter[bar]).toBe(barsBefore[bar]);
+      expect(after[bar]).toBe(before[bar]);
     }
   });
 
-  it('keeps every bar the same width when the count does not divide evenly', () => {
-    // 23 bars is two full groups and a short one; the short group must take a
-    // proportional share of the width, not an equal one, or its bars would
-    // come out wider than the rest.
+  /**
+   * One level of flex, so the track is divided once. Nesting the bars inside
+   * group containers distributed the width twice and therefore rounded twice,
+   * and Android rounds a view's bounds to whole pixels — which showed on a
+   * device as visibly uneven gaps across the wave.
+   */
+  it('divides the track once, with an equal share per bar', () => {
     const peaks = Array.from({ length: 23 }, () => 0.5);
     let tree!: ReactTestRenderer;
     act(() => {
@@ -312,7 +294,8 @@ describe('WaveformBars grouping', () => {
         />,
       );
     });
-    const groups = tree.root.findAll(
+
+    const intermediates = tree.root.findAll(
       (node) =>
         node.type === 'View' &&
         Array.isArray(node.props.style) &&
@@ -321,14 +304,16 @@ describe('WaveformBars grouping', () => {
             style && typeof style.flexGrow === 'number',
         ),
     );
-    const grow = groups.map(
-      (group) =>
-        group.props.style.find(
-          (style: Record<string, unknown>) =>
-            style && typeof style.flexGrow === 'number',
-        ).flexGrow,
-    );
-    expect(grow).toEqual([10, 10, 3]);
-    expect(findBars(tree)).toHaveLength(23);
+    expect(intermediates).toHaveLength(0);
+
+    const bars = findBars(tree);
+    expect(bars).toHaveLength(23);
+    for (const bar of bars) {
+      const flexed = bar.props.style.find(
+        (style: Record<string, unknown>) =>
+          style && typeof style.flex === 'number',
+      );
+      expect(flexed.flex).toBe(1);
+    }
   });
 });

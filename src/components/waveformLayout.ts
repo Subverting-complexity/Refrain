@@ -1,4 +1,5 @@
 import { spacing } from '../theme';
+import { WaveformPeaks } from '../types';
 
 /**
  * Geometry shared by the waveform surface, its presentational pieces, and the
@@ -131,3 +132,116 @@ export const HANDLE_ZONE = HANDLE_HEIGHT + 6;
  * are mapped relative to it, so both share one origin.
  */
 export const HORIZONTAL_PADDING = spacing.md;
+
+/**
+ * Narrowest a bar plus its gap may be, in dp.
+ *
+ * The analyser produces 200 buckets, which is a good resolution to *store* and
+ * far more than a phone can *draw*: on a 360dp screen the track is about 280dp
+ * wide, so 200 bars leaves 1.4dp per bar, of which 1dp is the gap either side.
+ * The bar itself is then 0.4dp — under half a physical pixel on a 3x screen.
+ * Android rounds each view's bounds to whole pixels, so those bars land as a
+ * ragged 1px comb rather than a waveform, and the per-bar shading the played
+ * tier grades across is invisible at that width.
+ *
+ * Three dp gives a 2dp bar with a 1dp gap, which reads as a bar. It also halves
+ * the number of views the surface mounts, lays out and redraws, which is the
+ * part Android feels: a view here is a real object in the native hierarchy, not
+ * a rectangle in a display list.
+ */
+export const MIN_BAR_PITCH = 3;
+
+/** Fewest bars ever drawn, so a very narrow surface still shows a waveform. */
+export const MIN_BAR_COUNT = 24;
+
+/**
+ * How many bars to draw across `trackWidth`, never more than the analyser
+ * produced. A width of zero (before the surface has been measured) falls back
+ * to `maxBars`, so the first frame is dense rather than empty.
+ */
+export function barCountForTrackWidth(
+  trackWidth: number,
+  maxBars: number,
+): number {
+  if (maxBars <= 0) return 0;
+  if (!Number.isFinite(trackWidth) || trackWidth <= 0) return maxBars;
+  const fits = Math.floor(trackWidth / MIN_BAR_PITCH);
+  return Math.max(Math.min(MIN_BAR_COUNT, maxBars), Math.min(maxBars, fits));
+}
+
+/**
+ * Reduce `peaks` to `count` bars by taking the loudest sample in each run.
+ *
+ * The maximum rather than the mean: a waveform is read for its transients, and
+ * averaging a drum hit with the silence either side of it flattens exactly what
+ * the reader is looking for. Returns the input unchanged when it already fits,
+ * so the identity is stable and the memo above it holds.
+ */
+export function downsamplePeaks(
+  peaks: WaveformPeaks,
+  count: number,
+): WaveformPeaks {
+  if (count <= 0) return [];
+  if (count >= peaks.length) return peaks;
+
+  const out: number[] = new Array(count);
+  for (let bar = 0; bar < count; bar += 1) {
+    // Slice boundaries derived from the bar index rather than accumulated, so
+    // every source sample lands in exactly one bar and none is dropped.
+    const start = Math.floor((bar * peaks.length) / count);
+    const end = Math.max(
+      start + 1,
+      Math.floor(((bar + 1) * peaks.length) / count),
+    );
+    let loudest = 0;
+    for (let i = start; i < end && i < peaks.length; i += 1) {
+      const peak = peaks[i];
+      // A non-finite sample would poison the comparison and win every time.
+      // `WaveformBars` guards its own use of a bad peak; this keeps one from
+      // swallowing the whole run it sits in.
+      if (Number.isFinite(peak) && peak > loudest) loudest = peak;
+    }
+    out[bar] = loudest;
+  }
+  return out;
+}
+
+/**
+ * Where a touch at `x` — measured from the left edge of the touch surface,
+ * which is inset by {@link HORIZONTAL_PADDING} — falls in the track, in
+ * milliseconds. Returns null before the surface is measured or for a track of
+ * unknown length.
+ *
+ * A worklet: the waveform maps a pointer event to a position on the UI thread
+ * so a drag never waits for JavaScript. Plain callers are unaffected.
+ */
+export function positionFromTouchX(
+  x: number,
+  trackWidth: number,
+  durationMs: number,
+): number | null {
+  'worklet';
+  if (durationMs <= 0 || trackWidth <= 0) return null;
+  const ratio = Math.max(0, Math.min(1, (x - HORIZONTAL_PADDING) / trackWidth));
+  return Math.round(ratio * durationMs);
+}
+
+/**
+ * Where a position in milliseconds sits along the track, in pixels from the
+ * left edge of the track (not of the touch surface).
+ *
+ * The overlays are placed with this and a `translateX` rather than the
+ * percentage `left` they used to carry. A percentage is a layout value: moving
+ * the playhead re-ran Yoga and re-laid the surface out ten times a second and
+ * on every pointer event of a drag. A translation is a draw-time value, so the
+ * same movement costs a transform on an existing frame.
+ */
+export function trackOffsetPx(
+  ms: number,
+  durationMs: number,
+  trackWidth: number,
+): number {
+  'worklet';
+  if (durationMs <= 0) return 0;
+  return (Math.max(0, Math.min(ms, durationMs)) / durationMs) * trackWidth;
+}

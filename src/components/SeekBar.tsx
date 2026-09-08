@@ -7,7 +7,11 @@ import {
   ViewStyle,
 } from 'react-native';
 
-import { useSliderGesture } from '../hooks/useSliderGesture';
+import { useDerivedValue } from 'react-native-reanimated';
+
+import { usePlayheadValue } from '../hooks/usePlayheadValue';
+import { useSharedNumber } from '../hooks/useSharedNumber';
+import { useDisplayRatio, useSliderGesture } from '../hooks/useSliderGesture';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
@@ -24,6 +28,12 @@ const clamp = (value: number, min: number, max: number): number =>
 interface SeekBarProps {
   positionMs: number;
   durationMs: number;
+  /**
+   * Whether the transport is running. Only the fill uses it: a playhead that is
+   * advancing is drawn between the engine's reports rather than stepping to
+   * each one. See {@link usePlayheadValue}.
+   */
+  isPlaying?: boolean;
   onSeek: (positionMs: number) => void;
   /**
    * When both are provided and `rangeStartMs < rangeEndMs`, the bar represents
@@ -44,6 +54,7 @@ interface SeekBarProps {
 export const SeekBar = React.memo(function SeekBar({
   positionMs,
   durationMs,
+  isPlaying = false,
   onSeek,
   rangeStartMs,
   rangeEndMs,
@@ -74,12 +85,24 @@ export const SeekBar = React.memo(function SeekBar({
     [onSeek, positionFromRatio],
   );
 
-  const { pan, handleLayout, dragRatio } = useSliderGesture({
+  const { pan, handleLayout, trackWidth, dragRatio } = useSliderGesture({
     onValueChange: handleValueChange,
     enabled: spanMs > 0,
   });
 
-  const displayProgress = dragRatio ?? progress;
+  // The fill is drawn from the UI thread: the playhead glides between the
+  // engine's ten reports a second, and a drag overrides it at the display's own
+  // rate. Neither path re-renders this component — what re-renders it is the
+  // clock below, once a second.
+  const playhead = usePlayheadValue(positionMs, isPlaying);
+  const baseValue = useSharedNumber(baseMs);
+  const spanValue = useSharedNumber(spanMs);
+  const settledRatio = useDerivedValue(() => {
+    if (spanValue.value <= 0) return 0;
+    const elapsed = playhead.value - baseValue.value;
+    return Math.max(0, Math.min(1, elapsed / spanValue.value));
+  });
+  const displayRatio = useDisplayRatio(settledRatio, dragRatio);
 
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -104,7 +127,7 @@ export const SeekBar = React.memo(function SeekBar({
   // actions that never changes, and a percentage that changes a hundred times
   // across a whole track. The value memo keys on that rounded percentage
   // rather than on the position, or it would be rebuilt just as often.
-  const a11yPercent = Math.round(displayProgress * 100);
+  const a11yPercent = Math.round(progress * 100);
   const a11yValue = useMemo(
     () => ({ min: 0, max: 100, now: a11yPercent }),
     [a11yPercent],
@@ -120,7 +143,8 @@ export const SeekBar = React.memo(function SeekBar({
       accessibilityValue={a11yValue}
     >
       <SliderBar
-        progress={displayProgress}
+        progress={displayRatio}
+        trackWidth={trackWidth}
         trackColor={theme.colors.track}
         fillColor={theme.colors.accentForeground}
         pan={pan}

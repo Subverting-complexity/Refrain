@@ -16,6 +16,53 @@ const WAV_AUDIO_FORMAT_IEEE_FLOAT = 3;
 const READ_WINDOW_BYTES = 256 * 1024;
 
 /**
+ * How much of each bucket is actually examined once a bucket grows past the
+ * point where reading all of it is worth the wait.
+ *
+ * Every path below used to touch every byte of the file: the compressed
+ * derivation ran a divide and an add per byte, and the WAV parser a `DataView`
+ * read per frame. That is fine on a desktop engine and not on Hermes, where the
+ * same loops run interpreted — and it is entirely synchronous, so the whole
+ * app is frozen for the duration, including the callbacks that tell the player
+ * its audio has finished loading. A long track therefore looked like slow
+ * *audio* loading, which is not where the time was going at all.
+ *
+ * The work is now bounded: whatever the file's length, a bucket contributes at
+ * most `SAMPLE_WINDOWS_PER_BUCKET` reads of a fixed size. For the default two
+ * hundred buckets that is under two megabytes examined rather than the whole
+ * file, and it does not grow with the track.
+ *
+ * The sample is taken as several windows spread across the bucket rather than
+ * one window in the middle, because a bucket of a real track is a second or
+ * more of music: a single window would report whatever happened to be at that
+ * instant, and the drawn envelope would be noise rather than a quieter version
+ * of the signal. Spreading the reads keeps each bar an average of its own span.
+ *
+ * A bucket small enough to read whole still is, exactly as before — which is
+ * every file short enough for the exact scan to be cheap.
+ */
+const SAMPLE_WINDOWS_PER_BUCKET = 4;
+const SAMPLE_FRAMES_PER_WINDOW = 512;
+const SAMPLE_BYTES_PER_WINDOW = 2048;
+
+/**
+ * The offsets of the sample windows inside one bucket, in whatever unit the
+ * caller counts in (frames for WAV, bytes for compressed audio).
+ *
+ * Windows are spread evenly and each sits at the start of its own share, so
+ * together they cover the bucket without overlapping and without either end
+ * being favoured.
+ */
+function sampleOffsets(spanUnits: number, windowUnits: number): number[] {
+  const share = Math.floor(spanUnits / SAMPLE_WINDOWS_PER_BUCKET);
+  const offsets: number[] = [];
+  for (let i = 0; i < SAMPLE_WINDOWS_PER_BUCKET; i++) {
+    offsets.push(i * share + Math.floor((share - windowUnits) / 2));
+  }
+  return offsets;
+}
+
+/**
  * Random-access byte source over a file. Implementations read on demand so
  * callers never hold the whole file in memory at once.
  *
@@ -169,9 +216,70 @@ function locateWavData(reader: ByteReader): WavDataLayout | null {
 }
 
 /**
+ * RMS peaks for a WAV file whose buckets are too long to read whole.
+ *
+ * Each bucket is measured from a few short windows spread across it rather than
+ * from every frame in it — see `SAMPLE_WINDOWS_PER_BUCKET`. A bucket of
+ * constant amplitude gives exactly the figure the full scan would; one that
+ * varies gives an estimate of it, which is all a bar three pixels wide can
+ * show.
+ */
+function sampleWavPeaks(
+  reader: ByteReader,
+  bucketCount: number,
+  layout: WavDataLayout,
+  framesPerBucket: number,
+): WaveformPeaks {
+  const { dataOffset, bytesPerSample, bytesPerFrame, audioFormat } = layout;
+  const peaks: number[] = [];
+
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const bucketFirstFrame = bucket * framesPerBucket;
+    let sumSquares = 0;
+    let count = 0;
+
+    for (const offset of sampleOffsets(
+      framesPerBucket,
+      SAMPLE_FRAMES_PER_WINDOW,
+    )) {
+      const firstFrame = bucketFirstFrame + Math.max(0, offset);
+      const window = reader.readAt(
+        dataOffset + firstFrame * bytesPerFrame,
+        SAMPLE_FRAMES_PER_WINDOW * bytesPerFrame,
+      );
+      if (window.length === 0) continue;
+      const view = new DataView(
+        window.buffer,
+        window.byteOffset,
+        window.byteLength,
+      );
+      const frames = Math.floor(window.length / bytesPerFrame);
+      for (let i = 0; i < frames; i++) {
+        const sample = readSample(
+          view,
+          i * bytesPerFrame,
+          bytesPerSample,
+          audioFormat,
+        );
+        sumSquares += sample * sample;
+        count += 1;
+      }
+    }
+
+    peaks.push(count > 0 ? Math.sqrt(sumSquares / count) : 0);
+  }
+
+  return normalizePeaks(peaks);
+}
+
+/**
  * Computes RMS peaks for a WAV file by streaming the data region in bounded
  * windows. Frames are assigned to buckets exactly as a single-pass scan would,
  * so peak values match a full-buffer computation.
+ *
+ * That exact scan is kept for every file short enough to afford it, and is what
+ * the format tests measure. Past that length the buckets are sampled instead;
+ * see `sampleWavPeaks`.
  */
 function parseWavPeaks(
   reader: ByteReader,
@@ -191,6 +299,10 @@ function parseWavPeaks(
 
   const framesPerBucket = Math.max(1, Math.floor(totalFrames / bucketCount));
   const usableFrames = Math.min(totalFrames, framesPerBucket * bucketCount);
+
+  if (framesPerBucket > SAMPLE_WINDOWS_PER_BUCKET * SAMPLE_FRAMES_PER_WINDOW) {
+    return sampleWavPeaks(reader, bucketCount, layout, framesPerBucket);
+  }
 
   const sumSquares = new Float64Array(bucketCount);
   const counts = new Float64Array(bucketCount);
@@ -238,8 +350,49 @@ function parseWavPeaks(
 }
 
 /**
+ * Byte-magnitude peaks for a compressed file whose buckets are too long to read
+ * whole. The counterpart of `sampleWavPeaks`, and for the same reason: this is
+ * the path almost every real track takes, because almost every real track is an
+ * MP3 of more than a couple of megabytes.
+ */
+function sampleCompressedPeaks(
+  reader: ByteReader,
+  bucketCount: number,
+  bytesPerBucket: number,
+): WaveformPeaks {
+  const peaks: number[] = [];
+
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const bucketStart = bucket * bytesPerBucket;
+    let sum = 0;
+    let count = 0;
+
+    for (const offset of sampleOffsets(
+      bytesPerBucket,
+      SAMPLE_BYTES_PER_WINDOW,
+    )) {
+      const window = reader.readAt(
+        bucketStart + Math.max(0, offset),
+        SAMPLE_BYTES_PER_WINDOW,
+      );
+      for (let i = 0; i < window.length; i++) {
+        sum += window[i];
+        count += 1;
+      }
+    }
+
+    peaks.push(count > 0 ? sum / count / 255 : 0);
+  }
+
+  return normalizePeaks(peaks);
+}
+
+/**
  * Derives coarse peaks from raw byte magnitude for non-WAV (compressed) files,
  * streaming the file in bounded windows rather than buffering it whole.
+ *
+ * As with the WAV path, the exact scan is kept for files short enough to afford
+ * it and the buckets are sampled beyond that; see `sampleCompressedPeaks`.
  */
 function deriveCompressedPeaks(
   reader: ByteReader,
@@ -248,6 +401,10 @@ function deriveCompressedPeaks(
   const total = reader.size;
   const bytesPerBucket = Math.max(1, Math.floor(total / bucketCount));
   const usableBytes = Math.min(total, bytesPerBucket * bucketCount);
+
+  if (bytesPerBucket > SAMPLE_WINDOWS_PER_BUCKET * SAMPLE_BYTES_PER_WINDOW) {
+    return sampleCompressedPeaks(reader, bucketCount, bytesPerBucket);
+  }
 
   const sums = new Float64Array(bucketCount);
   const counts = new Float64Array(bucketCount);

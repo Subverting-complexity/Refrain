@@ -8,9 +8,11 @@ jest.mock('react-native-gesture-handler', () => {
     handlers: Record<string, (e: unknown) => void>;
     settings: string[];
   } | null = null;
+  let built = 0;
   const makePan = () => {
     const handlers: Record<string, (e: unknown) => void> = {};
     const settings: string[] = [];
+    built += 1;
     const api = {
       runOnJS: (on: boolean) => {
         settings.push(`runOnJS:${on}`);
@@ -39,8 +41,10 @@ jest.mock('react-native-gesture-handler', () => {
   return {
     Gesture: { Pan: makePan },
     __getLast: () => last,
+    __buildCount: () => built,
     __reset: () => {
       last = null;
+      built = 0;
     },
   };
 });
@@ -55,18 +59,36 @@ interface Calls {
   finalize: number;
 }
 
-function renderHook(calls: Calls) {
+function emptyCalls(): Calls {
+  return { begin: [], update: [], finalize: 0 };
+}
+
+/**
+ * Callbacks with a stable identity, which is what the hook asks of its callers:
+ * the real ones are worklets that close over shared values, and shared values
+ * never change identity. Built once per `Calls` object and reused across
+ * renders, so a re-render hands the hook the same three functions.
+ */
+function stableHandlers(calls: Calls) {
+  return {
+    onBegin: (x: number, y: number) => {
+      calls.begin.push([x, y]);
+    },
+    onUpdate: (x: number, y: number) => {
+      calls.update.push([x, y]);
+    },
+    onFinalize: () => {
+      calls.finalize += 1;
+    },
+  };
+}
+
+function renderHook(handlers: ReturnType<typeof stableHandlers>) {
   let gesture: ReturnType<typeof usePanGesture>;
   let renders = 0;
   function TestComponent() {
     renders += 1;
-    gesture = usePanGesture({
-      onBegin: (x, y) => calls.begin.push([x, y]),
-      onUpdate: (x, y) => calls.update.push([x, y]),
-      onFinalize: () => {
-        calls.finalize += 1;
-      },
-    });
+    gesture = usePanGesture(handlers);
     return null;
   }
   let tree!: ReactTestRenderer;
@@ -82,10 +104,6 @@ function renderHook(calls: Calls) {
   };
 }
 
-function emptyCalls(): Calls {
-  return { begin: [], update: [], finalize: 0 };
-}
-
 describe('usePanGesture', () => {
   beforeEach(() => {
     RNGH.__reset();
@@ -94,18 +112,24 @@ describe('usePanGesture', () => {
   // Asserted individually rather than as an ordered list: which order the
   // builder is called in is implementation, the values are the contract.
   it('claims the touch the instant a finger lands', () => {
-    renderHook(emptyCalls());
+    renderHook(stableHandlers(emptyCalls()));
     expect(last().settings).toContain('minDistance:0');
   });
 
-  it('runs its callbacks on the JS thread', () => {
-    renderHook(emptyCalls());
-    expect(last().settings).toContain('runOnJS:true');
+  it('leaves the handlers on the UI thread', () => {
+    renderHook(stableHandlers(emptyCalls()));
+
+    // `runOnJS(true)` would route every pointer event through JavaScript, which
+    // is the arrangement this hook exists to get rid of. Asserted by absence
+    // because there is no positive signal: staying on the UI thread is the
+    // default, and it is switching it off that has to be visible in a diff.
+    expect(last().settings).not.toContain('runOnJS:true');
+    expect(last().settings).not.toContain('runOnJS:false');
   });
 
   it('forwards both coordinates to onBegin and onUpdate', () => {
     const calls = emptyCalls();
-    renderHook(calls);
+    renderHook(stableHandlers(calls));
 
     act(() => last().handlers.begin({ x: 12, y: 34 }));
     act(() => last().handlers.update({ x: 56, y: 78 }));
@@ -116,8 +140,10 @@ describe('usePanGesture', () => {
     expect(calls.finalize).toBe(1);
   });
 
-  it('builds the gesture once, however many times the caller re-renders', () => {
-    const { gesture, rerender, renderCount } = renderHook(emptyCalls());
+  it('builds the gesture once while its handlers keep their identity', () => {
+    const { gesture, rerender, renderCount } = renderHook(
+      stableHandlers(emptyCalls()),
+    );
     const first = gesture();
 
     rerender();
@@ -125,24 +151,18 @@ describe('usePanGesture', () => {
 
     expect(renderCount()).toBeGreaterThan(1);
     expect(gesture()).toBe(first);
+    expect(RNGH.__buildCount()).toBe(1);
   });
 
-  it('calls the newest callbacks after a re-render, not the ones it was built with', () => {
-    // The whole point of the latest-ref plumbing: the gesture object is
-    // frozen at mount, but a drag that starts later must still reach the
-    // handlers from the most recent render.
-    const first = emptyCalls();
-    const second = emptyCalls();
-    let calls = first;
-
+  it('rebuilds the gesture when a handler changes identity', () => {
+    // The other half of the contract, stated so it cannot be broken silently:
+    // there is no latest-ref indirection any more, so a caller that hands over
+    // a fresh closure each render gets a fresh gesture — and a gesture replaced
+    // mid-drag drops the drag. Every caller keeps what varies in shared values
+    // for exactly this reason.
+    let gesture: ReturnType<typeof usePanGesture>;
     function TestComponent() {
-      usePanGesture({
-        onBegin: (x, y) => calls.begin.push([x, y]),
-        onUpdate: (x, y) => calls.update.push([x, y]),
-        onFinalize: () => {
-          calls.finalize += 1;
-        },
-      });
+      gesture = usePanGesture(stableHandlers(emptyCalls()));
       return null;
     }
 
@@ -150,12 +170,10 @@ describe('usePanGesture', () => {
     act(() => {
       tree = create(createElement(TestComponent));
     });
+    const first = gesture!;
 
-    calls = second;
     act(() => tree.update(createElement(TestComponent)));
-    act(() => last().handlers.begin({ x: 1, y: 2 }));
 
-    expect(first.begin).toEqual([]);
-    expect(second.begin).toEqual([[1, 2]]);
+    expect(gesture!).not.toBe(first);
   });
 });

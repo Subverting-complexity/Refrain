@@ -2,6 +2,10 @@ import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 
 import {
+  NO_MARKER,
+  TARGET_MARKER_A,
+  TARGET_NONE,
+  TARGET_SEEK,
   useWaveformGesture,
   UseWaveformGestureParams,
   UseWaveformGesture,
@@ -45,7 +49,10 @@ const xFor = (ms: number) => 12 + (ms / DURATION_MS) * 276;
 
 let lastResult: UseWaveformGesture;
 
+let renders = 0;
+
 function TestComponent(props: UseWaveformGestureParams) {
+  renders += 1;
   lastResult = useWaveformGesture(props);
   return null;
 }
@@ -58,6 +65,7 @@ function render(overrides: Partial<UseWaveformGestureParams> = {}) {
     onSeek: jest.fn(),
     ...overrides,
   };
+  renders = 0;
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(createElement(TestComponent, props));
@@ -66,7 +74,7 @@ function render(overrides: Partial<UseWaveformGestureParams> = {}) {
     act(() => {
       tree.update(createElement(TestComponent, props));
     });
-  return { props, rerender };
+  return { props, rerender, renderCount: () => renders };
 }
 
 function layout(width = CONTAINER_WIDTH) {
@@ -78,12 +86,25 @@ function layout(width = CONTAINER_WIDTH) {
   });
 }
 
-const begin = (x: number, y = 0) => act(() => mockHandlers.begin({ x, y }));
-const move = (x: number) => act(() => mockHandlers.update({ x }));
-const finalize = () => act(() => mockHandlers.finalize({}));
+/**
+ * Drive one gesture callback and let its `runOnJS` calls land.
+ *
+ * The handlers are worklets: they move the surface by writing shared values,
+ * and reach JavaScript only through `runOnJS`, which queues a microtask. So
+ * nothing has been delivered to the callbacks until that queue has drained.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
+}
+
+const begin = (x: number, y = 0) => fire(() => mockHandlers.begin({ x, y }));
+const move = (x: number) => fire(() => mockHandlers.update({ x }));
+const finalize = () => fire(() => mockHandlers.finalize({}));
 
 describe('useWaveformGesture', () => {
-  it('builds the Pan gesture once across re-renders', () => {
+  it('builds the Pan gesture once across re-renders', async () => {
     const { rerender } = render();
     const first = lastResult.gesture;
 
@@ -93,55 +114,55 @@ describe('useWaveformGesture', () => {
   });
 
   describe('routing a touch', () => {
-    it('seeks on a tap when no marker is under the finger', () => {
+    it('seeks on a tap when no marker is under the finger', async () => {
       const { props } = render();
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
 
       expect(props.onSeek).toHaveBeenCalledWith(5000);
     });
 
-    it('ignores touches before the surface has been measured', () => {
+    it('ignores touches before the surface has been measured', async () => {
       const { props } = render();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
 
       expect(props.onSeek).not.toHaveBeenCalled();
     });
 
-    it('ignores touches on a track of unknown length', () => {
+    it('ignores touches on a track of unknown length', async () => {
       const { props } = render({ durationMs: 0 });
       layout();
 
-      begin(150);
+      await begin(150);
 
       expect(props.onSeek).not.toHaveBeenCalled();
     });
 
-    it('grabs an existing A handle instead of seeking', () => {
+    it('grabs an existing A handle instead of seeking', async () => {
       const onMarkerAChange = jest.fn();
       const { props } = render({ markerA: 5000, onMarkerAChange });
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
 
       expect(onMarkerAChange).toHaveBeenCalledWith(5000);
       expect(props.onSeek).not.toHaveBeenCalled();
     });
 
-    it('leaves a marker ungrabbable without a change handler', () => {
+    it('leaves a marker ungrabbable without a change handler', async () => {
       const { props } = render({ markerA: 5000 });
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
 
       expect(props.onSeek).toHaveBeenCalledWith(5000);
     });
 
     // A lives at the top of the surface and B at the bottom, so markers sitting
     // almost on top of each other stay individually selectable.
-    it('splits overlapping handles by the vertical half of the touch', () => {
+    it('splits overlapping handles by the vertical half of the touch', async () => {
       const onMarkerAChange = jest.fn();
       const onMarkerBChange = jest.fn();
       render({
@@ -152,48 +173,48 @@ describe('useWaveformGesture', () => {
       });
       layout();
 
-      begin(xFor(5000), 10);
-      finalize();
+      await begin(xFor(5000), 10);
+      await finalize();
       expect(onMarkerAChange).toHaveBeenCalled();
       expect(onMarkerBChange).not.toHaveBeenCalled();
 
-      begin(xFor(5000), HEIGHT - 10);
+      await begin(xFor(5000), HEIGHT - 10);
       expect(onMarkerBChange).toHaveBeenCalled();
     });
   });
 
   describe('tap-to-place', () => {
-    it('drops an armed A marker and reports the placement', () => {
+    it('drops an armed A marker and reports the placement', async () => {
       const onMarkerAChange = jest.fn();
       const onPlaceComplete = jest.fn();
       render({ placeMode: 'A', onMarkerAChange, onPlaceComplete });
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
       expect(onMarkerAChange).toHaveBeenCalledWith(5000);
 
-      finalize();
+      await finalize();
       expect(onPlaceComplete).toHaveBeenCalledWith('A');
     });
 
-    it('does not report a placement for a fine-tune drag', () => {
+    it('does not report a placement for a fine-tune drag', async () => {
       const onMarkerAChange = jest.fn();
       const onPlaceComplete = jest.fn();
       render({ markerA: 5000, onMarkerAChange, onPlaceComplete });
       layout();
 
-      begin(xFor(5000));
-      finalize();
+      await begin(xFor(5000));
+      await finalize();
 
       expect(onPlaceComplete).not.toHaveBeenCalled();
     });
 
-    it('only seeks when nothing is armed', () => {
+    it('only seeks when nothing is armed', async () => {
       const onMarkerAChange = jest.fn();
       const { props } = render({ onMarkerAChange });
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
 
       expect(props.onSeek).toHaveBeenCalledWith(5000);
       expect(onMarkerAChange).not.toHaveBeenCalled();
@@ -202,70 +223,82 @@ describe('useWaveformGesture', () => {
 
   // The engine rejects a B at or before A, so the handle has to stop at the
   // boundary rather than keep moving and have its write silently dropped.
-  it('clamps a dragged B handle to just past A', () => {
+  it('clamps a dragged B handle to just past A', async () => {
     const onMarkerBChange = jest.fn();
     render({ markerA: 5000, markerB: 8000, onMarkerBChange });
     layout();
 
-    begin(xFor(8000), HEIGHT - 10);
-    move(xFor(1000));
-    finalize();
+    await begin(xFor(8000), HEIGHT - 10);
+    await move(xFor(1000));
+    await finalize();
 
     expect(onMarkerBChange).toHaveBeenLastCalledWith(5001);
-    expect(lastResult.drag).toBeNull();
+    expect(lastResult.dragMs.value).toBe(5001);
+    expect(lastResult.dragTarget.value).toBe(TARGET_NONE);
   });
 
   describe('drag state', () => {
-    it('tracks the live value and target, then clears on release', () => {
-      const { rerender } = render();
+    it('tracks the live value and target, then clears on release', async () => {
+      render();
       layout();
 
-      begin(xFor(2500));
-      rerender();
-      expect(lastResult.drag).toEqual({ ms: 2500, target: 'seek' });
+      await begin(xFor(2500));
+      expect(lastResult.dragTarget.value).toBe(TARGET_SEEK);
+      expect(lastResult.dragMs.value).toBe(2500);
 
-      finalize();
-      rerender();
-      expect(lastResult.drag).toBeNull();
+      await move(xFor(6000));
+      expect(lastResult.dragMs.value).toBe(6000);
+
+      await finalize();
+      expect(lastResult.dragTarget.value).toBe(TARGET_NONE);
     });
 
     /**
-     * The reason `moveDrag` compares before it sets. A pan reports every
-     * pointer event and positions round to whole milliseconds, so a held
-     * finger sends a run of moves that all resolve to the same place. Each one
-     * used to allocate a fresh drag object and re-render the whole waveform
-     * surface for a value that had not changed.
+     * The whole point of moving the drag onto the UI thread. Every pointer
+     * event moves the surface, and on Android there are up to a hundred and
+     * twenty of them a second, but none of them renders: the overlays read
+     * `dragMs` through animated styles instead of through props.
      */
-    it('keeps the same drag object when a move resolves to the same position', () => {
-      render();
+    it('follows the finger without rendering the caller', async () => {
+      const { renderCount } = render();
       layout();
 
-      begin(xFor(2500));
-      const afterBegin = lastResult.drag;
+      await begin(xFor(2500));
+      const before = renderCount();
 
-      move(xFor(2500));
+      await move(xFor(3000));
+      await move(xFor(3500));
+      await move(xFor(4000));
+      await move(xFor(4500));
 
-      expect(lastResult.drag).toBe(afterBegin);
-      finalize();
+      expect(lastResult.dragMs.value).toBe(4500);
+      expect(renderCount()).toBe(before);
+      await finalize();
     });
 
-    it('allocates a new drag object when the position actually moves', () => {
+    it('reports the marker positions the overlays draw from', async () => {
+      render({ markerA: 5000, onMarkerAChange: jest.fn() });
+      layout();
+
+      expect(lastResult.markerAValue.value).toBe(5000);
+      expect(lastResult.markerBValue.value).toBe(NO_MARKER);
+
+      await begin(xFor(5000));
+      expect(lastResult.dragTarget.value).toBe(TARGET_MARKER_A);
+      await finalize();
+    });
+
+    it('measures the track inside the surface padding', () => {
       render();
       layout();
 
-      begin(xFor(2500));
-      const afterBegin = lastResult.drag;
-
-      move(xFor(6000));
-
-      expect(lastResult.drag).not.toBe(afterBegin);
-      expect(lastResult.drag).toEqual({ ms: 6000, target: 'seek' });
-      finalize();
+      // 300px container, 12px of padding each side.
+      expect(lastResult.trackWidth.value).toBe(276);
     });
   });
 
   describe('snippet preview', () => {
-    it('starts, follows, and ends the preview for a marker drag', () => {
+    it('starts, follows, and ends the preview for a marker drag', async () => {
       const onPreviewStart = jest.fn();
       const onPreviewMove = jest.fn();
       const onPreviewEnd = jest.fn();
@@ -278,24 +311,24 @@ describe('useWaveformGesture', () => {
       });
       layout();
 
-      begin(xFor(5000));
+      await begin(xFor(5000));
       expect(onPreviewStart).toHaveBeenCalledWith(5000);
 
-      move(xFor(6000));
-      finalize();
+      await move(xFor(6000));
+      await finalize();
 
       expect(onPreviewMove).toHaveBeenCalledWith(6000);
       expect(onPreviewEnd).toHaveBeenCalled();
     });
 
-    it('never previews a plain seek', () => {
+    it('never previews a plain seek', async () => {
       const onPreviewStart = jest.fn();
       const onPreviewEnd = jest.fn();
       render({ onPreviewStart, onPreviewEnd });
       layout();
 
-      begin(xFor(5000));
-      finalize();
+      await begin(xFor(5000));
+      await finalize();
 
       expect(onPreviewStart).not.toHaveBeenCalled();
       expect(onPreviewEnd).not.toHaveBeenCalled();

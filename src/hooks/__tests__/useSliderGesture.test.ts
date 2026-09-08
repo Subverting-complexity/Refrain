@@ -1,7 +1,7 @@
 import React from 'react';
 import { create, act } from 'react-test-renderer';
 
-import { useSliderGesture } from '../useSliderGesture';
+import { NO_DRAG, useSliderGesture } from '../useSliderGesture';
 
 jest.mock('react-native-gesture-handler', () => {
   let last: { handlers: Record<string, (e: unknown) => void> } | null = null;
@@ -52,11 +52,33 @@ function HookHost({
 }
 
 function renderHook(onValueChange: (r: number) => void, enabled?: boolean) {
-  let tree: import('react-test-renderer').ReactTestRenderer;
+  let tree!: import('react-test-renderer').ReactTestRenderer;
   act(() => {
     tree = create(React.createElement(HookHost, { onValueChange, enabled }));
   });
-  return tree!;
+  const rerender = () =>
+    act(() => {
+      tree.update(React.createElement(HookHost, { onValueChange, enabled }));
+    });
+  return Object.assign(tree, { rerender });
+}
+
+/**
+ * Drive one gesture callback and let the throttle's `runOnJS` land.
+ *
+ * A worklet does not call back into JavaScript directly: `runOnJS` queues a
+ * microtask, which is what keeps the ordering guarantee the throttle relies on.
+ * Nothing has reached `onValueChange` until that queue drains.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
+}
+
+/** The live drag ratio, read off the shared value the hook exposes. */
+function dragRatio(): number {
+  return hookResult.dragRatio.value;
 }
 
 function setTrackWidth(width: number) {
@@ -82,94 +104,114 @@ describe('useSliderGesture', () => {
     renderHook(jest.fn());
     expect(hookResult.pan).toBeDefined();
     expect(hookResult.handleLayout).toBeInstanceOf(Function);
-    expect(hookResult.dragRatio).toBeNull();
+    expect(dragRatio()).toBe(NO_DRAG);
+    expect(hookResult.trackWidth.value).toBe(0);
   });
 
-  it('fires onValueChange with the ratio on begin', () => {
+  it('builds the pan gesture once across re-renders', () => {
+    // A Pan rebuilt while a finger is down drops the drag, so every input the
+    // handlers need has to reach them through a shared value rather than a
+    // closure. Cheap to break and invisible until someone drags.
+    const { rerender } = renderHook(jest.fn());
+    const first = hookResult.pan;
+
+    rerender();
+    rerender();
+
+    expect(hookResult.pan).toBe(first);
+  });
+
+  it('fires onValueChange with the ratio on begin', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange);
     setTrackWidth(200);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 100 }));
+    await fire(() => handlers().begin({ x: 100 }));
 
     expect(onValueChange).toHaveBeenCalledWith(0.5);
-    expect(hookResult.dragRatio).toBe(0.5);
+    expect(dragRatio()).toBe(0.5);
   });
 
-  it('clamps ratio to 0..1', () => {
+  it('clamps ratio to 0..1', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange);
     setTrackWidth(200);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 300 }));
+    await fire(() => handlers().begin({ x: 300 }));
     expect(onValueChange).toHaveBeenCalledWith(1);
 
     nowSpy.mockReturnValue(1100);
-    act(() => handlers().finalize({}));
+    await fire(() => handlers().finalize({}));
 
     nowSpy.mockReturnValue(1200);
-    act(() => handlers().begin({ x: -50 }));
+    await fire(() => handlers().begin({ x: -50 }));
     expect(onValueChange).toHaveBeenLastCalledWith(0);
   });
 
-  it('throttles move callbacks', () => {
+  it('throttles move callbacks', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange);
     setTrackWidth(100);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 0 }));
+    await fire(() => handlers().begin({ x: 0 }));
     expect(onValueChange).toHaveBeenCalledTimes(1);
 
     nowSpy.mockReturnValue(1010);
-    act(() => handlers().update({ x: 50 }));
+    await fire(() => handlers().update({ x: 50 }));
     expect(onValueChange).toHaveBeenCalledTimes(1);
-    expect(hookResult.dragRatio).toBe(0.5);
+    expect(dragRatio()).toBe(0.5);
 
     nowSpy.mockReturnValue(1100);
-    act(() => handlers().update({ x: 80 }));
+    await fire(() => handlers().update({ x: 80 }));
     expect(onValueChange).toHaveBeenCalledTimes(2);
     expect(onValueChange).toHaveBeenLastCalledWith(0.8);
   });
 
-  it('commits final value on finalize', () => {
+  it('commits final value on finalize', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange);
     setTrackWidth(100);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 0 }));
+    await fire(() => handlers().begin({ x: 0 }));
 
     nowSpy.mockReturnValue(1010);
-    act(() => handlers().update({ x: 75 }));
+    await fire(() => handlers().update({ x: 75 }));
 
     nowSpy.mockReturnValue(1020);
-    act(() => handlers().finalize({}));
+    await fire(() => handlers().finalize({}));
 
     expect(onValueChange).toHaveBeenLastCalledWith(0.75);
-    expect(hookResult.dragRatio).toBeNull();
+    expect(dragRatio()).toBe(NO_DRAG);
   });
 
-  it('does nothing when enabled is false', () => {
+  it('does nothing when enabled is false', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange, false);
     setTrackWidth(200);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 100 }));
+    await fire(() => handlers().begin({ x: 100 }));
 
     expect(onValueChange).not.toHaveBeenCalled();
-    expect(hookResult.dragRatio).toBeNull();
+    expect(dragRatio()).toBe(NO_DRAG);
   });
 
-  it('does nothing when track has zero width', () => {
+  it('records the measured track width', () => {
+    renderHook(jest.fn());
+    setTrackWidth(240);
+    expect(hookResult.trackWidth.value).toBe(240);
+  });
+
+  it('does nothing when track has zero width', async () => {
     const onValueChange = jest.fn();
     renderHook(onValueChange);
 
     nowSpy.mockReturnValue(1000);
-    act(() => handlers().begin({ x: 100 }));
+    await fire(() => handlers().begin({ x: 100 }));
 
     expect(onValueChange).not.toHaveBeenCalled();
   });

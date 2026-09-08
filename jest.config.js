@@ -4,6 +4,7 @@ module.exports = {
   // Neutralizes JS-driven Animated.timing so no animation frame outlives a
   // test and crashes the worker after teardown (see jest.setup.js, issue #212).
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  resolver: 'react-native-worklets/jest/resolver.js',
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
   // Never pick up test files inside local git worktrees under .claude/ — they
   // are stale repo copies and would run duplicate/outdated suites. A clean CI
@@ -21,7 +22,10 @@ module.exports = {
   // that matters -- turning `import`/`export` into `require`/`module.exports`
   // -- is named explicitly rather than assumed.
   transform: {
-    '\\.mjs$': ['babel-jest', { plugins: ['@babel/plugin-transform-modules-commonjs'] }],
+    '\\.mjs$': [
+      'babel-jest',
+      { plugins: ['@babel/plugin-transform-modules-commonjs'] },
+    ],
   },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',

@@ -88,18 +88,25 @@ function layout(tree: ReactTestRenderer, width = 300) {
   });
 }
 
-function begin(x: number) {
-  act(() => handlers().begin({ x }));
-}
-function move(x: number) {
-  act(() => handlers().update({ x }));
-}
-function finalize() {
-  act(() => handlers().finalize({}));
+/**
+ * Drive one gesture callback and let its `runOnJS` calls land.
+ *
+ * The handlers are worklets: they move the bar by writing shared values and
+ * reach JavaScript only through `runOnJS`, which queues a microtask. Nothing
+ * has reached `onSeek` until that queue has drained.
+ */
+async function fire(run: () => void): Promise<void> {
+  await act(async () => {
+    run();
+  });
 }
 
+const begin = (x: number) => fire(() => handlers().begin({ x }));
+const move = (x: number) => fire(() => handlers().update({ x }));
+const finalize = () => fire(() => handlers().finalize({}));
+
 describe('SeekBar', () => {
-  it('sets adjustable role and position label', () => {
+  it('sets adjustable role and position label', async () => {
     const tree = renderSeekBar({ positionMs: 5000, durationMs: 120000 });
     const container = getAdjustable(tree);
     expect(container).toBeDefined();
@@ -107,17 +114,17 @@ describe('SeekBar', () => {
     expect(container.props.accessibilityLabel).toContain('2:00');
   });
 
-  it('calls onSeek when the bar is tapped', () => {
+  it('calls onSeek when the bar is tapped', async () => {
     const onSeek = jest.fn();
     const tree = renderSeekBar({ durationMs: 10000, onSeek });
     layout(tree);
 
-    begin(150);
+    await begin(150);
 
     expect(onSeek).toHaveBeenCalledWith(5000);
   });
 
-  it('accepts style prop override', () => {
+  it('accepts style prop override', async () => {
     const tree = renderSeekBar({ style: { marginTop: 20 } });
     const container = getAdjustable(tree);
     const flatStyle = container.props.style;
@@ -138,97 +145,118 @@ describe('SeekBar', () => {
       nowSpy.mockRestore();
     });
 
-    it('throttles native seeks during rapid drag moves', () => {
+    it('throttles native seeks during rapid drag moves', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(0);
+      await begin(0);
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenLastCalledWith(0);
 
       // Two moves within the 50ms throttle window: no extra native seeks.
       nowSpy.mockReturnValue(1010);
-      move(30);
+      await move(30);
       nowSpy.mockReturnValue(1020);
-      move(60);
+      await move(60);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       // A move past the throttle window fires one native seek.
       nowSpy.mockReturnValue(1100);
-      move(90);
+      await move(90);
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(3000);
     });
 
-    it('updates the visual every frame even while seeks are throttled', () => {
+    /**
+     * The point of the whole rewrite. The fill follows the finger from a shared
+     * value through an animated style, so a pointer event moves the bar without
+     * rendering anything — and on Android there are up to a hundred and twenty
+     * of those a second.
+     *
+     * Element identity is what can see it: a re-render would build fresh child
+     * elements even where every value it computed was equal.
+     */
+    it('does not re-render while the finger moves', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(0);
+      await begin(0);
+      const afterBegin = getAdjustable(tree).props;
 
-      // Throttled move (within window) — no native seek but visual moves.
       nowSpy.mockReturnValue(1010);
-      move(30);
-      expect(onSeek).toHaveBeenCalledTimes(1);
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(10);
+      await move(30);
+      nowSpy.mockReturnValue(1020);
+      await move(60);
+      nowSpy.mockReturnValue(1030);
+      await move(90);
+
+      expect(getAdjustable(tree).props).toBe(afterBegin);
+      await finalize();
     });
 
-    it('fires one final unthrottled seek on release', () => {
+    it('fires one final unthrottled seek on release', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(0);
+      await begin(0);
       // Throttled move — the final position must still be committed on release.
       nowSpy.mockReturnValue(1010);
-      move(75);
+      await move(75);
       expect(onSeek).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1020);
-      finalize();
+      await finalize();
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(2500);
     });
 
-    it('does not fire a redundant seek on release after a pure tap', () => {
+    it('does not fire a redundant seek on release after a pure tap', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
 
       // Tap already seeked on grant; release must not repeat the same seek.
       expect(onSeek).toHaveBeenCalledTimes(1);
       expect(onSeek).toHaveBeenCalledWith(5000);
     });
 
-    it('does not re-fire on release when the final move already seeked', () => {
+    it('does not re-fire on release when the final move already seeked', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 10000, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(0);
+      await begin(0);
       // Move past the throttle window so it seeks (3000), recording it.
       nowSpy.mockReturnValue(1100);
-      move(90);
+      await move(90);
       expect(onSeek).toHaveBeenCalledTimes(2);
 
       nowSpy.mockReturnValue(1110);
-      finalize();
+      await finalize();
       // Final position already committed by the move — no extra seek.
       expect(onSeek).toHaveBeenCalledTimes(2);
       expect(onSeek).toHaveBeenLastCalledWith(3000);
     });
 
-    it('restores prop-driven visual after release', () => {
+    /**
+     * What the platform is told, as distinct from what is drawn. The announced
+     * percentage follows the engine, not the finger: a screen reader drives
+     * this bar with the increment and decrement actions rather than by
+     * dragging, and re-announcing a value a hundred times a second would both
+     * flood the reader and re-render the bar for every pointer event.
+     */
+    it('announces the engine position rather than the finger', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 0,
@@ -238,45 +266,27 @@ describe('SeekBar', () => {
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
+      await begin(150);
+      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
 
-      finalize();
-      // dragRatio cleared → falls back to positionMs prop (0).
+      await finalize();
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
     });
 
-    it('clears the drag visual when the gesture finalizes', () => {
-      const onSeek = jest.fn();
-      const tree = renderSeekBar({
-        positionMs: 0,
-        durationMs: 10000,
-        onSeek,
-      });
-      layout(tree);
-
-      nowSpy.mockReturnValue(1000);
-      begin(300);
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(100);
-
-      finalize();
-      expect(getAdjustable(tree).props.accessibilityValue.now).toBe(0);
-    });
-
-    it('ignores drag when duration is zero', () => {
+    it('ignores drag when duration is zero', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ durationMs: 0, onSeek });
       layout(tree);
 
       nowSpy.mockReturnValue(1000);
-      begin(150);
-      finalize();
+      await begin(150);
+      await finalize();
       expect(onSeek).not.toHaveBeenCalled();
     });
   });
 
   describe('A/B region scoping', () => {
-    it('reports position relative to the region in the label', () => {
+    it('reports position relative to the region in the label', async () => {
       const tree = renderSeekBar({
         positionMs: 8000,
         durationMs: 60000,
@@ -290,7 +300,7 @@ describe('SeekBar', () => {
       expect(container.props.accessibilityLabel).toContain('0:10');
     });
 
-    it('shows the playhead as progress through the region', () => {
+    it('shows the playhead as progress through the region', async () => {
       const tree = renderSeekBar({
         positionMs: 10000,
         durationMs: 60000,
@@ -301,7 +311,7 @@ describe('SeekBar', () => {
       expect(getAdjustable(tree).props.accessibilityValue.now).toBe(50);
     });
 
-    it('maps a tap to an absolute position inside the region', () => {
+    it('maps a tap to an absolute position inside the region', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         durationMs: 60000,
@@ -312,11 +322,11 @@ describe('SeekBar', () => {
       layout(tree);
 
       // Tap at the bar midpoint → 5000 + 0.5 * 10000 = 10000ms.
-      begin(150);
+      await begin(150);
       expect(onSeek).toHaveBeenCalledWith(10000);
     });
 
-    it('ignores an inverted range and spans the whole track', () => {
+    it('ignores an inverted range and spans the whole track', async () => {
       const tree = renderSeekBar({
         positionMs: 30000,
         durationMs: 60000,
@@ -331,7 +341,7 @@ describe('SeekBar', () => {
   });
 
   describe('accessibility actions', () => {
-    it('exposes increment and decrement actions', () => {
+    it('exposes increment and decrement actions', async () => {
       const tree = renderSeekBar();
       const container = getAdjustable(tree);
       expect(container.props.accessibilityActions).toEqual([
@@ -340,7 +350,7 @@ describe('SeekBar', () => {
       ]);
     });
 
-    it('announces progress as a percentage via accessibilityValue', () => {
+    it('announces progress as a percentage via accessibilityValue', async () => {
       const tree = renderSeekBar({ positionMs: 5000, durationMs: 20000 });
       const container = getAdjustable(tree);
       expect(container.props.accessibilityValue).toEqual({
@@ -350,7 +360,7 @@ describe('SeekBar', () => {
       });
     });
 
-    it('seeks forward 5s on increment', () => {
+    it('seeks forward 5s on increment', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 5000,
@@ -365,7 +375,7 @@ describe('SeekBar', () => {
       expect(onSeek).toHaveBeenCalledWith(10000);
     });
 
-    it('seeks back 5s on decrement', () => {
+    it('seeks back 5s on decrement', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 8000,
@@ -380,7 +390,7 @@ describe('SeekBar', () => {
       expect(onSeek).toHaveBeenCalledWith(3000);
     });
 
-    it('clamps increment to duration', () => {
+    it('clamps increment to duration', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 18000,
@@ -395,7 +405,7 @@ describe('SeekBar', () => {
       expect(onSeek).toHaveBeenCalledWith(20000);
     });
 
-    it('clamps decrement to zero', () => {
+    it('clamps decrement to zero', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({
         positionMs: 2000,
@@ -410,7 +420,7 @@ describe('SeekBar', () => {
       expect(onSeek).toHaveBeenCalledWith(0);
     });
 
-    it('ignores actions when duration is zero', () => {
+    it('ignores actions when duration is zero', async () => {
       const onSeek = jest.fn();
       const tree = renderSeekBar({ positionMs: 0, durationMs: 0, onSeek });
       act(() => {

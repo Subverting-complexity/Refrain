@@ -1,5 +1,9 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  SharedValue,
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 
 import { useTheme } from '../hooks/useTheme';
 import { withAlpha } from '../utils/color';
@@ -31,17 +35,28 @@ export const MARKER_LINE_HALO = 1;
 
 export interface WaveformMarkersProps {
   durationMs: number;
-  /** Marker positions in ms — already resolved to their live drag values. */
+  /**
+   * Marker positions in ms, as the engine last reported them. They name the
+   * markers for a screen reader and decide which are drawn at all; where each
+   * one is drawn comes from the shared values below, which follow a finger at
+   * the display's rate rather than at the engine's.
+   */
   markerA?: number;
   markerB?: number;
   /** Whether A and B form a valid region, so the tint band should be drawn. */
   hasRegion: boolean;
+  /** Each marker's offset along the track, in pixels. */
+  markerAX: SharedValue<number>;
+  markerBX: SharedValue<number>;
+  /** The tinted region's left edge and width along the track, in pixels. */
+  regionX: SharedValue<number>;
+  regionWidth: SharedValue<number>;
 }
 
 interface MarkerProps {
   label: 'start' | 'end';
   ms: number;
-  durationMs: number;
+  offsetX: SharedValue<number>;
   color: string;
   textColor: string;
   /** The colour of the edge that keeps the line legible over every bar tier. */
@@ -54,101 +69,130 @@ interface MarkerProps {
  * grab targets never stack on top of each other even when the markers are
  * close together.
  *
- * Memoised on primitives. A marker sits still through everything the playhead
- * does, so it must not pay for a playback tick.
+ * All three pieces are placed by translating them along the track from a shared
+ * value, so a drag moves them on the UI thread without React rendering and
+ * without a layout pass. They used to be placed with a percentage `left`, which
+ * is a layout value: dragging a handle re-ran Yoga over the surface on every
+ * pointer event.
+ *
+ * Memoised on top of that, so the renders that do happen — the engine echoing a
+ * marker back at the drag's throttled cadence — cost nothing here.
  */
 const Marker = React.memo(function Marker({
   label,
   ms,
-  durationMs,
+  offsetX,
   color,
   textColor,
   haloColor,
 }: MarkerProps) {
-  const leftPct = (ms / durationMs) * 100;
   const isStart = label === 'start';
+  const slide = useAnimatedStyle(() => ({
+    transform: [{ translateX: offsetX.value }],
+  }));
 
   return (
     <>
-      <View
+      <Animated.View
         style={[
           styles.noPointerEvents,
           isStart ? styles.markerLineStart : styles.markerLineEnd,
-          {
-            left: `${leftPct}%`,
-            backgroundColor: color,
-            borderColor: haloColor,
-          },
+          { backgroundColor: color, borderColor: haloColor },
+          slide,
         ]}
         accessibilityLabel={`Loop ${label} marker at ${formatDuration(ms)}`}
       />
-      <View
+      <Animated.View
         style={[
           styles.noPointerEvents,
           isStart ? styles.markerDotStart : styles.markerDotEnd,
-          { left: `${leftPct}%`, backgroundColor: color },
+          { backgroundColor: color },
+          slide,
         ]}
       />
-      <View
+      <Animated.View
         style={[
           styles.noPointerEvents,
           styles.markerHandle,
           isStart ? styles.markerHandleStart : styles.markerHandleEnd,
-          { left: `${leftPct}%`, backgroundColor: color },
+          { backgroundColor: color },
+          slide,
         ]}
       >
         <Text style={[styles.markerHandleText, { color: textColor }]}>
           {isStart ? 'A' : 'B'}
         </Text>
-      </View>
+      </Animated.View>
     </>
+  );
+});
+
+interface RegionProps {
+  offsetX: SharedValue<number>;
+  width: SharedValue<number>;
+  color: string;
+}
+
+/**
+ * The wash over the looped span.
+ *
+ * A one-pixel band scaled to the region's width rather than a band whose width
+ * is set: a scale is resolved when the frame is drawn, where setting a width
+ * would re-run layout on every pointer event of a marker drag. The band carries
+ * no corner radius, so the scale is exact — there is no rounding for it to
+ * distort.
+ */
+const Region = React.memo(function Region({
+  offsetX,
+  width,
+  color,
+}: RegionProps) {
+  const style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: offsetX.value },
+      { scaleX: Math.max(0, width.value) },
+    ],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        styles.noPointerEvents,
+        styles.markerRegion,
+        { backgroundColor: color },
+        style,
+      ]}
+    />
   );
 });
 
 /**
  * The A/B overlay: the tinted loop region plus each marker's line, dot, and
- * flag. Purely presentational — positions arrive as milliseconds and are
- * turned into percentages of the track, nothing here hit-tests or drags.
- * Absolutely positioned, so it expects a relative parent.
- *
- * Memoised, with the same reasoning as `Marker`: the overlay only changes when
- * a marker moves, which is a gesture, not a tick.
+ * flag. Purely presentational — positions arrive as pixel offsets along the
+ * track and nothing here hit-tests or drags. Absolutely positioned, so it
+ * expects a relative parent.
  */
 export const WaveformMarkers = React.memo(function WaveformMarkers({
   durationMs,
   markerA,
   markerB,
   hasRegion,
+  markerAX,
+  markerBX,
+  regionX,
+  regionWidth,
 }: WaveformMarkersProps) {
   const { theme } = useTheme();
 
   if (durationMs <= 0) return null;
 
-  // Derive percentages from ms directly (not from precomputed fractions) so the
-  // width is exact — subtracting the fractions drifts by a float ULP.
-  const regionLeftPct = hasRegion
-    ? ((markerA as number) / durationMs) * 100
-    : 0;
-  const regionWidthPct = hasRegion
-    ? (((markerB as number) - (markerA as number)) / durationMs) * 100
-    : 0;
-
   return (
     <>
       {hasRegion ? (
-        <View
-          style={[
-            styles.noPointerEvents,
-            styles.markerRegion,
-            {
-              left: `${regionLeftPct}%`,
-              width: `${regionWidthPct}%`,
-              backgroundColor: withAlpha(
-                theme.colors.markerA,
-                REGION_TINT_ALPHA,
-              ),
-            },
-          ]}
+        <Region
+          offsetX={regionX}
+          width={regionWidth}
+          color={withAlpha(theme.colors.markerA, REGION_TINT_ALPHA)}
         />
       ) : null}
 
@@ -156,7 +200,7 @@ export const WaveformMarkers = React.memo(function WaveformMarkers({
         <Marker
           label="start"
           ms={markerA}
-          durationMs={durationMs}
+          offsetX={markerAX}
           color={theme.colors.markerA}
           textColor={theme.colors.markerAText}
           haloColor={theme.colors.surface}
@@ -167,7 +211,7 @@ export const WaveformMarkers = React.memo(function WaveformMarkers({
         <Marker
           label="end"
           ms={markerB}
-          durationMs={durationMs}
+          offsetX={markerBX}
           color={theme.colors.markerB}
           textColor={theme.colors.markerBText}
           haloColor={theme.colors.surface}
@@ -188,6 +232,7 @@ const styles = StyleSheet.create({
   // from the bars down to just above its bottom flag.
   markerLineStart: {
     position: 'absolute',
+    left: 0,
     top: HANDLE_HEIGHT,
     bottom: HANDLE_ZONE,
     // The core stays 2px; the edges sit outside it, so the line reads at the
@@ -200,6 +245,7 @@ const styles = StyleSheet.create({
   },
   markerLineEnd: {
     position: 'absolute',
+    left: 0,
     top: HANDLE_ZONE,
     bottom: HANDLE_HEIGHT,
     // The core stays 2px; the edges sit outside it, so the line reads at the
@@ -212,6 +258,7 @@ const styles = StyleSheet.create({
   },
   markerDotStart: {
     position: 'absolute',
+    left: 0,
     top: HANDLE_HEIGHT,
     width: 8,
     height: 8,
@@ -220,6 +267,7 @@ const styles = StyleSheet.create({
   },
   markerDotEnd: {
     position: 'absolute',
+    left: 0,
     bottom: HANDLE_HEIGHT,
     width: 8,
     height: 8,
@@ -228,6 +276,7 @@ const styles = StyleSheet.create({
   },
   markerHandle: {
     position: 'absolute',
+    left: 0,
     width: HANDLE_WIDTH,
     height: HANDLE_HEIGHT,
     marginLeft: -HANDLE_WIDTH / 2,
@@ -245,9 +294,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  // One pixel wide and scaled to the region's width; see `Region`.
   markerRegion: {
     position: 'absolute',
+    left: 0,
     top: HANDLE_ZONE,
     bottom: HANDLE_ZONE,
+    width: 1,
+    transformOrigin: 'left center',
   },
 });
