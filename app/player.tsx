@@ -20,6 +20,7 @@ import { UnsavedSegmentDialog } from '@/src/components/UnsavedSegmentDialog';
 import { WaveformView } from '@/src/components/WaveformView';
 import { useAudioPlayer } from '@/src/hooks/useAudioPlayer';
 import { useCountdown } from '@/src/hooks/useCountdown';
+import { useMarkerDrag } from '@/src/hooks/useMarkerDrag';
 import { usePersistTrackDuration } from '@/src/hooks/usePersistTrackDuration';
 import { useStampTrackPlayed } from '@/src/hooks/useStampTrackPlayed';
 import { useSegmentWorkflow } from '@/src/hooks/useSegmentWorkflow';
@@ -70,7 +71,7 @@ export default function PlayerScreen() {
 
   const {
     status,
-    positionMs,
+    playheadMs,
     durationMs,
     markerA,
     markerB,
@@ -96,6 +97,13 @@ export default function PlayerScreen() {
   } = useAudioPlayer(uri, trackId, filename);
 
   const { toast, showToast, showError, hideToast } = useToast();
+
+  // Where the waveform publishes the marker it is dragging. Owned here because
+  // the wave and the marker tiles both draw from it and are siblings; the
+  // engine hears about a marker only when the gesture starts and settles, so
+  // this is the only live account of one between those two points. See
+  // `useMarkerDrag`.
+  const markerDrag = useMarkerDrag();
 
   // The named-segment side of the player: the saved list, which one is loaded,
   // both dialogs, and the unsaved-edit guard (including the leave-the-screen
@@ -360,12 +368,12 @@ export default function PlayerScreen() {
           {peaks.length > 0 ? (
             <WaveformView
               peaks={peaks}
-              positionMs={positionMs}
+              playheadMs={playheadMs}
               durationMs={durationMs}
-              isPlaying={status === 'playing'}
               onSeek={seekTo}
               markerA={markerA ?? undefined}
               markerB={markerB ?? undefined}
+              markerDrag={markerDrag}
               loopEnabled={loopEnabled}
               placeMode={placeMode}
               onPlaceComplete={handlePlaceComplete}
@@ -432,6 +440,7 @@ export default function PlayerScreen() {
             status={status}
             markerA={markerA}
             markerB={markerB}
+            markerDrag={markerDrag}
             durationMs={durationMs}
             loopEnabled={loopEnabled}
             placeMode={placeMode}
@@ -448,9 +457,8 @@ export default function PlayerScreen() {
           />
 
           <SeekBar
-            positionMs={positionMs}
+            playheadMs={playheadMs}
             durationMs={durationMs}
-            isPlaying={status === 'playing'}
             onSeek={seekTo}
             rangeStartMs={markerA ?? undefined}
             rangeEndMs={markerB ?? undefined}

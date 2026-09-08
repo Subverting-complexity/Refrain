@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 
+import {
+  MarkerDrag,
+  TARGET_MARKER_A,
+  TARGET_MARKER_B,
+  useMarkerDrag,
+} from '../hooks/useMarkerDrag';
 import { useTheme } from '../hooks/useTheme';
+import { useUiDerivedNumber } from '../hooks/useUiDerivedNumber';
 import { radii, spacing } from '../theme';
 import { PlaybackStatus } from '../types';
 import { formatDuration } from '../utils/formatTime';
@@ -13,12 +20,25 @@ import { MarkerTimeSheet } from './MarkerTimeSheet';
 const MARKER_TILE_MIN_WIDTH = 50;
 const MARKER_TILE_HEIGHT = 52;
 
+/** No marker is being dragged, so the tile shows the committed position. */
+const NOT_DRAGGING = -1;
+
 export type PlaceMode = 'none' | 'A' | 'B';
 
 interface MarkerControlsProps {
   status: PlaybackStatus;
   markerA: number | null;
   markerB: number | null;
+  /**
+   * The waveform's in-flight drag, so a tile shows where its marker is being
+   * dragged *to* rather than where it was last committed. The engine is only
+   * written twice per gesture now (see {@link MarkerDrag}), so without this the
+   * tile's time would sit still for the length of a drag and then jump.
+   *
+   * Optional: with no drag supplied the tiles simply follow the committed
+   * positions, which is what they do outside the player.
+   */
+  markerDrag?: MarkerDrag;
   durationMs: number;
   loopEnabled: boolean;
   placeMode: PlaceMode;
@@ -46,13 +66,18 @@ interface MarkerControlsProps {
 }
 
 /**
- * Memoised. The player subscribes to the playhead, so this re-rendered ten
- * times a second for a marker row that only changes when a marker does.
+ * Memoised, and given only values that move at human speed. The row used to
+ * re-render ten times a second because the player subscribed to the playhead,
+ * and twenty times a second during a marker drag because the engine echoed
+ * every throttled position back through the screen. Neither reaches it now:
+ * the playhead does not come here at all, and a drag arrives as a shared value
+ * that only crosses the thread boundary when the second on the tile changes.
  */
 export const MarkerControls = React.memo(function MarkerControls({
   status,
   markerA,
   markerB,
+  markerDrag,
   durationMs,
   loopEnabled,
   placeMode,
@@ -70,6 +95,33 @@ export const MarkerControls = React.memo(function MarkerControls({
   const { theme } = useTheme();
   // null = closed; 'A' or 'B' = sheet open for that marker
   const [sheetTarget, setSheetTarget] = useState<'A' | 'B' | null>(null);
+
+  // A tile shows a time in whole seconds, so that is what it subscribes to.
+  // Both are projected on the UI thread and cross back only when the second
+  // they display changes — not on every pointer event of the drag, and not
+  // through the screen. The idle value is NOT_DRAGGING rather than the position
+  // itself, so a released marker falls back to the committed prop instead of
+  // holding the last place a finger left it.
+  const ownDrag = useMarkerDrag();
+  const drag = markerDrag ?? ownDrag;
+  const deriveDragA = useCallback(() => {
+    'worklet';
+    if (drag.target.value !== TARGET_MARKER_A) return NOT_DRAGGING;
+    return Math.floor(Math.max(0, drag.ms.value) / 1000);
+  }, [drag]);
+  const deriveDragB = useCallback(() => {
+    'worklet';
+    if (drag.target.value !== TARGET_MARKER_B) return NOT_DRAGGING;
+    return Math.floor(Math.max(0, drag.ms.value) / 1000);
+  }, [drag]);
+  const dragASecond = useUiDerivedNumber(deriveDragA, NOT_DRAGGING);
+  const dragBSecond = useUiDerivedNumber(deriveDragB, NOT_DRAGGING);
+  // Only ever a substitute for a marker that already exists: a tap-to-place
+  // writes the new marker on the first pointer event, so `markerA` is set
+  // before any drag of A can be in flight.
+  const shownA = dragASecond === NOT_DRAGGING ? markerA : dragASecond * 1000;
+  const shownB = dragBSecond === NOT_DRAGGING ? markerB : dragBSecond * 1000;
+
   const isDisabled = status === 'idle' || status === 'error';
   const hasRegion = markerA != null && markerB != null;
   // The loop is armable with or without markers: a full A/B region loops
@@ -143,7 +195,7 @@ export const MarkerControls = React.memo(function MarkerControls({
       <View style={styles.row}>
         {renderButton(
           'A',
-          markerA,
+          shownA,
           theme.colors.markerA,
           placeMode === 'A',
           isDisabled,
@@ -151,7 +203,7 @@ export const MarkerControls = React.memo(function MarkerControls({
         )}
         {renderButton(
           'B',
-          markerB,
+          shownB,
           theme.colors.markerB,
           placeMode === 'B',
           isDisabled || (markerA == null && markerB == null),

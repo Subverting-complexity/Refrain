@@ -10,6 +10,15 @@ import {
 } from '../components/waveformLayout';
 import { clampToBounds, markerBounds } from '../utils/markerBounds';
 import { useLatestRef } from './useLatestRef';
+import {
+  MarkerDrag,
+  NO_MARKER,
+  TARGET_MARKER_A,
+  TARGET_MARKER_B,
+  TARGET_NONE,
+  TARGET_SEEK,
+  useMarkerDrag,
+} from './useMarkerDrag';
 import { usePanGesture } from './usePanGesture';
 import { useSharedNumber } from './useSharedNumber';
 import { useUiDragThrottle } from './useUiDragThrottle';
@@ -17,21 +26,29 @@ import { useUiDragThrottle } from './useUiDragThrottle';
 /** What an in-flight waveform gesture is moving. */
 export type DragTarget = 'markerA' | 'markerB' | 'seek';
 
+// Re-exported so the surface's own vocabulary stays in one import for its
+// callers, while the shared values themselves live in a leaf module the marker
+// tiles can reach without pulling in the gesture machinery.
+export {
+  NO_MARKER,
+  TARGET_MARKER_A,
+  TARGET_MARKER_B,
+  TARGET_NONE,
+  TARGET_SEEK,
+};
+export type { MarkerDrag };
+
 /**
- * The drag target as a number, because the UI thread carries it in a shared
- * value and a shared value holding a string costs a serialisation branch on
- * every write. `TARGET_NONE` also means "no drag in flight".
+ * Which marker a numeric target names, for the callbacks that take a letter.
+ *
+ * A worklet as well as a plain function, because `clampForTarget` calls it on
+ * the UI thread. Without the directive every marker drag threw
+ * `Tried to synchronously call a non-worklet function` out of the pan handler
+ * on the first pointer event, which is why dragging a handle did nothing but
+ * raise an error overlay. The JavaScript-thread callers are unaffected.
  */
-export const TARGET_NONE = 0;
-export const TARGET_SEEK = 1;
-export const TARGET_MARKER_A = 2;
-export const TARGET_MARKER_B = 3;
-
-/** A marker position that is not set. Positions are never negative. */
-export const NO_MARKER = -1;
-
-/** Which marker a numeric target names, for the callbacks that take a letter. */
 function markerLetter(target: number): 'A' | 'B' {
+  'worklet';
   return target === TARGET_MARKER_A ? 'A' : 'B';
 }
 
@@ -39,6 +56,12 @@ export interface UseWaveformGestureParams {
   durationMs: number;
   /** Height of the touch surface, used to split A (top) from B (bottom). */
   height: number;
+  /**
+   * Where to publish the in-flight drag. Supply the screen's own
+   * {@link MarkerDrag} when something outside the waveform draws from it — the
+   * marker tiles do — and omit it for a surface that stands alone.
+   */
+  drag?: MarkerDrag;
   markerA?: number;
   markerB?: number;
   /**
@@ -48,6 +71,13 @@ export interface UseWaveformGestureParams {
    */
   placeMode: 'none' | 'A' | 'B';
   onSeek: (positionMs: number) => void;
+  /**
+   * Where a marker landed. Called twice per marker gesture — once when the
+   * handle is grabbed or the marker dropped, and once with the final position
+   * on release — never at the drag's cadence. See {@link MarkerDrag} for why:
+   * an engine write is a transport change, and a transport change is a render
+   * of the whole screen.
+   */
   onMarkerAChange?: (positionMs: number) => void;
   onMarkerBChange?: (positionMs: number) => void;
   onPlaceComplete?: (marker: 'A' | 'B') => void;
@@ -71,6 +101,8 @@ export interface UseWaveformGesture {
   onLayout: (e: LayoutChangeEvent) => void;
   /** Width of the track the bars occupy, in pixels. */
   trackWidth: SharedValue<number>;
+  /** The drag being published — the one passed in, or this hook's own. */
+  drag: MarkerDrag;
   /** Which element the finger is moving, as one of the `TARGET_*` constants. */
   dragTarget: SharedValue<number>;
   /** Where that element currently is, in milliseconds. */
@@ -98,12 +130,15 @@ function isMarkerTarget(target: number): boolean {
  * involved in a drag at all, which is the point — see `usePanGesture` for why
  * the previous arrangement could not be made fast enough on Android.
  *
- * JavaScript is reached only for what genuinely has to happen there: the audio
- * engine calls, at the throttled twenty a second, and the once-per-gesture
- * bookkeeping at either end. Those cross through `runOnJS`, which preserves the
- * order calls were scheduled in — which is what lets the start hook run before
- * the first value it applies to, and the final value be delivered before the
- * commit that reads it.
+ * JavaScript is reached only for what genuinely has to happen there. A seek and
+ * the preview monitor need a stream of positions, so they get one at the
+ * throttled twenty a second. A marker does not: writing one to the engine
+ * republishes the transport, and that is a render of the whole screen, so it
+ * happens twice — at the grab and on release — and the shared values carry it
+ * in between. Everything crosses through `runOnJS`, which preserves the order
+ * calls were scheduled in: the start hook runs before the first value it
+ * applies to, and the final preview follow lands before the commit that reads
+ * the end state.
  *
  * Every input the worklets need is mirrored into a shared value rather than
  * captured, so the handlers never change identity and the Pan is built exactly
@@ -112,6 +147,7 @@ function isMarkerTarget(target: number): boolean {
 export function useWaveformGesture({
   durationMs,
   height,
+  drag: providedDrag,
   markerA,
   markerB,
   placeMode,
@@ -125,8 +161,13 @@ export function useWaveformGesture({
   onPreviewEnd,
 }: UseWaveformGestureParams): UseWaveformGesture {
   const trackWidth = useSharedValue(0);
-  const dragTarget = useSharedValue(TARGET_NONE);
-  const dragMs = useSharedValue(0);
+  // A surface with nowhere to publish its drag keeps one to itself, so it still
+  // moves its own overlays. The hook runs either way — a hook cannot be
+  // conditional — and the unused pair costs two shared values.
+  const ownDrag = useMarkerDrag();
+  const drag = providedDrag ?? ownDrag;
+  const dragTarget = drag.target;
+  const dragMs = drag.ms;
   // Whether the in-flight gesture is an arm-driven placement (vs. a fine-tune
   // drag of an existing handle, or a plain seek), so the end of the gesture
   // knows to advance the parent's arm state.
@@ -164,41 +205,62 @@ export function useWaveformGesture({
   // gesture, from the UI thread, before any value is delivered.
   const activeTarget = useRef<number>(TARGET_NONE);
 
+  const applyMarker = useCallback(
+    (target: number, ms: number) => {
+      if (target === TARGET_MARKER_A) markerARef.current?.(ms);
+      else if (target === TARGET_MARKER_B) markerBRef.current?.(ms);
+    },
+    [markerARef, markerBRef],
+  );
+
+  /**
+   * The throttled per-move callback. A seek goes to the engine here, because a
+   * seek *is* the position — there is nowhere else for it to land. A marker
+   * does not: the only thing it feeds mid-drag is the audio the preview plays,
+   * which is not React's business. Where the marker has got to is read from the
+   * shared values instead; see {@link MarkerDrag}.
+   */
   const deliver = useCallback(
     (ms: number) => {
       const target = activeTarget.current;
-      if (target === TARGET_MARKER_A) markerARef.current?.(ms);
-      else if (target === TARGET_MARKER_B) markerBRef.current?.(ms);
-      else seekRef.current(ms);
-      // The preview follows the marker at the same throttled cadence as the
-      // marker itself, and never follows a plain seek.
       if (isMarkerTarget(target)) previewMoveRef.current?.(ms);
+      else seekRef.current(ms);
     },
-    [seekRef, markerARef, markerBRef, previewMoveRef],
+    [seekRef, previewMoveRef],
   );
   const throttle = useUiDragThrottle(deliver);
 
   const beginOnJS = useCallback(
     (target: number, ms: number) => {
       activeTarget.current = target;
-      if (isMarkerTarget(target)) previewStartRef.current?.(ms);
+      if (isMarkerTarget(target)) {
+        // The one mid-gesture write, and it is not an optimisation to remove:
+        // a tap-to-place has no marker yet, and the overlay only draws a marker
+        // the screen knows about. Grabbing an existing handle re-writes the
+        // position it already had, which changes nothing and so renders
+        // nothing.
+        applyMarker(target, ms);
+        previewStartRef.current?.(ms);
+      }
     },
-    [previewStartRef],
+    [applyMarker, previewStartRef],
   );
 
   const endOnJS = useCallback(
-    (target: number, placement: boolean) => {
+    (target: number, placement: boolean, ms: number) => {
       if (isMarkerTarget(target)) {
-        // Commit before tearing the preview down. While the monitor is still
-        // active the engine redirects its pending restore to the loop start, so
-        // the playhead moves exactly once instead of racing the restore's seek.
+        // The whole drag arrives here as one write, then the commit. Commit
+        // before tearing the preview down: while the monitor is still active
+        // the engine redirects its pending restore to the loop start, so the
+        // playhead moves exactly once instead of racing the restore's seek.
+        applyMarker(target, ms);
         markerCommitRef.current?.(markerLetter(target));
         previewEndRef.current?.();
       }
       if (placement) placeCompleteRef.current?.(markerLetter(target));
       activeTarget.current = TARGET_NONE;
     },
-    [markerCommitRef, previewEndRef, placeCompleteRef],
+    [applyMarker, markerCommitRef, previewEndRef, placeCompleteRef],
   );
 
   const onLayout = useCallback(
@@ -356,14 +418,14 @@ export function useWaveformGesture({
     const target = dragTarget.value;
     if (target === TARGET_NONE) return;
     const placement = isPlacement.value;
-    // Commit the final throttled value — which also delivers the final preview
-    // follow — before the end hook, so the monitor restores from the correct
-    // end state. `runOnJS` keeps the two in that order.
+    // Flush the final throttled value — the last preview follow, or the last
+    // seek — before the end hook, so the monitor restores from the correct end
+    // state. `runOnJS` keeps the two in that order.
     throttle.end();
-    runOnJS(endOnJS)(target, placement);
+    runOnJS(endOnJS)(target, placement, dragMs.value);
     isPlacement.value = false;
     dragTarget.value = TARGET_NONE;
-  }, [dragTarget, isPlacement, throttle, endOnJS]);
+  }, [dragTarget, dragMs, isPlacement, throttle, endOnJS]);
 
   const gesture = usePanGesture({ onBegin, onUpdate, onFinalize });
 
@@ -371,6 +433,7 @@ export function useWaveformGesture({
     gesture,
     onLayout,
     trackWidth,
+    drag,
     dragTarget,
     dragMs,
     markerAValue,

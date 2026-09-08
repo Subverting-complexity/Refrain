@@ -1676,6 +1676,65 @@ describe('audioEngine', () => {
       );
     });
 
+    /**
+     * The visible defect this guards: a seek makes the Android player report
+     * `isLoaded: false` for two to four ticks while it re-buffers, and the
+     * status still carries a valid position and duration throughout. Treating
+     * those as "no track" published an idle, zero-length transport around nine
+     * times a second for the length of a drag, which greyed every marker
+     * control and flickered the markers, the loop wash and the seek fill in and
+     * out. It read as the whole screen redrawing, and it was.
+     */
+    it('holds the transport through the re-buffer that follows a seek', async () => {
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      subscribe(listener);
+      listener.mockClear();
+
+      statusCallback?.({
+        isLoaded: false,
+        isBuffering: true,
+        playing: false,
+        currentTime: 42,
+        duration: 60,
+        didJustFinish: false,
+        error: null,
+      });
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'playing',
+          positionMs: 42000,
+          durationMs: 60000,
+        }),
+      );
+    });
+
+    it('still reports idle when the player has no track at all', async () => {
+      const { loadTrack, subscribe } = require('../audioEngine');
+      const listener = jest.fn();
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      subscribe(listener);
+      listener.mockClear();
+
+      // No duration on the status: nothing is loaded, as distinct from a
+      // loaded track catching up after a seek.
+      statusCallback?.({ isLoaded: false, duration: 0, error: null });
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'idle',
+          positionMs: 0,
+          durationMs: 0,
+        }),
+      );
+    });
+
     it('reports loading status when buffering', async () => {
       const { loadTrack, subscribe } = require('../audioEngine');
       const listener = jest.fn();
@@ -2696,6 +2755,67 @@ describe('audioEngine', () => {
       updateMonitor(31000);
 
       expect(mockSeekTo).not.toHaveBeenCalled();
+    });
+
+    it('holds a second follow-seek back until the interval has passed', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        updateMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000); // window [28s, 32s]
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+      mockSeekTo.mockClear();
+
+      const nowSpy = jest.spyOn(Date, 'now');
+      // The first follow of a preview is never held back.
+      nowSpy.mockReturnValue(1_000_000);
+      updateMonitor(50000); // window [48s, 52s]; 30s is outside
+      expect(mockSeekTo).toHaveBeenCalledWith(48);
+      mockSeekTo.mockClear();
+
+      // A drag fast enough to leave the window again a tenth of a second later
+      // re-cues nothing: twenty splices a second is not something anyone can
+      // hear as position, and every one of them costs a frame.
+      nowSpy.mockReturnValue(1_000_100);
+      updateMonitor(20000); // window [18s, 22s]; 30s is outside again
+      expect(mockSeekTo).not.toHaveBeenCalled();
+
+      // Past the interval, the audio catches up.
+      nowSpy.mockReturnValue(1_000_400);
+      updateMonitor(20000);
+      expect(mockSeekTo).toHaveBeenCalledWith(18);
+      nowSpy.mockRestore();
+    });
+
+    it('keeps the loop window current while a follow-seek is held back', async () => {
+      const {
+        loadTrack,
+        startMonitor,
+        updateMonitor,
+      } = require('../audioEngine');
+
+      await loadTrack('file:///test.mp3');
+      statusCallback?.(makeLoadedStatus({ currentTime: 10, duration: 60 }));
+      await startMonitor(30000); // window [28s, 32s]
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 30 }));
+
+      const nowSpy = jest.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(1_000_000);
+      updateMonitor(50000); // window [48s, 52s], and re-cues
+      nowSpy.mockReturnValue(1_000_100);
+      updateMonitor(40000); // window [38s, 42s], held back
+      mockSeekTo.mockClear();
+
+      // Only the audio waits: the bounds already follow the marker, so playing
+      // past the new window end rewinds to the new window start.
+      statusCallback?.(makeLoadedStatus({ playing: true, currentTime: 42 }));
+
+      expect(mockSeekTo).toHaveBeenCalledWith(38);
+      nowSpy.mockRestore();
     });
 
     it('updateMonitor is a no-op when the monitor is not running', async () => {

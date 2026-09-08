@@ -49,10 +49,16 @@ export function waveformHeightForViewport(viewportHeight: number): number {
  * not changed" the same statement, so the memo holds. Which direction to snap
  * depends on the comparison the value feeds, hence two functions: rounding to
  * the nearest centre would move a boundary that sits exactly on one.
+ *
+ * All four are worklets. The snap is applied on the UI thread, where the
+ * playhead lives, so that only a movement which actually crosses a bar centre
+ * crosses the thread boundary and re-renders the bars; see
+ * `useUiDerivedNumber`. Plain JavaScript callers and the tests are unaffected.
  */
 
 /** Rebuild a grid position from an index, exactly as `WaveformBars` does. */
 function centreFraction(index: number, barCount: number): number {
+  'worklet';
   return (index + 0.5) / barCount;
 }
 
@@ -64,6 +70,7 @@ function centreFraction(index: number, barCount: number): number {
  * snaps step from here using the comparison itself.
  */
 function guessIndex(fraction: number, barCount: number): number {
+  'worklet';
   return fraction * barCount - 0.5;
 }
 
@@ -79,6 +86,7 @@ function guessIndex(fraction: number, barCount: number): number {
  * overshoot past the end of the track does the same.
  */
 export function snapDownToBarGrid(fraction: number, barCount: number): number {
+  'worklet';
   if (barCount <= 0 || !Number.isFinite(fraction)) return fraction;
   let index = Math.max(
     -1,
@@ -102,6 +110,7 @@ export function snapDownToBarGrid(fraction: number, barCount: number): number {
  * `fraction`, clamped to the first bar and to one past the last.
  */
 export function snapUpToBarGrid(fraction: number, barCount: number): number {
+  'worklet';
   if (barCount <= 0 || !Number.isFinite(fraction)) return fraction;
   let index = Math.max(
     0,

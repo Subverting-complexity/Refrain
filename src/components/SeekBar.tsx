@@ -7,12 +7,12 @@ import {
   ViewStyle,
 } from 'react-native';
 
-import { useDerivedValue } from 'react-native-reanimated';
+import { SharedValue, useDerivedValue } from 'react-native-reanimated';
 
-import { usePlayheadValue } from '../hooks/usePlayheadValue';
 import { useSharedNumber } from '../hooks/useSharedNumber';
 import { useDisplayRatio, useSliderGesture } from '../hooks/useSliderGesture';
 import { useTheme } from '../hooks/useTheme';
+import { useUiDerivedNumber } from '../hooks/useUiDerivedNumber';
 import { spacing } from '../theme';
 import { formatDuration } from '../utils/formatTime';
 import { SliderBar } from './SliderBar';
@@ -26,14 +26,13 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
 
 interface SeekBarProps {
-  positionMs: number;
-  durationMs: number;
   /**
-   * Whether the transport is running. Only the fill uses it: a playhead that is
-   * advancing is drawn between the engine's reports rather than stepping to
-   * each one. See {@link usePlayheadValue}.
+   * The playhead, in milliseconds, as a shared value — see the same prop on
+   * `WaveformView`. The fill, the thumb and the elapsed clock all come from it,
+   * the first two on the UI thread and the clock once a second.
    */
-  isPlaying?: boolean;
+  playheadMs: SharedValue<number>;
+  durationMs: number;
   onSeek: (positionMs: number) => void;
   /**
    * When both are provided and `rangeStartMs < rangeEndMs`, the bar represents
@@ -52,9 +51,8 @@ interface SeekBarProps {
  * player's other state (arming a marker, opening a sheet) must not.
  */
 export const SeekBar = React.memo(function SeekBar({
-  positionMs,
+  playheadMs,
   durationMs,
-  isPlaying = false,
   onSeek,
   rangeStartMs,
   rangeEndMs,
@@ -69,9 +67,6 @@ export const SeekBar = React.memo(function SeekBar({
     durationMs > 0;
   const baseMs = hasRange ? (rangeStartMs as number) : 0;
   const spanMs = hasRange ? (rangeEndMs as number) - baseMs : durationMs;
-
-  const elapsedMs = clamp(positionMs, baseMs, baseMs + spanMs) - baseMs;
-  const progress = spanMs > 0 ? elapsedMs / spanMs : 0;
 
   const positionFromRatio = useCallback(
     (ratio: number): number => Math.round(baseMs + ratio * spanMs),
@@ -94,7 +89,7 @@ export const SeekBar = React.memo(function SeekBar({
   // engine's ten reports a second, and a drag overrides it at the display's own
   // rate. Neither path re-renders this component — what re-renders it is the
   // clock below, once a second.
-  const playhead = usePlayheadValue(positionMs, isPlaying);
+  const playhead = playheadMs;
   const baseValue = useSharedNumber(baseMs);
   const spanValue = useSharedNumber(spanMs);
   const settledRatio = useDerivedValue(() => {
@@ -104,30 +99,56 @@ export const SeekBar = React.memo(function SeekBar({
   });
   const displayRatio = useDisplayRatio(settledRatio, dragRatio);
 
+  // The clock and the announced percentage, each derived on the UI thread at
+  // the rate it is read at rather than the rate the playhead moves at: whole
+  // seconds for the label, whole percent for the screen reader. Both come from
+  // the settled playhead rather than the finger, so a fast drag across a long
+  // track cannot re-render this once a frame.
+  const deriveElapsedSecond = useCallback(() => {
+    'worklet';
+    if (spanValue.value <= 0) return 0;
+    const elapsed = Math.max(
+      0,
+      Math.min(spanValue.value, playhead.value - baseValue.value),
+    );
+    return Math.floor(elapsed / 1000);
+  }, [playhead, baseValue, spanValue]);
+  const elapsedSecond = useUiDerivedNumber(deriveElapsedSecond, 0);
+  const elapsedMs = elapsedSecond * 1000;
+
+  const deriveA11yPercent = useCallback(() => {
+    'worklet';
+    if (spanValue.value <= 0) return 0;
+    const ratio = (playhead.value - baseValue.value) / spanValue.value;
+    return Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+  }, [playhead, baseValue, spanValue]);
+  const a11yPercent = useUiDerivedNumber(deriveA11yPercent, 0);
+
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       if (spanMs <= 0) return;
       const { actionName } = e.nativeEvent;
+      // Read the playhead at the moment the action fires; see the same read in
+      // `WaveformView`.
+      const positionMs = clamp(playhead.value, baseMs, baseMs + spanMs);
       if (actionName === 'increment') {
         onSeek(Math.min(baseMs + spanMs, positionMs + SEEK_STEP_MS));
       } else if (actionName === 'decrement') {
         onSeek(Math.max(baseMs, positionMs - SEEK_STEP_MS));
       }
     },
-    [spanMs, baseMs, positionMs, onSeek],
+    [spanMs, baseMs, playhead, onSeek],
   );
 
   const a11yLabel = hasRange
     ? `Loop position: ${formatDuration(elapsedMs)} of ${formatDuration(spanMs)}`
-    : `Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
+    : `Playback position: ${formatDuration(elapsedMs)} of ${formatDuration(durationMs)}`;
 
-  // Both of these were built inline, so each was a different object on every
-  // render and the host view was handed a changed accessibility prop ten times
-  // a second while playing and on every pointer event of a drag — for a set of
-  // actions that never changes, and a percentage that changes a hundred times
-  // across a whole track. The value memo keys on that rounded percentage
-  // rather than on the position, or it would be rebuilt just as often.
-  const a11yPercent = Math.round(progress * 100);
+  // Built inline, this was a different object on every render, so the host
+  // view was handed a changed accessibility prop ten times a second while
+  // playing and on every pointer event of a drag — for a percentage that
+  // changes a hundred times across a whole track. It keys on the figure
+  // derived above instead.
   const a11yValue = useMemo(
     () => ({ min: 0, max: 100, now: a11yPercent }),
     [a11yPercent],
@@ -158,7 +179,7 @@ export const SeekBar = React.memo(function SeekBar({
             { color: theme.colors.textSecondary },
           ]}
         >
-          {formatDuration(hasRange ? elapsedMs : positionMs)}
+          {formatDuration(elapsedMs)}
         </Text>
         <Text
           style={[

@@ -1,12 +1,33 @@
 import { useCallback, useEffect } from 'react';
+import { SharedValue } from 'react-native-reanimated';
 
 import * as audioEngine from '../services/audioEngine';
-import { PlaybackState } from '../types';
-import { useEngineSubscription } from './useEngineSubscription';
+import { PlaybackState, PlaybackStatus } from '../types';
+import { useEngineSelector } from './useEngineSelector';
+import { usePlayheadValue } from './usePlayheadValue';
 
-const IDLE_STATE: PlaybackState = {
+/**
+ * Everything the engine publishes **except** the playhead.
+ *
+ * The split is the point. `PlaybackState` puts the position in the same object
+ * as the transport, so a screen that subscribed to it re-rendered ten times a
+ * second while playing and at the drag's cadence while scrubbing — for a
+ * button that had not changed. Every field here moves at human speed: a track
+ * loads, a marker is dropped, the loop is armed. The position moves at the
+ * engine's, and reaches the UI as a shared value instead.
+ */
+export interface TransportState {
+  status: PlaybackStatus;
+  durationMs: number;
+  markerA: number | null;
+  markerB: number | null;
+  loopEnabled: boolean;
+  volume: number;
+  lastError?: string;
+}
+
+const IDLE_TRANSPORT: TransportState = {
   status: 'idle',
-  positionMs: 0,
   durationMs: 0,
   markerA: null,
   markerB: null,
@@ -14,12 +35,76 @@ const IDLE_STATE: PlaybackState = {
   volume: 1,
 };
 
+function selectTransport(state: PlaybackState): TransportState {
+  return {
+    status: state.status,
+    durationMs: state.durationMs,
+    markerA: state.markerA,
+    markerB: state.markerB,
+    loopEnabled: state.loopEnabled,
+    volume: state.volume,
+    lastError: state.lastError,
+  };
+}
+
+function sameTransport(a: TransportState, b: TransportState): boolean {
+  return (
+    a.status === b.status &&
+    a.durationMs === b.durationMs &&
+    a.markerA === b.markerA &&
+    a.markerB === b.markerB &&
+    a.loopEnabled === b.loopEnabled &&
+    a.volume === b.volume &&
+    a.lastError === b.lastError
+  );
+}
+
+export interface UseAudioPlayer extends TransportState {
+  /**
+   * The playhead, in milliseconds, as a shared value.
+   *
+   * Not React state: it moves ten times a second while playing and follows a
+   * finger while scrubbing, and every one of those movements would otherwise
+   * be a render. Hand it to a component that draws the playhead — the waveform,
+   * the seek bar — which reads it from the UI thread. See
+   * {@link usePlayheadValue}.
+   */
+  playheadMs: SharedValue<number>;
+  play: () => Promise<void>;
+  pause: () => Promise<void>;
+  seekTo: (ms: number) => Promise<void>;
+  skipBack: () => Promise<void>;
+  skipForward: () => Promise<void>;
+  setMarkerA: (ms: number) => void;
+  setMarkerB: (ms: number) => boolean;
+  clearMarkers: () => void;
+  clearMarkerB: () => void;
+  commitMarkerPlacement: (placed: audioEngine.MarkerCommit) => Promise<void>;
+  setLoopEnabled: (enabled: boolean) => void;
+  setLoopRestartHandler: (handler: (() => void) | null) => void;
+  setVolume: (v: number) => void;
+  startMonitor: (centerMs: number) => Promise<void>;
+  updateMonitor: (centerMs: number) => void;
+  stopMonitor: () => Promise<void>;
+  /** The engine's current snapshot, for event-time reads that must not subscribe. */
+  getPlaybackState: () => PlaybackState;
+}
+
 export function useAudioPlayer(
   trackUri: string | null,
   trackId?: string | null,
   trackName?: string | null,
-) {
-  const state = useEngineSubscription(audioEngine.subscribe, IDLE_STATE);
+): UseAudioPlayer {
+  const transport = useEngineSelector(
+    audioEngine.subscribe,
+    audioEngine.getState,
+    selectTransport,
+    sameTransport,
+  );
+  const playheadMs = usePlayheadValue(
+    audioEngine.subscribe,
+    audioEngine.getState,
+  );
 
   // Hydrate the persisted volume once on mount, before the track loads, so
   // playback starts at the user's saved level rather than the default. The
@@ -85,7 +170,8 @@ export function useAudioPlayer(
   const stopMonitor = useCallback(() => audioEngine.stopMonitor(), []);
 
   return {
-    ...state,
+    ...transport,
+    playheadMs,
     play,
     pause,
     seekTo,
@@ -102,5 +188,8 @@ export function useAudioPlayer(
     startMonitor,
     updateMonitor,
     stopMonitor,
+    getPlaybackState: audioEngine.getState,
   };
 }
+
+export { IDLE_TRANSPORT };

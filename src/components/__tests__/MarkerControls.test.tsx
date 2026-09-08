@@ -1,7 +1,14 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { create, act, ReactTestRenderer } from 'react-test-renderer';
+import { makeMutable } from 'react-native-reanimated';
 
+import {
+  MarkerDrag,
+  TARGET_MARKER_A,
+  TARGET_MARKER_B,
+  TARGET_NONE,
+} from '../../hooks/useMarkerDrag';
 import { MarkerControls } from '../MarkerControls';
 
 jest.mock('../../hooks/useTheme');
@@ -437,5 +444,56 @@ describe('MarkerControls', () => {
       (s: Record<string, unknown>) => s && s.marginTop === 10,
     );
     expect(hasMargin).toBe(true);
+  });
+});
+
+describe('MarkerControls while a marker is dragged', () => {
+  /**
+   * Let the tile's UI-thread projection reach React. The time it shows is
+   * derived in the UI runtime and mirrored back only when the second changes,
+   * and under Jest those reactions run on the frame loop's real timers.
+   */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  }
+
+  function makeDrag(target: number, ms: number): MarkerDrag {
+    return { target: makeMutable(target), ms: makeMutable(ms) };
+  }
+
+  it('shows where A is being dragged to, not where it was committed', async () => {
+    const markerDrag = makeDrag(TARGET_MARKER_A, 44000);
+    const tree = renderControls({ markerA: 5000, markerB: 90000, markerDrag });
+
+    await settle();
+
+    expect(findText(tree, '0:44')).toHaveLength(1);
+    expect(findText(tree, '0:05')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('shows where B is being dragged to', async () => {
+    const markerDrag = makeDrag(TARGET_MARKER_B, 61000);
+    const tree = renderControls({ markerA: 5000, markerB: 90000, markerDrag });
+
+    await settle();
+
+    expect(findText(tree, '1:01')).toHaveLength(1);
+    // A is not the one moving, so it keeps its committed time.
+    expect(findText(tree, '0:05')).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it('falls back to the committed positions when nothing is being dragged', async () => {
+    const markerDrag = makeDrag(TARGET_NONE, 44000);
+    const tree = renderControls({ markerA: 5000, markerB: 90000, markerDrag });
+
+    await settle();
+
+    expect(findText(tree, '0:05')).toHaveLength(1);
+    expect(findText(tree, '1:30')).toHaveLength(1);
+    act(() => tree.unmount());
   });
 });

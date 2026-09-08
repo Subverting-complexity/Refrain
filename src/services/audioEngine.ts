@@ -77,8 +77,32 @@ const markerPersistence = createMarkerPersistence({
 // markerB/loopEnabled — it overrides the active loop region for its lifetime
 // only. See startMonitor/updateMonitor/stopMonitor below.
 
+/**
+ * Shortest gap between two of the monitor's follow-seeks, in milliseconds.
+ *
+ * The follow-seek is the single most expensive thing a marker drag does. On
+ * Android the player has to be driven from the main thread, so every seek is
+ * work queued ahead of the frame that is trying to draw the marker the seek is
+ * following. Measured on a 120Hz mid-range device, letting it run at the drag's
+ * own throttled cadence — one per pointer batch, about twenty a second — took a
+ * marker drag from a 12ms median frame to 20ms and a 90th percentile of 15ms to
+ * 40ms. It was, after the transport writes, the whole of what made dragging a
+ * marker feel worse than dragging the playhead.
+ *
+ * Nothing is lost by slowing it down, because twenty splices a second is not
+ * something anyone can hear as position: a preview that re-cues four times a
+ * second sounds like scrubbing, and one that re-cues twenty times a second
+ * sounds like static. Between seeks the window still follows the marker, so the
+ * bounds are always current and only the audio lags — the same graceful
+ * degradation the web path has always run.
+ */
+const MONITOR_FOLLOW_INTERVAL_MS = 250;
+
 // Whether the rolling monitor is currently previewing.
 let monitorActive = false;
+// When the monitor last re-cued, so the follow can be rate-limited. Zero means
+// "no seek yet this preview", so the first follow is never held back.
+let monitorFollowAt = 0;
 // The current preview window in ms, clamped to the track, or null when idle.
 let monitorWindow: MonitorWindow | null = null;
 // Transport state captured at startMonitor, restored verbatim at stopMonitor.
@@ -299,9 +323,52 @@ function notify(state: PlaybackState): void {
   }
 }
 
+/**
+ * Whether an `isLoaded: false` report is a loaded track re-buffering rather
+ * than no track at all.
+ *
+ * Every seek puts the Android player into a short buffer, and expo-audio
+ * reports `isLoaded: false` for the two to four status ticks it lasts —
+ * while still carrying a usable `currentTime` and `duration`. Reading that as
+ * "nothing is loaded" published an idle transport with a zero length nine times
+ * a second throughout a scrub, which is not merely a wasted render: at zero
+ * duration the marker overlay draws nothing, so the A and B flags, their lines
+ * and the loop wash vanished and came back several times a second, every marker
+ * control greyed itself out on the idle status, and the seek bar's fill
+ * collapsed. That flicker is what a drag on this screen actually looked like.
+ *
+ * A player that has never loaded reports no duration either, so the length is
+ * what separates the two cases: a track we already know the length of, backed
+ * by a live player, is loaded and busy.
+ */
+function isRebuffering(status: AudioStatus): boolean {
+  return (
+    player != null &&
+    currentState.durationMs > 0 &&
+    Number.isFinite(status.duration) &&
+    status.duration > 0
+  );
+}
+
 function parseStatus(status: AudioStatus): PlaybackState {
   if (!status.isLoaded) {
-    return { ...IDLE_STATE, markerA, markerB, loopEnabled, volume };
+    if (!isRebuffering(status)) {
+      return { ...IDLE_STATE, markerA, markerB, loopEnabled, volume };
+    }
+    // Keep the transport we already had. A buffer between two frames of a
+    // scrub is not a state the user has any use for being told about, and
+    // publishing one flipped every control that keys on the status.
+    return {
+      status: currentState.status === 'idle' ? 'loading' : currentState.status,
+      positionMs: Number.isFinite(status.currentTime)
+        ? secToMs(status.currentTime)
+        : currentState.positionMs,
+      durationMs: secToMs(status.duration),
+      markerA,
+      markerB,
+      loopEnabled,
+      volume,
+    };
   }
 
   let playbackStatus: PlaybackStatus = 'paused';
@@ -966,6 +1033,7 @@ export async function startMonitor(centerMs: number): Promise<void> {
       isPlaying: currentState.status === 'playing',
     };
     monitorActive = true;
+    monitorFollowAt = 0;
   }
   monitorWindow = computeMonitorWindow(centerMs);
   // Resume the web audio graph on this gesture so the preview isn't left
@@ -989,32 +1057,39 @@ export async function startMonitor(centerMs: number): Promise<void> {
 }
 
 /**
- * Move the rolling monitor to follow a new center position. Cheap enough to
- * call at the drag-throttle rate (~20/sec). No-op when the monitor isn't
- * running.
+ * Move the rolling monitor to follow a new center position. Safe to call at the
+ * drag-throttle rate (~20/sec) — the window always moves, and the seek that
+ * makes the audio catch up is rate-limited to
+ * {@link MONITOR_FOLLOW_INTERVAL_MS}. No-op when the monitor isn't running.
  *
  * Platform note: continuous per-update re-seeking scrubs badly on web / iOS
  * Safari — seeking an `HTMLMediaElement` mid-playback stalls and clicks. So the
  * preview degrades gracefully there: on web it only moves the loop bounds and
  * lets the looping window carry the playhead into the new region at the next
  * rewind (it follows the marker at loop granularity rather than frame-tight).
- * On native it re-seeks to keep the playhead inside the moved window so the
- * preview tracks the marker continuously.
+ * On native it re-cues to keep the playhead inside the moved window, so the
+ * preview follows the marker several times a second.
  */
 export function updateMonitor(centerMs: number): void {
   if (!monitorActive || !player) return;
   monitorWindow = computeMonitorWindow(centerMs);
 
   if (Platform.OS === 'web') {
-    // Web fallback: bounds-only follow, no per-update seek (see note above).
+    // Web fallback: bounds-only follow, no re-cue seek (see note above).
     return;
   }
 
   // Native: pull the playhead back into the window only when it has fallen
   // outside the freshly moved bounds, so small drags don't restart playback
-  // and large jumps still keep audio within [center-2s, center+2s].
+  // and large jumps still keep audio within [center-2s, center+2s]. A drag
+  // fast enough to leave the window on every update is held to one seek per
+  // interval; the bounds above have already moved, so nothing but the audio
+  // waits.
   const pos = currentState.positionMs;
   if (pos < monitorWindow.start || pos >= monitorWindow.end) {
+    const now = Date.now();
+    if (now - monitorFollowAt < MONITOR_FOLLOW_INTERVAL_MS) return;
+    monitorFollowAt = now;
     markInternalSeek(monitorWindow.start);
     player.seekTo(msToSec(monitorWindow.start)).catch(() => {
       // Best-effort: a failed follow-seek must not break the drag.
