@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   AccessibilityActionEvent,
   StyleSheet,
@@ -14,6 +14,9 @@ import { formatDuration } from '../utils/formatTime';
 import { SliderBar } from './SliderBar';
 
 const SEEK_STEP_MS = 5000;
+
+// Module-level so the array identity never changes; see `a11yValue` below.
+const STEP_ACTIONS = [{ name: 'increment' }, { name: 'decrement' }];
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
@@ -95,18 +98,26 @@ export const SeekBar = React.memo(function SeekBar({
     ? `Loop position: ${formatDuration(elapsedMs)} of ${formatDuration(spanMs)}`
     : `Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
 
+  // Both of these were built inline, so each was a different object on every
+  // render and the host view was handed a changed accessibility prop ten times
+  // a second while playing and on every pointer event of a drag — for a set of
+  // actions that never changes, and a percentage that changes a hundred times
+  // across a whole track. The value memo keys on that rounded percentage
+  // rather than on the position, or it would be rebuilt just as often.
+  const a11yPercent = Math.round(displayProgress * 100);
+  const a11yValue = useMemo(
+    () => ({ min: 0, max: 100, now: a11yPercent }),
+    [a11yPercent],
+  );
+
   return (
     <View
       style={[styles.container, style]}
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
-      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      accessibilityActions={STEP_ACTIONS}
       onAccessibilityAction={handleAccessibilityAction}
-      accessibilityValue={{
-        min: 0,
-        max: 100,
-        now: Math.round(displayProgress * 100),
-      }}
+      accessibilityValue={a11yValue}
     >
       <SliderBar
         progress={displayProgress}

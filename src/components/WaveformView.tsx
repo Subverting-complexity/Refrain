@@ -19,6 +19,8 @@ import { MARKER_LINE_HALO, WaveformMarkers } from './WaveformMarkers';
 import {
   HANDLE_ZONE,
   HORIZONTAL_PADDING,
+  snapDownToBarGrid,
+  snapUpToBarGrid,
   waveformHeightForViewport,
 } from './waveformLayout';
 
@@ -133,7 +135,7 @@ const Cursor = React.memo(function Cursor({
  * the displayed values (prop-driven, or the live drag value while one is in
  * flight) and the accessibility surface.
  */
-export function WaveformView({
+export const WaveformView = React.memo(function WaveformView({
   peaks,
   positionMs,
   durationMs,
@@ -190,6 +192,22 @@ export function WaveformView({
   const bFrac = hasRegion ? (displayMarkerB as number) / durationMs : 0;
   const loopActive = hasRegion && loopEnabled;
 
+  // What the bars are handed, snapped to their own grid.
+  //
+  // The overlays below follow the playhead and the markers exactly, because a
+  // cursor that moved in bar-width steps would read as stuttering. The bars
+  // cannot: a bar is one of three colours, decided by which side of the edge
+  // its centre falls on, so it can only change when an edge crosses a centre.
+  // Between crossings the raw fractions still differ on every frame, and that
+  // is what re-rendered a memoised component with 200 children ten times a
+  // second while playing and on every pointer event of a drag. Snapped, the
+  // props are identical across every movement that draws the same picture, and
+  // the memo holds. See `snapDownToBarGrid`.
+  const barCount = peaks.length;
+  const barsProgress = snapDownToBarGrid(progress, barCount);
+  const barsAFrac = hasRegion ? snapUpToBarGrid(aFrac, barCount) : 0;
+  const barsBFrac = hasRegion ? snapDownToBarGrid(bFrac, barCount) : 0;
+
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       if (durationMs <= 0) return;
@@ -245,6 +263,17 @@ export function WaveformView({
     [onMarkerAChange, onMarkerBChange],
   );
 
+  // A fresh object here is a changed prop on the host view, so the platform
+  // was handed a new accessibility value ten times a second while playing and
+  // on every pointer event of a drag. What it announces is a whole percentage,
+  // which changes a hundred times across an entire track — so the memo keys on
+  // that rounded figure, not on the position it came from.
+  const a11yPercent = Math.round(progress * 100);
+  const a11yValue = useMemo(
+    () => ({ min: 0, max: 100, now: a11yPercent }),
+    [a11yPercent],
+  );
+
   const a11yLabel = useMemo(() => {
     let label = `Waveform. Playback position: ${formatDuration(positionMs)} of ${formatDuration(durationMs)}`;
     if (markerA != null && markerB != null) {
@@ -265,17 +294,17 @@ export function WaveformView({
       accessibilityHint="Swipe up or down to seek. Activate for more options including placing loop markers."
       accessibilityActions={a11yActions}
       onAccessibilityAction={handleAccessibilityAction}
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
+      accessibilityValue={a11yValue}
     >
       <GestureDetector gesture={gesture}>
         <View style={[styles.touchArea, { height }]} onLayout={onLayout}>
           <View style={styles.track}>
             <WaveformBars
               peaks={peaks}
-              progress={progress}
+              progress={barsProgress}
               hasRegion={hasRegion}
-              aFrac={aFrac}
-              bFrac={bFrac}
+              aFrac={barsAFrac}
+              bFrac={barsBFrac}
               loopActive={loopActive}
             />
 
@@ -296,7 +325,7 @@ export function WaveformView({
       </GestureDetector>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   // The decorative overlays (region tint, marker lines/dots/flags, cursor) must

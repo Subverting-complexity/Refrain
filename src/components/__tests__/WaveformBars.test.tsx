@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { darkTheme } from '../../theme';
+import { mix } from '../../utils/color';
 import { WaveformBars } from '../WaveformBars';
 
 jest.mock('../../hooks/useTheme');
@@ -125,5 +126,209 @@ describe('WaveformBars', () => {
     expect(fill(bars[0])).toBe(darkTheme.colors.waveformDull);
     expect(fill(bars[3])).toBe(darkTheme.colors.waveformLoop);
     expect(fill(bars[4])).toBe(darkTheme.colors.waveformDull);
+  });
+});
+
+/**
+ * The bars are drawn in memoised groups so that a moving edge re-renders the
+ * ten bars around it rather than all two hundred. Grouping is an optimisation
+ * and nothing else, so what has to be proved about it is that it draws the
+ * same picture the flat per-bar rules did, and that it actually confines a
+ * re-render to the group the edge is in.
+ */
+describe('WaveformBars grouping', () => {
+  // Enough bars for several groups, with amplitudes that vary so a played
+  // bar's grading is distinguishable from its neighbour's.
+  const MANY = Array.from({ length: 50 }, (_, i) => ((i % 9) + 1) / 9);
+
+  /** The tier rules, stated flatly, as the reference to compare against. */
+  function expectedFills(
+    peaks: number[],
+    props: {
+      progress: number;
+      hasRegion: boolean;
+      aFrac: number;
+      bFrac: number;
+      loopActive: boolean;
+    },
+  ): string[] {
+    const { progress, hasRegion, aFrac, bFrac, loopActive } = props;
+    return peaks.map((peak, index) => {
+      const centre = (index + 0.5) / peaks.length;
+      const inRegion = hasRegion && centre >= aFrac && centre <= bFrac;
+      const played = loopActive
+        ? inRegion && centre <= progress
+        : centre <= progress;
+      if (played) {
+        return mix(
+          darkTheme.colors.waveformPlayed,
+          darkTheme.colors.waveformPeak,
+          peak,
+        );
+      }
+      return inRegion
+        ? darkTheme.colors.waveformLoop
+        : darkTheme.colors.waveformDull;
+    });
+  }
+
+  function renderMany(props: {
+    progress: number;
+    hasRegion: boolean;
+    aFrac: number;
+    bFrac: number;
+    loopActive: boolean;
+  }) {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<WaveformBars peaks={MANY} {...props} />);
+    });
+    return tree;
+  }
+
+  const CASES = [
+    { progress: 0, hasRegion: false, aFrac: 0, bFrac: 0, loopActive: false },
+    { progress: 1, hasRegion: false, aFrac: 0, bFrac: 0, loopActive: false },
+    { progress: 0.37, hasRegion: false, aFrac: 0, bFrac: 0, loopActive: false },
+    // An edge landing exactly on a bar centre, where a boundary derived by
+    // arithmetic rather than by comparison could fall the wrong way.
+    { progress: 0.25, hasRegion: false, aFrac: 0, bFrac: 0, loopActive: false },
+    {
+      progress: 0.6,
+      hasRegion: true,
+      aFrac: 0.2,
+      bFrac: 0.8,
+      loopActive: true,
+    },
+    {
+      progress: 0.6,
+      hasRegion: true,
+      aFrac: 0.2,
+      bFrac: 0.8,
+      loopActive: false,
+    },
+    // The region edges on centres, and the playhead outside the region.
+    {
+      progress: 0.9,
+      hasRegion: true,
+      aFrac: 0.25,
+      bFrac: 0.75,
+      loopActive: true,
+    },
+    // A region narrower than one bar.
+    {
+      progress: 0.5,
+      hasRegion: true,
+      aFrac: 0.5,
+      bFrac: 0.505,
+      loopActive: true,
+    },
+  ];
+
+  it.each(CASES)('draws the flat per-bar rules (%j)', (props) => {
+    expect(findBars(renderMany(props)).map(fill)).toEqual(
+      expectedFills(MANY, props),
+    );
+  });
+
+  /** The group containers: the only Views carrying a numeric `flexGrow`. */
+  function findGroups(tree: ReactTestRenderer) {
+    return tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (style: Record<string, unknown>) =>
+            style && typeof style.flexGrow === 'number',
+        ),
+    );
+  }
+
+  /**
+   * The property the grouping exists for. Moving the playhead past one bar
+   * must re-render the group that bar is in and no other — reference equality
+   * is the assertion that can see it, because React reuses the previous
+   * element for a memoised child that bailed out.
+   *
+   * Without this, every one of the two hundred bars on a real track was
+   * rebuilt and re-reconciled ten times a second while playing, and on every
+   * pointer event of a drag.
+   */
+  it('re-renders only the group the edge moved through', () => {
+    // Fifty bars, so centres sit 0.02 apart at 0.01, 0.03, 0.05 ... The bar
+    // centred at 0.51 is index 25, in the third group of ten; 0.505 sits just
+    // before it and 0.515 just past it.
+    const tree = renderMany({
+      progress: 0.505,
+      hasRegion: false,
+      aFrac: 0,
+      bFrac: 0,
+      loopActive: false,
+    });
+    const groupsBefore = findGroups(tree).map((group) => group.props.style);
+    const barsBefore = findBars(tree).map((bar) => bar.props.style);
+
+    act(() => {
+      tree.update(
+        <WaveformBars
+          peaks={MANY}
+          progress={0.515}
+          hasRegion={false}
+          aFrac={0}
+          bFrac={0}
+          loopActive={false}
+        />,
+      );
+    });
+    const groupsAfter = findGroups(tree).map((group) => group.props.style);
+    const barsAfter = findBars(tree).map((bar) => bar.props.style);
+
+    // The crossed bar, and the group holding it, are the only things rebuilt.
+    expect(barsAfter[25]).not.toBe(barsBefore[25]);
+    expect(groupsAfter[2]).not.toBe(groupsBefore[2]);
+    for (const group of [0, 1, 3, 4]) {
+      expect(groupsAfter[group]).toBe(groupsBefore[group]);
+    }
+    for (const bar of [0, 9, 24, 26, 30, 49]) {
+      expect(barsAfter[bar]).toBe(barsBefore[bar]);
+    }
+  });
+
+  it('keeps every bar the same width when the count does not divide evenly', () => {
+    // 23 bars is two full groups and a short one; the short group must take a
+    // proportional share of the width, not an equal one, or its bars would
+    // come out wider than the rest.
+    const peaks = Array.from({ length: 23 }, () => 0.5);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <WaveformBars
+          peaks={peaks}
+          progress={0}
+          hasRegion={false}
+          aFrac={0}
+          bFrac={0}
+          loopActive={false}
+        />,
+      );
+    });
+    const groups = tree.root.findAll(
+      (node) =>
+        node.type === 'View' &&
+        Array.isArray(node.props.style) &&
+        node.props.style.some(
+          (style: Record<string, unknown>) =>
+            style && typeof style.flexGrow === 'number',
+        ),
+    );
+    const grow = groups.map(
+      (group) =>
+        group.props.style.find(
+          (style: Record<string, unknown>) =>
+            style && typeof style.flexGrow === 'number',
+        ).flexGrow,
+    );
+    expect(grow).toEqual([10, 10, 3]);
+    expect(findBars(tree)).toHaveLength(23);
   });
 });

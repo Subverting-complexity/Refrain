@@ -1345,6 +1345,88 @@ describe('WaveformView', () => {
     });
   });
 
+  /**
+   * The surface follows the playhead and the markers exactly — the cursor and
+   * the marker lines have to, or they would read as stuttering — but the bars
+   * cannot change until an edge crosses one of their centres. These are the
+   * tests for that difference, and for the jank it was causing: before it, a
+   * playback tick and every pointer event of a drag rebuilt and re-reconciled
+   * all two hundred bars of a real track.
+   *
+   * Reference equality is the assertion that can see it: React reuses the
+   * previous element for a memoised child that bailed out.
+   */
+  describe('what a movement re-renders', () => {
+    it('leaves every bar alone when the playhead moves within one bar', () => {
+      // Five bars over ten seconds: centres at 1s, 3s, 5s, 7s and 9s. Both
+      // positions sit between the second and third, so no bar can change.
+      const tree = renderWaveform({ positionMs: 3400, durationMs: 10000 });
+      const before = findBars(tree).map((bar) => bar.props.style);
+
+      act(() => {
+        tree.update(
+          <WaveformView
+            peaks={DEFAULT_PEAKS}
+            positionMs={3600}
+            durationMs={10000}
+            onSeek={jest.fn()}
+          />,
+        );
+      });
+
+      expect(findBars(tree).map((bar) => bar.props.style)).toEqual(before);
+      findBars(tree).forEach((bar, index) => {
+        expect(bar.props.style).toBe(before[index]);
+      });
+    });
+
+    it('still recolours the bar the playhead crosses', () => {
+      const tree = renderWaveform({ positionMs: 2900, durationMs: 10000 });
+      const before = findBars(tree).map((bar) => bar.props.style);
+
+      act(() => {
+        tree.update(
+          <WaveformView
+            peaks={DEFAULT_PEAKS}
+            positionMs={3100}
+            durationMs={10000}
+            onSeek={jest.fn()}
+          />,
+        );
+      });
+
+      const after = findBars(tree).map((bar) => bar.props.style);
+      expect(after[1]).not.toBe(before[1]);
+      expect(after[2]).toBe(before[2]);
+    });
+
+    it('leaves the bars alone while a marker is dragged within one bar', () => {
+      const onMarkerAChange = jest.fn();
+      const tree = renderWaveform({
+        markerA: 4500,
+        markerB: 9000,
+        durationMs: 10000,
+        onMarkerAChange,
+        onMarkerBChange: jest.fn(),
+      });
+      layout(tree);
+
+      // Grab A and nudge it a pixel. A sits at 4500ms, between the bars
+      // centred at 3000 and 5000, so the nudge moves it in milliseconds
+      // without reaching either centre.
+      begin(137);
+      const before = findBars(tree).map((bar) => bar.props.style);
+      move(138);
+
+      findBars(tree).forEach((bar, index) => {
+        expect(bar.props.style).toBe(before[index]);
+      });
+      // The drag is live all the same: the marker itself moved.
+      expect(onMarkerAChange).toHaveBeenCalled();
+      finalize();
+    });
+  });
+
   it('accepts style prop override', () => {
     const tree = renderWaveform({ style: { marginTop: 20 } });
 
