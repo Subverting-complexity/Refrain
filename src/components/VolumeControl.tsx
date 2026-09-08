@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { AccessibilityActionEvent, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -10,6 +10,10 @@ import { isIOSWeb } from '../utils/platform';
 import { SliderBar } from './SliderBar';
 
 const VOLUME_STEP = 0.05;
+
+// Module-level so the array identity never changes: built inline it was a new
+// object on every drag frame, and so a changed prop on the host view.
+const STEP_ACTIONS = [{ name: 'increment' }, { name: 'decrement' }];
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -39,6 +43,13 @@ export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
 
   const showIOSHint = isIOSWeb() && !isWebAudioGainSupported();
 
+  // Rebuilt only when the announced percentage changes, rather than on every
+  // frame of a volume drag.
+  const a11yValue = useMemo(
+    () => ({ min: 0, max: 100, now: percent }),
+    [percent],
+  );
+
   const handleAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       const { actionName } = e.nativeEvent;
@@ -66,9 +77,9 @@ export function VolumeControl({ volume, onVolumeChange }: VolumeControlProps) {
           style={styles.slider}
           accessibilityRole="adjustable"
           accessibilityLabel={`Volume: ${percent}%`}
-          accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+          accessibilityActions={STEP_ACTIONS}
           onAccessibilityAction={handleAccessibilityAction}
-          accessibilityValue={{ min: 0, max: 100, now: percent }}
+          accessibilityValue={a11yValue}
         >
           <SliderBar
             progress={displayVolume}
