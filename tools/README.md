@@ -29,7 +29,8 @@ Every entry below has a clickable `tools\<name>.cmd` launcher and the underlying
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `QualityGate`   | Single entry point that runs every static check in sequence (health → assets → typecheck → lint → format → SDK dependency check → tests + coverage). Pass `-Install` for `npm ci` first, `-SkipTests` to skip Jest.                                                                           |
 | `Deploy`        | The single store-release entry point. Double-clicked it opens a menu; given arguments it runs that release directly. Cloud build and submit via EAS for `-Platform both` (default), `ios` or `android`, on the `store` or `fast` lane, plus the store listing push. No Mac needed. See below. |
-| `LaunchAndroid` | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`. Nothing to do with the stores.                                                                                                                                                           |
+| `LaunchAndroid` | Local build + install + Metro bundler against a USB-connected Android device via `expo run:android`. Nothing to do with the stores. See [Android build directory](#android-build-directory). |
+| `LaunchAndroidSkipClean` | `LaunchAndroid` with `-SkipClean`: a quick relaunch that keeps the caches, the generated `android/` project and the last Gradle build. For JavaScript and TypeScript changes; after a change to `app.json`, a config plugin or a native dependency, use `LaunchAndroid`. |
 | `LaunchWeb`     | Dev-time web preview (`expo start --web`). UI smoke test only — native audio behaves differently in a browser. See the note below.                                                                                                                                                            |
 
 ## `Deploy` — the one release entry point
@@ -256,6 +257,43 @@ clip — use `Deploy.cmd -Profile development -Platform ios` or
 # Launch without opening a browser
 .\tools\LaunchWeb.cmd -NoOpen
 ```
+
+## Android build directory
+
+The Android native build fails on Windows when the checkout path is long. The
+SDK's CMake ships ninja 1.10.2, which refuses any path over 260 characters, and
+CMake names some object files after the full source path, so the checkout
+prefix counts twice. Ninja reports `Filename longer than 260 characters`.
+
+`LaunchAndroid.ps1` can build from a short directory instead, per machine, set
+in [`android-build-dirs.json`](android-build-dirs.json):
+
+```json
+{
+  "machines": {
+    "ADIDESKTOP": "D:\\Dev\\Refrain"
+  }
+}
+```
+
+- The key is the Windows computer name (`$env:COMPUTERNAME`), matched without
+  regard to case. Add your own line to opt in.
+- The value is an absolute path, or a path relative to the checkout the launcher
+  runs from.
+- A machine that is not listed builds in place, exactly as before.
+- `-InPlace` ignores the entry for one run.
+
+On a listed machine every launch mirrors the working tree into that directory
+with `robocopy /MIR` and runs the build there. The copy includes uncommitted
+edits and ignored files such as `.env`. It keeps its own `node_modules`,
+`android/` and build outputs between runs, so only the first launch pays for
+`npm ci`. The run log still goes to `logs/` in the checkout you launched from.
+The launcher refuses a directory that has contents it did not create, because a
+mirror deletes whatever the source lacks.
+
+Metro runs from the copy, so an edit in your checkout reaches the device only
+after another launch. `LaunchAndroidSkipClean.cmd` is the quicker one. Two
+checkouts launching at once share the one copy, so run one at a time.
 
 ## Build log
 

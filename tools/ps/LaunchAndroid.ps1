@@ -19,6 +19,10 @@
 .PARAMETER Device
     Target a specific device serial (from adb devices).
 
+.PARAMETER InPlace
+    Build in this checkout even when tools/android-build-dirs.json names a
+    build directory for this machine.
+
 .NOTES
     Every run is transcribed to logs/launch-android_<timestamp>.log. A Gradle
     failure runs to hundreds of lines and scrolls out of the console buffer;
@@ -37,7 +41,8 @@
 param(
     [switch]$SkipChecks,
     [switch]$SkipClean,
-    [string]$Device
+    [string]$Device,
+    [switch]$InPlace
 )
 
 Set-StrictMode -Version Latest
@@ -91,11 +96,10 @@ if (-not (Test-Path (Join-Path $AppDir 'package.json'))) {
     Write-Err "Cannot find package.json. Run this script from the mobile app directory."
     Wait-AndExit 1
 }
-Push-Location $AppDir
-
-$AndroidDir = Join-Path $AppDir 'android'
 
 # -- Run log ------------------------------------------------------------------
+# Opened before the build directory is resolved, so the log stays in the
+# checkout you launched from even when the build runs in a copy.
 
 $LogDir = Join-Path $AppDir 'logs'
 if (-not (Test-Path $LogDir)) {
@@ -109,6 +113,106 @@ try {
     Write-Warn "Could not open a run log: $($_.Exception.Message)"
     $LogFile = $null
 }
+
+# -- Build directory -----------------------------------------------------------
+# The native build fails on Windows once the checkout path is long. Ninja 1.10,
+# the version the SDK's CMake ships, refuses any path over 260 characters, and
+# CMake names some object files after the full source path, so the checkout
+# prefix counts twice.
+#
+# tools/android-build-dirs.json maps a computer name to a short directory. On a
+# listed machine the working tree is mirrored there and everything below runs
+# against the copy; on any other machine nothing changes. The copy carries
+# uncommitted edits and ignored files such as .env, and keeps its own
+# node_modules and android/ between runs, so only the first launch pays for a
+# full install.
+
+function Resolve-BuildDir {
+    param([string]$SourceDir)
+    $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'android-build-dirs.json'
+    if (-not (Test-Path $configPath)) { return $null }
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    } catch {
+        Write-Err "Cannot read $configPath : $($_.Exception.Message)"
+        Wait-AndExit 1
+    }
+    if (-not $config.PSObject.Properties['machines']) { return $null }
+    $entry = $config.machines.PSObject.Properties |
+        Where-Object { $_.Name -ieq $env:COMPUTERNAME } |
+        Select-Object -First 1
+    if (-not $entry) { return $null }
+    $dir = [string]$entry.Value
+    if (-not [System.IO.Path]::IsPathRooted($dir)) {
+        $dir = Join-Path $SourceDir $dir
+    }
+    return [System.IO.Path]::GetFullPath($dir).TrimEnd('\')
+}
+
+function Sync-BuildDir {
+    param([string]$SourceDir, [string]$TargetDir)
+
+    $sourcePrefix = $SourceDir.TrimEnd('\') + '\'
+    $targetPrefix = $TargetDir.TrimEnd('\') + '\'
+    if ($targetPrefix.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $sourcePrefix.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Err "The build directory $TargetDir overlaps the checkout $SourceDir. Choose one outside it."
+        Wait-AndExit 1
+    }
+
+    # A mirror deletes whatever the source does not have, so refuse a directory
+    # that has contents and was not made by this launcher.
+    $marker = Join-Path $TargetDir '.refrain-build-copy'
+    if ((Test-Path $TargetDir) -and -not (Test-Path $marker) -and
+        (Get-ChildItem -LiteralPath $TargetDir -Force | Select-Object -First 1)) {
+        Write-Err "$TargetDir already holds files this launcher did not put there, and copying would delete them."
+        Write-Err "  Empty it, or point tools/android-build-dirs.json at another directory."
+        Wait-AndExit 1
+    }
+    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+
+    # Excluded directories are neither copied nor purged from the copy, which is
+    # what lets it keep its own dependencies and native project between runs.
+    # Bare names match at any depth. The rest are full paths so they match only
+    # at the root.
+    $excludeDirs = @(
+        'node_modules', 'build', '.cxx', '.gradle', '.git',
+        (Join-Path $SourceDir 'android'),
+        (Join-Path $SourceDir 'ios'),
+        (Join-Path $SourceDir 'logs'),
+        (Join-Path $SourceDir '.claude'),
+        (Join-Path $SourceDir '.expo'),
+        (Join-Path $SourceDir '.vs'),
+        (Join-Path $SourceDir '.fallow'),
+        (Join-Path $SourceDir 'coverage'),
+        (Join-Path $SourceDir 'dist'),
+        (Join-Path $SourceDir 'web-build'),
+        (Join-Path $SourceDir 'graphify-out')
+    )
+    # .git is a file, not a directory, in a git worktree.
+    robocopy $SourceDir $TargetDir /MIR /XD @excludeDirs /XF .git .refrain-build-copy /MT:16 /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    $robocopyExit = $LASTEXITCODE
+    # robocopy reports success as 0-7; 8 and above means files were not copied.
+    if ($robocopyExit -ge 8) {
+        Write-Err "robocopy failed (exit $robocopyExit) copying $SourceDir to $TargetDir."
+        Wait-AndExit 1
+    }
+    Set-Content -LiteralPath $marker -Value $SourceDir
+}
+
+$SourceDir = "$AppDir".TrimEnd('\')
+$BuildDir = if ($InPlace) { $null } else { Resolve-BuildDir $SourceDir }
+if ($BuildDir -and ($BuildDir -ine $SourceDir)) {
+    Write-Step "Copying the checkout to $BuildDir"
+    Sync-BuildDir -SourceDir $SourceDir -TargetDir $BuildDir
+    $AppDir = $BuildDir
+    Write-Ok "Building from $BuildDir, the directory set for $env:COMPUTERNAME in tools/android-build-dirs.json"
+    Write-Warn "Metro serves the copy, so edits made in $SourceDir need a relaunch to reach the device. LaunchAndroidSkipClean.cmd is the quicker one."
+}
+
+Push-Location $AppDir
+
+$AndroidDir = Join-Path $AppDir 'android'
 
 # -- Prerequisite checks ------------------------------------------------------
 

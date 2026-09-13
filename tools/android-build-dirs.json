@@ -1,0 +1,6 @@
+{
+  "$comment": "Where tools/ps/LaunchAndroid.ps1 builds, per machine. The key is the Windows computer name ($env:COMPUTERNAME, matched case-insensitively); the value is an absolute path, or a path relative to the checkout. A machine not listed builds in place, as before. See tools/README.md -> Android build directory.",
+  "machines": {
+    "ADIDESKTOP": "D:\\Dev\\Refrain"
+  }
+}
