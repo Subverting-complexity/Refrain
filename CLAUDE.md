@@ -24,6 +24,13 @@ whole run to `logs/launch-android_<timestamp>.log` so a Gradle failure
 is still readable after it scrolls past. `npm run android` is the same
 build without any of that.
 
+On a machine listed in `tools/android-build-dirs.json`, the launcher
+copies the checkout to that machine's short directory and builds there,
+because a long checkout path breaks the native build on Windows.
+`tools/README.md` → Android build directory has the detail.
+`tools\LaunchAndroidSkipClean.cmd` is the quick relaunch for JavaScript
+and TypeScript changes.
+
 Either way it compiles rather than just starting Metro, because Expo Go
 cannot run this app: `expo-share-intent` ships native code and a config
 plugin, so a dev client has to be built. `expo start --android` on its
